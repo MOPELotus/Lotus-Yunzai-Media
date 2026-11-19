@@ -198,7 +198,7 @@ export class BilibiliService {
       return { ...plan, ok: true, taskDir: task.dir, taskId: task.id, files, fileNames }
     } catch (error) {
       await releaseMediaTask(this.tasksDir, task.dir).catch(cleanupError => {
-        globalThis.logger?.warn?.(`[Lotus-Plugin] Bilibili task cleanup: ${cleanupError.message}`)
+        globalThis.logger?.warn?.(`[media] B 站任务清理失败： ${cleanupError.message}`)
       })
       throw error
     }

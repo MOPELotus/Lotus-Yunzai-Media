@@ -81,9 +81,9 @@ async function service() {
   if (config.music?.enable === false) throw new Error("点歌功能已关闭")
   return { service: new MusicService({ tuneweaveConfig: config.tuneweave, config: config.music, toolsPath: config.tools?.bin_dir }), config: config.music || {} }
 }
-export class LotusMusic extends BasePlugin {
+export class MusicMedia extends BasePlugin {
   constructor() {
-    super({ name: "[Lotus-Plugin] Music", dsc: "按平台点歌与公共账号登录", event: "message", priority: LOTUS_INTERCEPT_PRIORITY,
+    super({ name: "[media] 点歌", dsc: "按平台点歌与公共账号登录", event: "message", priority: LOTUS_INTERCEPT_PRIORITY,
       rule: [
         { reg: "^#(?:荷花)?(?:(?:网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水))?(?:点歌|搜歌)[\\s\\S]*$", fnc: "search" },
         { reg: "^#(?:荷花)?音乐登录$", fnc: "login" },
@@ -113,7 +113,7 @@ export class LotusMusic extends BasePlugin {
       const { service: api } = await service()
       await Promise.all([api.adoptPartnerAccount(), api.recoverTasks()])
     } catch (error) {
-      globalThis.logger?.debug?.(`[Lotus-Plugin] 音乐目录初始化：${error.message}`)
+      globalThis.logger?.debug?.(`[media] 音乐目录初始化：${error.message}`)
     }
   }
   async help(e = this.e) { await replyText(e, "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音，播放自动回退音源。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。");return true }
@@ -134,7 +134,7 @@ export class LotusMusic extends BasePlugin {
         sessions.delete(key)
         throw error
       }
-    } catch (error) { await replyText(e, `[荷花点歌]${error.message}`) }
+    } catch (error) { await replyText(e, `[media] 点歌：${error.message}`) }
     return true
   }
   async results(session, e = this.e) {
@@ -148,7 +148,7 @@ export class LotusMusic extends BasePlugin {
     } finally { session.loading = false }
     const image = await renderStatusCard({ title: MUSIC_PLATFORMS[session.platform] + "点歌", subtitle: session.keyword, badge: `第 ${session.page} 页`, userId: e.user_id,
       message: session.tracks.length ? "两分钟内回复数字选歌；#下一页 翻页，#取消 结束。播放时自动尝试完整备用音源。建议主人扫码登录。" : "没有搜索结果，可更换关键词或平台。",
-      items: session.tracks.map((track, i) => ({ label: String(i + 1), value: `${track.name} · ${track.artists?.map(a => a.name).join(" / ") || "未知歌手"}` })) }, { saveId: `lotus-music-search-${e.user_id}` }).catch(() => undefined)
+      items: session.tracks.map((track, i) => ({ label: String(i + 1), value: `${track.name} · ${track.artists?.map(a => a.name).join(" / ") || "未知歌手"}` })) }, { saveId: `media-music-search-${e.user_id}` }).catch(() => undefined)
     if (sessions.get(key) === session) await replyImage(e, image, session.tracks.map((track, i) => `${i + 1}. ${track.name}`).join("\n") || "没有搜索结果")
   }
   async login() {
@@ -160,7 +160,7 @@ export class LotusMusic extends BasePlugin {
       const key = musicSessionKey(e);sessions.get(key)?.controller?.abort()
       sessions.set(key, { stage: "platform", api, platforms, expires: Date.now() + (config.session_timeout_ms || 120000), config })
       await replyText(e, "请选择扫码平台：\n" + platforms.map((p, i) => `${i + 1}. ${p.name}`).join("\n") + "\n输入数字继续，#取消 退出。网易云与合伙人登录共用。")
-    } catch (error) { await replyText(e, `[荷花音乐]${error.message}`) }
+    } catch (error) { await replyText(e, `[media] 音乐：${error.message}`) }
     return true
   }
   async partnerLogin() {
@@ -183,7 +183,7 @@ export class LotusMusic extends BasePlugin {
     try { await this.qr(session, key, undefined, e) }
     catch (error) {
       if (sessions.get(key) === session) sessions.delete(key)
-      await replyText(e, "[荷花音乐]合伙人登录失败："+error.message)
+      await replyText(e, "[media] 音乐：合伙人登录失败："+error.message)
     }
     return true
   }
@@ -197,9 +197,9 @@ export class LotusMusic extends BasePlugin {
     }
     try {
       const api = new TuneWeaveService({ config:config.tuneweave })
-      const result = await api.initialize({ platform:"netease", onProgress:text=>replyText(e,"[荷花插件]"+text) })
-      await replyText(e, "[荷花插件]TuneWeave 初始化完成 · "+result.version+" · "+apiOrigin(result.apiUrl))
-    } catch (error) { await replyText(e,"[荷花插件]TuneWeave 初始化失败："+error.message) }
+      const result = await api.initialize({ platform:"netease", onProgress:text=>replyText(e,"[media] "+text) })
+      await replyText(e, "[media] TuneWeave 初始化完成 · "+result.version+" · "+apiOrigin(result.apiUrl))
+    } catch (error) { await replyText(e,"[media] TuneWeave 初始化失败："+error.message) }
     return true
   }
 
@@ -212,7 +212,7 @@ export class LotusMusic extends BasePlugin {
     }
     const result = await new TuneWeaveService({config:config.tuneweave}).status("netease")
     const status = result.requiresUpdate ? "待更新" : result.ok ? "就绪" : "未就绪"
-    await replyText(e,"[荷花插件]TuneWeave "+status+" · "+(result.version || "未知版本")+"\n"+
+    await replyText(e,"[media] TuneWeave "+status+" · "+(result.version || "未知版本")+"\n"+
       apiOrigin(result.apiUrl)+"\n"+result.message)
     return true
   }
@@ -250,7 +250,7 @@ export class LotusMusic extends BasePlugin {
           await this.qr(session,key,type.type,e)
         }
       }
-    } catch(error) {await replyText(e,`[荷花音乐]${error.message}`)}
+    } catch(error) {await replyText(e,`[media] 音乐：${error.message}`)}
     return true
   }
   async qr(session,key,type,e = this.e) {

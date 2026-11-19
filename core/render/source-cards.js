@@ -168,10 +168,10 @@ export async function renderSourceCard(template,data={},options={}){
  const p=new SourceCanvas(template==="status"?600:900)
  if(template==="status"){
   elemental(p)
-  p.log(data.title||'荷花插件',data.items||[],[data.subtitle,data.message].filter(Boolean).join('\n'))
+  p.log(data.title||'Lotus-Yunzai',data.items||[],[data.subtitle,data.message].filter(Boolean).join('\n'))
  }else{
   await news(p,data,template)
  }
- p.text(`荷花插件${data.generatedAt?' · '+data.generatedAt:''}`,15,p.y+15,p.width-30,12,WHITE,{align:'center',shadow:true,leading:18})
+ p.text(`Lotus-Yunzai${data.generatedAt?' · '+data.generatedAt:''}`,15,p.y+15,p.width-30,12,WHITE,{align:'center',shadow:true,leading:18})
  return p.render(options)
 }

@@ -43,8 +43,8 @@ export async function releaseMediaTask(root, dir) {
 export async function recoverMediaTasks(root) {
   const result = { removed: 0, retained: 0 }
   const report = () => {
-    if (result.retained) globalThis.logger?.info?.(`[Lotus-Plugin] Media recovery retained ${result.retained} active or unverifiable entries in ${root}`)
-    if (result.removed) globalThis.logger?.info?.(`[Lotus-Plugin] Media recovery removed ${result.removed} exited tasks in ${root}`)
+    if (result.retained) globalThis.logger?.info?.(`[media] Media recovery retained ${result.retained} active or unverifiable entries in ${root}`)
+    if (result.removed) globalThis.logger?.info?.(`[media] Media recovery removed ${result.removed} exited tasks in ${root}`)
     return result
   }
   const entries = await fs.readdir(root, { withFileTypes: true }).catch(error => {

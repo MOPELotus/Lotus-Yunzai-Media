@@ -295,7 +295,7 @@ export class TuneWeaveService {
     if (!repair && compareTuneWeaveVersions(status.version, targetVersion) >= 0) return { ...status, skipped: true, reason: "up_to_date" }
     const state = await this.managedProcess()
     if (!state.alive) throw new Error("TuneWeave 托管进程未运行，取消自动替换")
-    const send = async message => { try { await notify?.(message) } catch (error) { globalThis.logger?.warn?.(`[Lotus-Plugin] TuneWeave 更新通知失败：${error.message}`) } }
+    const send = async message => { try { await notify?.(message) } catch (error) { globalThis.logger?.warn?.(`[media] TuneWeave 更新通知失败：${error.message}`) } }
     await send(`TuneWeave 当前 ${status.version}，正在${repair ? "修复" : "更新至"} ${targetVersion}；下载校验后自动重启服务。`)
     let release, backup, replaced = false, stopped = false
     try {

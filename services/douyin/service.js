@@ -154,7 +154,7 @@ export class DouyinService {
       }
       return { ok: true, info, taskDir: task.dir, taskId: task.id, files: output, artifacts, warnings, partial: failedItems.length > 0, failedItems }
     } catch (error) {
-      await this.releaseTask({ taskDir: task.dir }).catch(cleanupError => globalThis.logger?.warn?.(`[Lotus-Plugin] Douyin task cleanup: ${cleanupError.message}`))
+      await this.releaseTask({ taskDir: task.dir }).catch(cleanupError => globalThis.logger?.warn?.(`[media] 抖音任务清理失败： ${cleanupError.message}`))
       throw error
     }
   }

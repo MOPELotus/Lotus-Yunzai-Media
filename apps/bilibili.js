@@ -18,11 +18,11 @@ import { ToolInstallerService } from "../services/tools/installer.js"
 
 const searchCache = new Map()
 
-export class LotusBilibili extends BasePlugin {
+export class BilibiliMedia extends BasePlugin {
   constructor() {
     super({
-      name: "[Lotus-Plugin] Bilibili",
-      dsc: "Lotus Bilibili parser",
+      name: "[media] B 站解析",
+      dsc: "B 站视频与直播解析",
       event: "message",
       priority: LOTUS_INTERCEPT_PRIORITY,
       rule: [
@@ -39,7 +39,7 @@ export class LotusBilibili extends BasePlugin {
 
   async init() {
     await (await createService()).recoverTasks().catch(error => {
-      globalThis.logger?.warn?.(`[Lotus-Plugin] Bilibili task recovery: ${error.message}`)
+      globalThis.logger?.warn?.(`[media] B 站任务恢复失败： ${error.message}`)
     })
   }
 
@@ -57,7 +57,7 @@ export class LotusBilibili extends BasePlugin {
   async searchVideo() {
     const keyword = String(this.e.msg || "").replace(/^#(?:荷花)?搜视频/, "").trim()
     if (!keyword) {
-      await replyText(this, "[荷花插件]请输入搜索关键词。")
+      await replyText(this, "[media] 请输入搜索关键词。")
       return true
     }
     try {
@@ -77,9 +77,9 @@ export class LotusBilibili extends BasePlugin {
           value: `${item.title} · ${item.author || "未知"} · ${formatNumber(item.play)}`,
         })),
       }, {
-        saveId: `lotus-bili-search-${this.e.user_id || "user"}`,
+        saveId: `media-bilibili-search-${this.e.user_id || "user"}`,
       })
-      await replyImage(this, image, "[荷花插件]B站搜索完成。")
+      await replyImage(this, image, "[media] B站搜索完成。")
     } catch (error) {
       await this.renderError("B站搜索", error)
     }
@@ -92,7 +92,7 @@ export class LotusBilibili extends BasePlugin {
     const index = Number(String(this.e.msg || "").replace(/^#看/, ""))
     const item = cached.results[index - 1]
     if (!item) {
-      await replyText(this, `[荷花插件]请输入 1-${cached.results.length} 之间的序号。`)
+      await replyText(this, `[media] 请输入 1-${cached.results.length} 之间的序号。`)
       return true
     }
     const service = await createService()
@@ -103,7 +103,7 @@ export class LotusBilibili extends BasePlugin {
   async directWatch() {
     const keyword = String(this.e.msg || "").replace(/^#(?:荷花)?看视频/, "").trim()
     if (!keyword) {
-      await replyText(this, "[荷花插件]请输入关键词。")
+      await replyText(this, "[media] 请输入关键词。")
       return true
     }
     try {
@@ -131,13 +131,13 @@ export class LotusBilibili extends BasePlugin {
       const qr = await service.createQrLogin()
       const image = await renderTemplate("qr-login", {
         title: "B站登录",
-        subtitle: "荷花插件 Bilibili",
+        subtitle: "Lotus-Yunzai · B 站",
         badge: "3 MIN",
-        notice: "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus 仅保存账号引用。",
+        notice: "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus-Yunzai 仅保存账号引用。",
         qrDataUrl: qr.qrDataUrl,
         profileId: "bilibili",
       }, {
-        saveId: `lotus-bili-login-${this.e.user_id || "master"}`,
+        saveId: `media-bilibili-login-${this.e.user_id || "master"}`,
       }).catch(() => undefined)
       const prefix = "data:image/png;base64,"
       const qrPng = image || (qr.qrDataUrl.startsWith(prefix) && Buffer.from(qr.qrDataUrl.slice(prefix.length), "base64"))
@@ -147,7 +147,7 @@ export class LotusBilibili extends BasePlugin {
       })
       const report = await renderStatusCard({
         title: "B站登录",
-        subtitle: "荷花插件 Bilibili",
+        subtitle: "Lotus-Yunzai · B 站",
         badge: "完成",
         message: "B站账号引用已保存，后续搜索和解析会自动使用。",
         userId: this.e.user_id,
@@ -156,9 +156,9 @@ export class LotusBilibili extends BasePlugin {
           { label: "保存时间", value: result.account.saved_at },
         ],
       }, {
-        saveId: `lotus-bili-login-ok-${this.e.user_id || "master"}`,
+        saveId: `media-bilibili-login-ok-${this.e.user_id || "master"}`,
       })
-      await replyImage(this, report, "[荷花插件]B站登录完成。")
+      await replyImage(this, report, "[media] B站登录完成。")
     } catch (error) {
       await this.renderError("B站登录", error)
     }
@@ -167,13 +167,13 @@ export class LotusBilibili extends BasePlugin {
 
   async initializeMediaTools() {
     if (!canManagePackages(this.e)) {
-      await replyText(this, "[荷花插件]只有机器人主人可以初始化媒体环境。")
+      await replyText(this, "[media] 只有机器人主人可以初始化媒体环境。")
       return true
     }
     const config = await loadGlobalConfig()
     const permission = new PermissionService({ permissions: config.permissions }).explain(this.e, "tools.install")
     if (!permission.ok) {
-      await replyText(this, "[荷花插件]当前会话没有初始化工具链的权限。")
+      await replyText(this, "[media] 当前会话没有初始化工具链的权限。")
       return true
     }
     const ready = await new ToolInstallerService({ config: config.tools }).ensureAll()
@@ -193,7 +193,7 @@ export class LotusBilibili extends BasePlugin {
   async downloadVideo() {
     const target = String(this.e.msg || "").replace(/^#(?:B站|b站|荷花)(?:下载|下视频)\s*/i, "").trim()
     if (!target) {
-      await replyText(this, "[荷花插件]请输入要下载的 B站链接、BV号或 av号。")
+      await replyText(this, "[media] 请输入要下载的 B站链接、BV号或 av号。")
       return true
     }
 
@@ -214,11 +214,11 @@ export class LotusBilibili extends BasePlugin {
       stat: info.stat || {},
       userId: this.e.user_id,
     }, {
-      saveId: `lotus-bili-${this.e.user_id || "user"}`,
+      saveId: `media-bilibili-${this.e.user_id || "user"}`,
     })
-    await replyImage(this, image, "[荷花插件]B站解析完成。")
+    await replyImage(this, image, "[media] B站解析完成。")
     if (info.type === "live" && info.playerUrl) {
-      await replyText(this, `[荷花插件]独立播放器：${info.playerUrl}`)
+      await replyText(this, `[media] 独立播放器：${info.playerUrl}`)
     } else if (info.type === "video" && info.url && options.download !== false) {
       await this.runBiliDownload(options.target || info.url, {
         service: options.service,
@@ -266,7 +266,7 @@ export class LotusBilibili extends BasePlugin {
         ...(globalConfig.bilibili?.download || {}),
       }, {
         onEvent: async event => {
-          if (event.message) globalThis.logger?.debug?.(`[Lotus-Plugin] Bilibili download: ${event.message}`)
+          if (event.message) globalThis.logger?.debug?.(`[media] B 站下载： ${event.message}`)
         },
       })
       if (!result.ok) {
@@ -285,7 +285,7 @@ export class LotusBilibili extends BasePlugin {
     } finally {
       if (result?.taskDir) {
         await service.releaseTask(result).catch(error => {
-          globalThis.logger?.warn?.(`[Lotus-Plugin] Bilibili task cleanup failed: ${error.message}`)
+          globalThis.logger?.warn?.(`[media] B 站任务清理失败： ${error.message}`)
         })
       }
     }
@@ -296,7 +296,7 @@ export class LotusBilibili extends BasePlugin {
     const diskFull = error.code === "ENOSPC" || error.code === "EDQUOT" || /No space left on device|Disk quota exceeded/i.test(error.message)
     const image = await renderStatusCard({
       title,
-      subtitle: "荷花插件 Bilibili",
+      subtitle: "Lotus-Yunzai · B 站",
       badge: "失败",
       message: diskFull ? "服务器磁盘空间不足，暂时无法下载或合并视频。" : error.message,
       userId: this.e.user_id,
@@ -304,9 +304,9 @@ export class LotusBilibili extends BasePlugin {
         { label: "建议", value: diskFull ? "请联系机器人主人清理磁盘空间后重试。" : "检查链接是否有效，或稍后重试。" },
       ],
     }, {
-      saveId: `lotus-bili-error-${this.e.user_id || "user"}`,
+      saveId: `media-bilibili-error-${this.e.user_id || "user"}`,
     })
-    await replyImage(this, image, `[荷花插件]${title}失败。`)
+    await replyImage(this, image, `[media] ${title}失败。`)
   }
 }
 

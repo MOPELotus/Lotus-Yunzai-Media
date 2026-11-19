@@ -179,7 +179,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
           postsByUid.set(uid,[])
           if (!active.aborted) {
             report.failed++
-            console.warn("[媒体订阅] " + provider.label + "动态读取失败：" + error.message)
+            console.warn("[media] 订阅 · " + provider.label + "动态读取失败：" + error.message)
           }
         }
       }
@@ -204,7 +204,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
             } catch (error) {
               if (!active.aborted) {
                 report.failed++
-                console.warn("[媒体订阅] " + provider.label + "动态构建失败：" + error.message)
+                console.warn("[media] 订阅 · " + provider.label + "动态构建失败：" + error.message)
               }
             }
           }
@@ -231,12 +231,12 @@ export function createSubscriptionDelivery({providers,config,groups,notification
       } catch (error) {
         if (!active.aborted) {
           report.failed++
-          console.warn("[媒体订阅] " + provider.label + "推送失败：" + error.message)
+          console.warn("[media] 订阅 · " + provider.label + "推送失败：" + error.message)
         }
       }
     }
     if (settings.log && (report.confirmed || report.unknown || report.failed)) {
-      console.info("[媒体订阅] " + provider.label + " 已确认 " + report.confirmed + "，未确认 " + report.unknown + "，异常 " + report.failed)
+      console.info("[media] 订阅 · " + provider.label + " 已确认 " + report.confirmed + "，未确认 " + report.unknown + "，异常 " + report.failed)
     }
     return report
   }
@@ -262,10 +262,10 @@ export function createSubscriptionDelivery({providers,config,groups,notification
         try {
           const settings = await config.settings(id)
           if (!settings.enable || active.aborted) continue
-          const job = new Job(() => { void run(id,true)?.catch(error => console.warn("[媒体订阅] " + error.message)) })
+          const job = new Job(() => { void run(id,true)?.catch(error => console.warn("[media] 订阅 · " + error.message)) })
           if (!job.schedule({rule:settings.cron,tz:"Asia/Shanghai"})) throw new Error("定时配置无效")
           jobs.push(job)
-        } catch (error) { console.warn("[媒体订阅] " + providers[id].label + " " + error.message) }
+        } catch (error) { console.warn("[media] 订阅 · " + providers[id].label + " " + error.message) }
       }
     },
     async dispose() {

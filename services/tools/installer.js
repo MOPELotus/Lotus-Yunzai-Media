@@ -182,7 +182,7 @@ export class ToolInstallerService {
       signal: AbortSignal.timeout(30000),
       headers: {
         Accept: "application/vnd.github+json",
-        "User-Agent": "Lotus-Plugin tool installer",
+        "User-Agent": "Lotus-Yunzai",
       },
     })
     if (!response.ok) throw new Error(`GitHub release request failed: HTTP ${response.status}`)
@@ -194,7 +194,7 @@ export class ToolInstallerService {
     const response = await this.fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
       headers: {
-        "User-Agent": "Lotus-Plugin tool installer",
+        "User-Agent": "Lotus-Yunzai",
       },
     })
     if (!response.ok) throw new Error(`download failed: HTTP ${response.status}`)
@@ -525,6 +525,6 @@ async function emitProgress(onProgress, message) {
   try {
     await onProgress(message)
   } catch (error) {
-    logger?.debug?.(`[Lotus-Plugin] progress callback failed: ${error.message}`)
+    logger?.debug?.(`[media] progress callback failed: ${error.message}`)
   }
 }

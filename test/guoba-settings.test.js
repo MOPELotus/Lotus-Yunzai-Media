@@ -16,6 +16,7 @@ const Result = {
 const defaults = {
   pushMsgMode: 1, mergeTextPic: 1, forwardSendDynamic: 1, maxPicsForSingleMsg: 2, maxTextLengthForSingleMsg: 300,
   pushStatus: 1, checkDynamicCD: "*/23 * * * *",
+  pushTransmit: 1, dynamicTimeRange: 7200, banWords: [],
 }
 
 test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆盖文件", async () => {
@@ -120,7 +121,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
       Object.keys(defaults).map((key) => `weibo.${key}`),
     )
     expect(await form.getConfigData()).toEqual({ bilibili: defaults, weibo: {
-      ...defaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0,
+      ...defaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0, banWords: ["样例"],
     } })
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "weibo.maxTextLengthForSingleMsg": 50001 }, { Result }))
       .toEqual({ ok: false, status: 422 })
@@ -142,9 +143,35 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(await form.setConfigData({ "bilibili.mergeTextPic": 0, "weibo.maxTextLengthForSingleMsg": 4 }, { Result }))
       .toEqual({ ok: true })
     expect(await form.getConfigData()).toEqual({ bilibili: { ...defaults, mergeTextPic: 0 }, weibo: {
-      ...defaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4,
+      ...defaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4, banWords: ["样例"],
     } })
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
+  } finally {
+    await rm(data, { force: true, recursive: true })
+  }
+})
+
+test("恢复两平台旧推送过滤设置并保存为原 YAML 类型", async () => {
+  const data = await mkdtemp(join(tmpdir(), "lotus-subscription-filters-"))
+  try {
+    const { configInfo: form } = supportGuoba(data)
+    expect(form.schemas.find(field => field.field === "bilibili.banWords")).toMatchObject({
+      component: "Select", componentProps: { mode: "tags" },
+    })
+    for (const values of [{ "weibo.banWords": ["文字", 13] }, { "weibo.dynamicTimeRange": 0 }]) {
+      expect(await form.setConfigData({ "bilibili.pushTransmit": 0, ...values }, { Result }))
+        .toEqual({ ok: false, status: 422 })
+      expect(existsSync(join(data, "yuki-plugin"))).toBe(false)
+    }
+    const config = createSubscriptionConfig(data, lockFile)
+    expect(await form.setConfigData({ "bilibili.banWords": [" 文字 ", " ", "[字面]"], "weibo.pushTransmit": 0,
+      "weibo.dynamicTimeRange": "4500" }, { Result })).toEqual({ ok: true })
+    expect(await config.settings("bilibili")).toMatchObject({ forwards: true, horizon: 7200, blacklist: ["文字", "[字面]"] })
+    expect(await config.settings("weibo")).toMatchObject({ forwards: false, horizon: 4500, blacklist: [] })
+    const path = join(data, "yuki-plugin", "config", "bilibili", "config.guoba.support.yaml")
+    expect(YAML.parse(await readFile(path, "utf8"))).toEqual({ banWords: ["文字", "[字面]"] })
+    expect(await form.setConfigData({ "bilibili.banWords": [] }, { Result })).toEqual({ ok: true })
+    expect(YAML.parse(await readFile(path, "utf8"))).toEqual({ banWords: [] })
   } finally {
     await rm(data, { force: true, recursive: true })
   }

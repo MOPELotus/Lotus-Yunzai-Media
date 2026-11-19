@@ -15,6 +15,12 @@ const fields = [
     help: "重启后生效。机器人主人仍可手动执行任务。" },
   { key: "checkDynamicCD", setting: "cron", label: "定时推送周期", component: "EasyCron",
     help: "支持五段或六段 Cron 表达式，按北京时间执行，重启后生效。" },
+  { key: "pushTransmit", setting: "forwards", label: "推送转发动态", options: ["关闭", "开启"],
+    help: "关闭后，此平台的所有订阅都跳过转发动态。" },
+  { key: "dynamicTimeRange", setting: "horizon", label: "动态时间范围（秒）", min: 1, max: 259_200,
+    help: "只推送此时间范围内发布的动态。" },
+  { key: "banWords", setting: "blacklist", label: "屏蔽关键词", tags: true,
+    help: "每行一个关键词。正文或标题包含关键词时跳过推送。" },
 ]
 const platforms = [
   { id: "bilibili", label: "B站" },
@@ -23,10 +29,14 @@ const platforms = [
 
 function fieldValue(field, settings) {
   const value = settings[field.setting]
-  return field.component === "EasyCron" ? value : Number(value)
+  return field.component === "EasyCron" || field.tags ? value : Number(value)
 }
 
 function submittedValue(field, value) {
+  if (field.tags) {
+    if (!Array.isArray(value) || !value.every(word => typeof word === "string")) return
+    return value.map(word => word.trim()).filter(Boolean)
+  }
   if (field.component === "EasyCron") {
     if (typeof value !== "string" || value.length > 128) return
     const cron = value.trim()
@@ -40,7 +50,13 @@ function submittedValue(field, value) {
     return
   }
   const number = typeof value === "string" && value.trim() ? Number(value) : value
-  if (Number.isSafeInteger(number) && number >= 0 && number <= (field.max ?? 1)) return number
+  if (Number.isSafeInteger(number) && number >= (field.min ?? 0) && number <= (field.max ?? 1)) return number
+}
+
+function changed(field, value, settings) {
+  const before = fieldValue(field, settings)
+  if (field.tags) return before.length !== value.length || before.some((word, index) => word !== value[index])
+  return before !== value
 }
 
 export function supportGuoba(directory = dataPath) {
@@ -50,13 +66,13 @@ export function supportGuoba(directory = dataPath) {
     configInfo: {
       schemas: platforms.flatMap(({ id, label: platform }) => [
         { component: "SOFT_GROUP_BEGIN", label: `${platform}动态推送` },
-        ...fields.map(({ key, label, options, max, help, component }) => ({
+        ...fields.map(({ key, label, options, min, max, help, component, tags }) => ({
           field: `${id}.${key}`,
           label: key === "pushMsgMode" ? platform + label : label,
           bottomHelpMessage: help,
-          component: component ?? (options ? "Select" : "InputNumber"),
-          componentProps: options ? { options: options.map((label, value) => ({ label, value })) }
-            : max !== undefined ? { min: 0, max, step: 1 } : undefined,
+          component: component ?? (options || tags ? "Select" : "InputNumber"),
+          componentProps: tags ? { mode: "tags" } : options ? { options: options.map((label, value) => ({ label, value })) }
+            : max !== undefined ? { min: min ?? 0, max, step: 1 } : undefined,
         })),
       ]),
       async getConfigData() {
@@ -83,7 +99,7 @@ export function supportGuoba(directory = dataPath) {
         }
         for (const [id, selected] of changes) {
           await config.editSettings(id, (settings) => Object.fromEntries(selected
-            .filter(({ field, value }) => fieldValue(field, settings) !== value)
+            .filter(({ field, value }) => changed(field, value, settings))
             .map(({ field, value }) => [field.key, value])))
         }
         return Result.ok()

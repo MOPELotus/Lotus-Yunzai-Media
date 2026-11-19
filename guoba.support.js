@@ -3,7 +3,7 @@ import { dataPath } from "./core/path.js"
 import { createSubscriptionConfig } from "./services/subscriptions/config.js"
 
 const fields = [
-  { key: "pushMsgMode", setting: "picture", label: "B站推送消息模式", options: ["文字模式", "图片模式"] },
+  { key: "pushMsgMode", setting: "picture", label: "推送消息模式", options: ["文字模式", "图片模式"] },
   { key: "mergeTextPic", setting: "merge", label: "文字图片合并发送", options: ["分开发送", "合并发送"],
     help: "仅在文字模式下生效。" },
   { key: "forwardSendDynamic", setting: "mergeForward", label: "合并转发动态", options: ["关闭", "开启"],
@@ -11,41 +11,54 @@ const fields = [
   { key: "maxPicsForSingleMsg", setting: "forwardPictureThreshold", label: "图片总数阈值", max: 100 },
   { key: "maxTextLengthForSingleMsg", setting: "forwardTextThreshold", label: "文字总长度阈值", max: 50_000 },
 ]
+const platforms = [
+  { id: "bilibili", label: "B站" },
+  { id: "weibo", label: "微博" },
+]
 
 export function supportGuoba(directory = dataPath) {
   const config = createSubscriptionConfig(directory, lockFile)
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
     configInfo: {
-      schemas: [
-        { component: "SOFT_GROUP_BEGIN", label: "B站动态推送" },
+      schemas: platforms.flatMap(({ id, label: platform }) => [
+        { component: "SOFT_GROUP_BEGIN", label: `${platform}动态推送` },
         ...fields.map(({ key, label, options, max, help }) => ({
-          field: `bilibili.${key}`,
-          label,
+          field: `${id}.${key}`,
+          label: key === "pushMsgMode" ? platform + label : label,
           bottomHelpMessage: help,
           component: options ? "Select" : "InputNumber",
           componentProps: options ? { options: options.map((label, value) => ({ label, value })) } : { min: 0, max, step: 1 },
         })),
-      ],
+      ]),
       async getConfigData() {
-        const settings = await config.settings("bilibili")
-        return { bilibili: Object.fromEntries(fields.map(({ key, setting }) => [key, Number(settings[setting])])) }
+        const entries = await Promise.all(platforms.map(async ({ id }) => {
+          const settings = await config.settings(id)
+          return [id, Object.fromEntries(fields.map(({ key, setting }) => [key, Number(settings[setting])]))]
+        }))
+        return Object.fromEntries(entries)
       },
       async setConfigData(values, { Result }) {
-        const selected = []
-        for (const field of fields) {
-          const name = `bilibili.${field.key}`
-          if (!Object.hasOwn(values, name)) continue
-          const value = values[name]
-          const number = typeof value === "string" && value.trim() ? Number(value) : value
-          if (!Number.isSafeInteger(number) || number < 0 || number > (field.max ?? 1)) {
-            return Result.error("请填写有效的 B 站动态推送设置。", 422)
+        const changes = new Map()
+        for (const { id, label } of platforms) {
+          const selected = []
+          for (const field of fields) {
+            const name = `${id}.${field.key}`
+            if (!Object.hasOwn(values, name)) continue
+            const value = values[name]
+            const number = typeof value === "string" && value.trim() ? Number(value) : value
+            if (!Number.isSafeInteger(number) || number < 0 || number > (field.max ?? 1)) {
+              return Result.error(`请填写有效的${label}动态推送设置。`, 422)
+            }
+            selected.push({ ...field, number })
           }
-          selected.push({ ...field, number })
+          if (selected.length) changes.set(id, selected)
         }
-        await config.editSettings("bilibili", (settings) => Object.fromEntries(selected
-          .filter(({ setting, number }) => Number(settings[setting]) !== number)
-          .map(({ key, number }) => [key, number])))
+        for (const [id, selected] of changes) {
+          await config.editSettings(id, (settings) => Object.fromEntries(selected
+            .filter(({ setting, number }) => Number(settings[setting]) !== number)
+            .map(({ key, number }) => [key, number])))
+        }
         return Result.ok()
       },
     },

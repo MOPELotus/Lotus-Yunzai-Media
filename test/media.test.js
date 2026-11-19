@@ -29,9 +29,13 @@ test("独立 QQ 分享卡优先取得 B 站短链，并只跟随 B 站域名", a
     requests.push([url.href, options.redirect])
     return new Response(null, {status: 302, headers: {location: "https://www.bilibili.com/video/BV1dAxE6VErW"}})
   } })
-  const raw = buildMediaMessageText({message: [{type: "json", data: JSON.stringify({
-    meta: {detail: {preview: "https://i0.hdslb.com/cover.png", qqdocurl: "https://b23.tv/test"}}
-  })}]})
+  const card = JSON.stringify({
+    meta: {detail: {preview: "https://www.bilibili.com/video/BV1dAxE6VErX", qqdocurl: "https://b23.tv/test"}}
+  })
+  const raw = buildMediaMessageText({
+    raw_message: `[CQ:json,data=${card}]`,
+    message: [{type:"json", data:card}]
+  })
   expect(await service.resolveTarget(service.extractTarget(raw))).toEqual({type: "video", bvid: "BV1dAxE6VErW"})
   expect(requests).toEqual([["https://b23.tv/test", "manual"]])
   expect(service.extractTarget(JSON.stringify({url:"https://example.test/bilibili.com/video/BV1dAxE6VErW"}))).toBeNull()

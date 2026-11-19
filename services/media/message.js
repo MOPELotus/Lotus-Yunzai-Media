@@ -1,10 +1,11 @@
 export function buildMediaMessageText(e = {}) {
-  const chunks = [e.raw_message, e.msg]
+  const chunks = []
   for (const item of Array.isArray(e.message) ? e.message : []) {
     if ((item?.type === "json" || item?.type === "xml" || item?.type === "light_app" || item?.type === "share") && item.data) chunks.push(typeof item.data === "string" ? item.data : JSON.stringify(item.data))
     if (item?.type === "text") chunks.push(item.text || item.data?.text)
   }
-  return chunks.filter(Boolean).join("\n")
+  chunks.push(e.raw_message, e.msg)
+  return [...new Set(chunks.filter(Boolean))].join("\n")
 }
 
 /** Bounded card sizes without discarding any article text or image ordering. */

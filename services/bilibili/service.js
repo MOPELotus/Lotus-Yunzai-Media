@@ -34,8 +34,15 @@ export class BilibiliService {
 
   extractTarget(message = "") {
     const raw = String(message || "")
-    const fromCard = extractFromJsonCard(raw)
-    if (fromCard !== undefined) return fromCard
+    let sawCard = false
+    for (const line of raw.split(/\r?\n/)) {
+      const fromCard = extractFromJsonCard(line)
+      if (fromCard) return fromCard
+      sawCard ||= fromCard === null
+    }
+    if (sawCard) return null
+    const wholeCard = extractFromJsonCard(raw)
+    if (wholeCard !== undefined) return wholeCard
 
     const clean = raw.replace(/\\\//g, "/")
     const match = clean.match(/https?:\/\/(?:www\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)

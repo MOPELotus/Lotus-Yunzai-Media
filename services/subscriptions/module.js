@@ -4,9 +4,11 @@ import { createWeiboProvider } from "./weibo/index.js"
 import { createSubscriptionConfig, numericId } from "./config.js"
 import { createSubscriptionDelivery } from "./delivery.js"
 import { profileText } from "./profile.js"
+import { renderSubscriptionHelp } from "./help.js"
 
 const dataDirectory = fileURLToPath(new URL("../../../../data",import.meta.url))
 const prefix = /^(?:#|\/)(?:yuki|优纪)?/iu
+const help = /^(?:#|\/)(?:yuki|优纪)帮助$/iu
 const platformName = "(哔哩哔哩|哔哩|bilibili|bili|b站|微博|weibo)"
 const edit = new RegExp("^(订阅|添加|add|取消|删除|del)"+platformName+"推送\\s*(.*)$","iu")
 const list = new RegExp("^"+platformName+"(全部)?(?:推送|动态|订阅)列表$","iu")
@@ -54,7 +56,7 @@ function display(provider,items,heading) {
 }
 
 export async function createSubscriptionModule(services, { providers = {bilibili:createBiliProvider(),weibo:createWeiboProvider()}, directory=dataDirectory,
-  getRedis=()=>globalThis.redis, render, now } = {}) {
+  getRedis=()=>globalThis.redis, render, now, renderHelp=renderSubscriptionHelp } = {}) {
   const config = createSubscriptionConfig(directory,services.lockFile)
   const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
@@ -62,6 +64,7 @@ export async function createSubscriptionModule(services, { providers = {bilibili
   const describe = provider => provider.label + "订阅"
 
   async function fallback(message,context) {
+    if (help.test(message.trim())) return renderHelp()
     if (!prefix.test(message)) return
     const command=message.replace(prefix,"").trim()
     const match=edit.exec(command)

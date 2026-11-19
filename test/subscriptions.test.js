@@ -10,6 +10,7 @@ import { articleContent } from "../services/subscriptions/bilibili/article.js"
 import { createSubscriptionDelivery, receiptKey, useDynamicForward } from "../services/subscriptions/delivery.js"
 import { createSubscriptionModule } from "../services/subscriptions/module.js"
 import { makeDynamicMessages } from "../services/subscriptions/render.js"
+import { renderSubscriptionHelp } from "../services/subscriptions/help.js"
 
 const temp=[]
 async function directory() {
@@ -257,6 +258,24 @@ test("全部订阅列表只列聊天所在机器人，授权终端可核对全�
     const terminal=await plugin.fallback(command,{message_type:"terminal",isMaster:true})
     expect(terminal.nodes).toHaveLength(3)
     expect(await plugin.fallback(command,{message_type:"terminal",isMaster:false})).toMatch(/只有机器人主人/u)
+  } finally { await plugin.dispose() }
+})
+
+test("公开订阅帮助兼容旧前缀，渲染不可用时保留现有指令",async()=>{
+  const root=await directory()
+  const stub=()=>renderSubscriptionHelp(async()=>{ throw new Error("fixture render unavailable") })
+  const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{},getRedis:()=>undefined,renderHelp:stub})
+  try {
+    const user={self_id:99,user_id:42,message_type:"private",isMaster:false}
+    const help=await plugin.fallback("#优纪帮助",user)
+    expect(help.type).toBe("text")
+    expect(help.text).toContain("#B站订阅列表")
+    expect(help.text).toContain("#执行微博任务")
+    expect(help.text).toContain("直接发送视频链接")
+    expect(help.text).not.toMatch(/扫码|Cookie|更新Yuki/iu)
+    for (const command of ["/优纪帮助","#yuki帮助","/YUKI帮助"]) expect(await plugin.fallback(command,user)).toEqual(help)
+    expect(await plugin.fallback("#帮助",user)).toBeUndefined()
+    expect(await renderSubscriptionHelp(async()=>({png:Buffer.from([1])}))).toEqual({type:"image",file:Buffer.from([1])})
   } finally { await plugin.dispose() }
 })
 

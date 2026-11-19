@@ -7,7 +7,7 @@ import YAML from "yaml"
 import { lockFile } from "../../../lib/file-lock.ts"
 import { supportGuoba } from "../guoba.support.js"
 import { createSubscriptionConfig } from "../services/subscriptions/config.js"
-import { useDynamicForward } from "../services/subscriptions/delivery.js"
+import { createSubscriptionDelivery, useDynamicForward } from "../services/subscriptions/delivery.js"
 
 const Result = {
   ok: () => ({ ok: true }),
@@ -15,6 +15,7 @@ const Result = {
 }
 const defaults = {
   pushMsgMode: 1, mergeTextPic: 1, forwardSendDynamic: 1, maxPicsForSingleMsg: 2, maxTextLengthForSingleMsg: 300,
+  pushStatus: 1, checkDynamicCD: "*/23 * * * *",
 }
 
 test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆盖文件", async () => {
@@ -34,7 +35,7 @@ test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆�
     const nodes = [{ payloads: [[{ type: "image", file: "fixture.png" }]] }]
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
     expect(await form.getConfigData()).toEqual({ bilibili: {
-      pushMsgMode: 1, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7, maxTextLengthForSingleMsg: 300,
+      ...defaults, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7,
     }, weibo: defaults })
     expect(await form.setConfigData({ "bilibili.forwardSendDynamic": 0 }, { Result })).toEqual({ ok: true })
     expect(existsSync(override)).toBe(false)
@@ -43,7 +44,7 @@ test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆�
     expect(existsSync(override)).toBe(false)
 
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "bilibili.maxPicsForSingleMsg": 0,
-      "bilibili.forwardSendDynamic": 1, "bilibili.checkDynamicCD": "unrecognized" }, { Result })).toEqual({ ok: true })
+      "bilibili.forwardSendDynamic": 1, "bilibili.custom": "unrecognized" }, { Result })).toEqual({ ok: true })
     expect(await readFile(primary, "utf8")).toBe(original)
     const raw = await readFile(override, "utf8")
     expect(raw).toContain("# 非面板配置保留")
@@ -54,12 +55,49 @@ test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆�
 
     const fresh = supportGuoba(data).configInfo
     expect(await fresh.getConfigData()).toEqual({ bilibili: {
-      pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 1, maxPicsForSingleMsg: 0, maxTextLengthForSingleMsg: 300,
+      ...defaults, pushMsgMode: 0, mergeTextPic: 0, maxPicsForSingleMsg: 0,
     }, weibo: defaults })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(true)
     expect(await fresh.setConfigData({ "bilibili.maxPicsForSingleMsg": 1 }, { Result })).toEqual({ ok: true })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
   } finally {
+    await rm(data, { force: true, recursive: true })
+  }
+})
+
+test("锅巴保存调度设置，重启后按平台注册任务且手动任务仍可执行", async () => {
+  const data = await mkdtemp(join(tmpdir(), "lotus-subscription-cron-"))
+  const config = createSubscriptionConfig(data, lockFile)
+  const calls = []
+  const providers = Object.fromEntries(["bilibili", "weibo"].map(id => [id, {
+    id, async fetchPosts() { calls.push(id); return [] },
+  }]))
+  const dispatch = createSubscriptionDelivery({
+    providers, config, notifications: () => [{ botId: 99, isFriend: async () => true }], getRedis: () => ({}),
+  })
+  try {
+    const { configInfo: form } = supportGuoba(data)
+    expect(form.schemas.find(field => field.field === "weibo.checkDynamicCD")?.component).toBe("EasyCron")
+    expect(await form.setConfigData({ "bilibili.pushStatus": 0, "weibo.checkDynamicCD": "61 * * * *" }, { Result }))
+      .toEqual({ ok: false, status: 422 })
+    expect(existsSync(join(data, "yuki-plugin"))).toBe(false)
+    expect(await form.setConfigData({ "bilibili.pushStatus": 0, "bilibili.checkDynamicCD": "* * * * * *",
+      "weibo.checkDynamicCD": "  * * * * * *  " }, { Result })).toEqual({ ok: true })
+    expect(await form.getConfigData()).toEqual({
+      bilibili: { ...defaults, pushStatus: 0, checkDynamicCD: "* * * * * *" },
+      weibo: { ...defaults, checkDynamicCD: "* * * * * *" },
+    })
+    for (const id of Object.keys(providers)) {
+      await config.update(id, { kind: "private", bot: "99", chat: "42" }, "1234", "add", [], [], "测试号")
+    }
+    await dispatch.start()
+    await Bun.sleep(1400)
+    expect(calls.length).toBeGreaterThan(0)
+    expect(new Set(calls)).toEqual(new Set(["weibo"]))
+    await dispatch.run("bilibili")
+    expect(calls).toContain("bilibili")
+  } finally {
+    await dispatch.dispose()
     await rm(data, { force: true, recursive: true })
   }
 })

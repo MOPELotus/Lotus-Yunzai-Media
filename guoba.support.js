@@ -1,3 +1,4 @@
+import { Job } from "node-schedule"
 import { lockFile } from "../../lib/file-lock.ts"
 import { dataPath } from "./core/path.js"
 import { createSubscriptionConfig } from "./services/subscriptions/config.js"
@@ -10,11 +11,37 @@ const fields = [
     help: "同一会话本次待推送的图片总数或文字总长度超过阈值时使用合并转发。" },
   { key: "maxPicsForSingleMsg", setting: "forwardPictureThreshold", label: "图片总数阈值", max: 100 },
   { key: "maxTextLengthForSingleMsg", setting: "forwardTextThreshold", label: "文字总长度阈值", max: 50_000 },
+  { key: "pushStatus", setting: "enable", label: "定时推送", options: ["关闭", "开启"],
+    help: "重启后生效。机器人主人仍可手动执行任务。" },
+  { key: "checkDynamicCD", setting: "cron", label: "定时推送周期", component: "EasyCron",
+    help: "支持五段或六段 Cron 表达式，按北京时间执行，重启后生效。" },
 ]
 const platforms = [
   { id: "bilibili", label: "B站" },
   { id: "weibo", label: "微博" },
 ]
+
+function fieldValue(field, settings) {
+  const value = settings[field.setting]
+  return field.component === "EasyCron" ? value : Number(value)
+}
+
+function submittedValue(field, value) {
+  if (field.component === "EasyCron") {
+    if (typeof value !== "string" || value.length > 128) return
+    const cron = value.trim()
+    if (!/^[\w*,/?#-]+(?:[ \t]+[\w*,/?#-]+){4,5}$/u.test(cron)) return
+    const job = new Job(() => {})
+    try {
+      if (job.schedule({ rule: cron, tz: "Asia/Shanghai" }) && !job.isOneTimeJob) return cron
+    } finally {
+      job.cancel()
+    }
+    return
+  }
+  const number = typeof value === "string" && value.trim() ? Number(value) : value
+  if (Number.isSafeInteger(number) && number >= 0 && number <= (field.max ?? 1)) return number
+}
 
 export function supportGuoba(directory = dataPath) {
   const config = createSubscriptionConfig(directory, lockFile)
@@ -23,18 +50,19 @@ export function supportGuoba(directory = dataPath) {
     configInfo: {
       schemas: platforms.flatMap(({ id, label: platform }) => [
         { component: "SOFT_GROUP_BEGIN", label: `${platform}动态推送` },
-        ...fields.map(({ key, label, options, max, help }) => ({
+        ...fields.map(({ key, label, options, max, help, component }) => ({
           field: `${id}.${key}`,
           label: key === "pushMsgMode" ? platform + label : label,
           bottomHelpMessage: help,
-          component: options ? "Select" : "InputNumber",
-          componentProps: options ? { options: options.map((label, value) => ({ label, value })) } : { min: 0, max, step: 1 },
+          component: component ?? (options ? "Select" : "InputNumber"),
+          componentProps: options ? { options: options.map((label, value) => ({ label, value })) }
+            : max !== undefined ? { min: 0, max, step: 1 } : undefined,
         })),
       ]),
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id }) => {
           const settings = await config.settings(id)
-          return [id, Object.fromEntries(fields.map(({ key, setting }) => [key, Number(settings[setting])]))]
+          return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
         return Object.fromEntries(entries)
       },
@@ -45,19 +73,18 @@ export function supportGuoba(directory = dataPath) {
           for (const field of fields) {
             const name = `${id}.${field.key}`
             if (!Object.hasOwn(values, name)) continue
-            const value = values[name]
-            const number = typeof value === "string" && value.trim() ? Number(value) : value
-            if (!Number.isSafeInteger(number) || number < 0 || number > (field.max ?? 1)) {
+            const value = submittedValue(field, values[name])
+            if (value === undefined) {
               return Result.error(`请填写有效的${label}动态推送设置。`, 422)
             }
-            selected.push({ ...field, number })
+            selected.push({ field, value })
           }
           if (selected.length) changes.set(id, selected)
         }
         for (const [id, selected] of changes) {
           await config.editSettings(id, (settings) => Object.fromEntries(selected
-            .filter(({ setting, number }) => Number(settings[setting]) !== number)
-            .map(({ key, number }) => [key, number])))
+            .filter(({ field, value }) => fieldValue(field, settings) !== value)
+            .map(({ field, value }) => [field.key, value])))
         }
         return Result.ok()
       },

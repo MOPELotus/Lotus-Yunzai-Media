@@ -1,5 +1,6 @@
 // Source format: snowtafir/yuki-plugin main3, b1d8fecf41d03f92746bb2404b0b0381a24103a5 (MIT).
 import { load } from "cheerio"
+import { publicCount } from "../profile.js"
 
 const entrypoint = "https://m.weibo.cn/api/container/getIndex"
 const emptyMessages = new Set(["这里还没有内容", "这里还没有内容哦", "用户不存在", "该用户不存在"])
@@ -54,7 +55,13 @@ function profileOf(value) {
   const uid = decimalId(value?.idstr) ?? decimalId(value?.id)
   const name = clean(value?.screen_name, 80)
   if (!uid || !name) return
-  return { uid, name, summary: clean(value.description, 250) || undefined }
+  return {
+    uid, name, summary: clean(value.description, 250) || undefined,
+    gender: value.gender === "f" ? "女" : value.gender === "m" ? "男" : undefined,
+    verification: clean(value.verified_reason, 160) || (value.verified === false ? "未认证" : undefined),
+    followers: publicCount(value.followers_count) ?? publicCount(value.followers_count_str),
+    following: publicCount(value.follow_count),
+  }
 }
 
 function publishedAt(value) {

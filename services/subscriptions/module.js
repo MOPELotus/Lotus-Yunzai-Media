@@ -3,6 +3,7 @@ import { createBiliProvider } from "./bilibili/index.js"
 import { createWeiboProvider } from "./weibo/index.js"
 import { createSubscriptionConfig, numericId } from "./config.js"
 import { createSubscriptionDelivery } from "./delivery.js"
+import { profileText } from "./profile.js"
 
 const dataDirectory = fileURLToPath(new URL("../../../../data",import.meta.url))
 const prefix = /^(?:#|\/)(?:yuki|优纪)?/iu
@@ -114,9 +115,8 @@ export async function createSubscriptionModule(services, { providers = {bilibili
       if (!value) return "请输入要查询的 UID 或昵称。"
       const found=lookup[2].toLowerCase()==="uid" ? [await provider.profile(value,{signal:services.signal})] :
         await provider.search?.(value,{signal:services.signal}) ?? []
-      const rows=found.filter(Boolean).slice(0,8).map(item=>item.name+" · UID "+item.uid+
-        (item.summary?"\n"+Array.from(item.summary).slice(0,240).join(""):""))
-      return rows.length ? rows.join("\n\n") : "没有找到公开用户资料。"
+      const rows=found.filter(Boolean).slice(0,8).map(profileText)
+      return rows.length ? [{type:"text",text:rows.join("\n\n")}] : "没有找到公开用户资料。"
     } catch (error) {
       return describe(provider)+"处理失败："+error.message
     }

@@ -26,7 +26,8 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
     requests.push({ url, method: request.method, credential: request.headers.get("Cookie"), token: request.headers.get("Authorization"),
       agent: request.headers.get("User-Agent") })
     if (url.searchParams.get("containerid") === `100505${uid}`) {
-      return Response.json({ ok: 1, data: { userInfo: { ...user, description: "账号简介" } } })
+      return Response.json({ ok: 1, data: { userInfo: { ...user, description: "账号简介",
+        gender: "f", verified_reason: "公开认证", followers_count_str: "12.4万", follow_count: 0 } } })
     }
     return Response.json({ ok: 1, data: { cards: [
       { card_type: 11, mblog: post.mblog }, post, post,
@@ -42,7 +43,8 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
       expect(init.redirect).toBe("manual")
       return fetch(new URL(input.pathname + input.search, server.url), { ...init, proxy: false })
     } })
-    expect(await source.profile(uid)).toEqual({ uid, name: "公开账号", summary: "账号简介" })
+    expect(await source.profile(uid)).toMatchObject({ uid, name: "公开账号", summary: "账号简介", gender: "女",
+      verification: "公开认证", followers: "12.4万", following: "0" })
     const posts = await source.fetchPosts(uid)
     expect(posts.map(post => post.id)).toEqual(["9999999999999999", "12345", "12346"])
     expect(posts[0]).toMatchObject({
@@ -86,11 +88,12 @@ test("微博搜索兼容旧用户卡片，调用取消时不读取上游", async
   const source = createWeiboProvider({ fetch: async input => {
     query = Object.fromEntries(input.searchParams)
     return Response.json({ ok: 1, data: { cards: [{ card_group: [
-      { card_type: 10, user }, { card_type: 3, users: [user, { id: 42, screen_name: "另一账号" }] },
+      { card_type: 10, user: { ...user, followers_count: 567, followers_count_str: "万" } },
+      { card_type: 3, users: [user, { id: 42, screen_name: "另一账号", followers_count: -1 }] },
     ] }] } })
   } })
-  expect(await source.search(" 测试 & 关键词 ")).toEqual([
-    { uid, name: "公开账号", summary: undefined }, { uid: "42", name: "另一账号", summary: undefined },
+  expect(await source.search(" 测试 & 关键词 ")).toMatchObject([
+    { uid, name: "公开账号", followers: "567" }, { uid: "42", name: "另一账号", followers: undefined },
   ])
   expect(query).toEqual({ type: "1", containerid: "100103", q: "测试 & 关键词", page_type: "searchall" })
   query = undefined

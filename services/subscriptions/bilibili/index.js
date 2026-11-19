@@ -1,4 +1,5 @@
 import { articleContent } from "./article.js"
+import { publicCount } from "../profile.js"
 
 // Dynamic fields and type mapping adapted from Yuki BiliQuery (MIT).
 const dynamicRoot = "https://m.bilibili.com/dynamic/"
@@ -35,6 +36,18 @@ function richText(nodes) {
 function liveInfo(content) {
   try { return JSON.parse(content)?.live_play_info }
   catch { return }
+}
+
+function profileLive(value) {
+  const roomId = accountId(value?.roomid)
+  if (!roomId) return
+  const status = value.liveStatus
+  return {
+    roomId,
+    title: typeof value.title === "string" ? value.title.slice(0, 120).toWellFormed() : undefined,
+    status: status === 1 || status === "1" ? "直播中" : status === 0 || status === "0" ? "未开播" : undefined,
+    viewers: publicCount(value.watched_show?.num),
+  }
 }
 
 export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
@@ -136,15 +149,22 @@ export function createBiliProvider({ fetch: request = globalThis.fetch } = {}) {
     async profile(uid, {signal} = {}) {
       if (!accountId(uid)) return
       const data = await get("/x/web-interface/card", {mid:uid}, signal)
-      if (accountId(data?.card?.mid) !== uid || !data.card.name) return
-      return {uid, name:data.card.name, summary:data.card.sign || ""}
+      const card = data?.card
+      if (accountId(card?.mid) !== uid || typeof card.name !== "string" || !card.name.trim()) return
+      return {
+        uid, name:card.name.slice(0,80).toWellFormed(), summary:typeof card.sign === "string" ? card.sign : "",
+        gender:["男","女","保密"].includes(card.sex) ? card.sex : undefined,
+        level:publicCount(card.level_info?.current_level), followers:publicCount(data.follower) ?? publicCount(card.fans),
+        following:publicCount(card.attention) ?? publicCount(card.friend), live:profileLive(card.live_room),
+      }
     },
     async search(keyword, {signal} = {}) {
       const data = await get("/x/web-interface/search/type", {keyword,search_type:"bili_user",page:"1",order:"totalrank"}, signal)
       if (!Array.isArray(data?.result)) return []
       return data.result.map(item => ({
-        uid:accountId(item.mid), name:String(item.uname || "").replace(/<[^>]+>/g, ""),
-        summary:typeof item.usign === "string" ? item.usign : "",
+        uid:accountId(item?.mid), name:typeof item?.uname === "string" ? item.uname.replace(/<[^>]+>/g, "").slice(0,80).toWellFormed() : "",
+        summary:typeof item?.usign === "string" ? item.usign : "",
+        followers:publicCount(item?.fans),
       })).filter(item => item.uid && item.name)
     },
   }

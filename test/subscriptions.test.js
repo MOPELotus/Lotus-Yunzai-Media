@@ -104,6 +104,32 @@ test("原动态订阅指令保留权限、别名、分类与当前会话",async(
   } finally { await plugin.dispose() }
 })
 
+test("B站旧查人指令保留开放资料、搜索粉丝数和规范直播间链接",async()=>{
+  const root=await directory()
+  const paths=[]
+  const provider=createBiliProvider({fetch:async (url,init)=>{
+    paths.push(url.pathname)
+    expect(init.credentials).toBe("omit")
+    if (url.pathname === "/x/web-interface/card") return Response.json({code:0,data:{follower:0,card:{
+      mid:uid,name:"公开昵称",sex:"保密",level_info:{current_level:6},attention:60,sign:"[CQ:at,qq=all]",
+      live_room:{roomid:12,title:"公开直播",liveStatus:0,watched_show:{num:0},url:"https://fixture.invalid/"},
+    }}})
+    return Response.json({code:0,data:{result:[null,{mid:uid,uname:'<em class="keyword">公开</em>昵称',fans:123},
+      {mid:123,uname:"另一账号",fans:"未知"},
+    ]}})
+  }})
+  const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
+  try {
+    const group={self_id:99,user_id:40,group_id:77,message_type:"group",isMaster:false}
+    expect(await plugin.fallback("/优纪B站UP主UID:"+uid,group)).toEqual([{type:"text",text:["公开昵称 · UID "+uid,
+      "性别：保密","等级：6","粉丝数：0","关注数：60","[CQ:at,qq=all]","直播间：公开直播","直播状态：未开播",
+      "观看人数：0","直播链接：https://live.bilibili.com/12"].join("\n")}])
+    expect(await plugin.fallback("#yukiB站UP主昵称：公开",group)).toEqual([{type:"text",text:
+      `公开昵称 · UID ${uid}\n粉丝数：123\n\n另一账号 · UID 123`}])
+    expect(paths).toEqual(["/x/web-interface/card","/x/web-interface/search/type"])
+  } finally { await plugin.dispose() }
+})
+
 test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键词和同群多机器人重复",async()=>{
   const confirmed=[]
   const kv=new Map()

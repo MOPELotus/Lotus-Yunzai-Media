@@ -1,6 +1,6 @@
 # 媒体解析
 
-Lotus-Yunzai 的 B 站、抖音和点歌模块。直接发送视频链接或 QQ 分享卡即可查看信息。插件依赖由 Lotus-Yunzai 初始化脚本安装。
+Lotus-Yunzai 的 B 站、抖音、动态订阅和点歌模块。直接发送视频链接或 QQ 分享卡即可查看信息。插件依赖由 Lotus-Yunzai 初始化脚本安装。
 
 ## B 站
 
@@ -38,6 +38,16 @@ Lotus-Yunzai 的 B 站、抖音和点歌模块。直接发送视频链接或 QQ 
 | `download_timeout_ms` | `180000` |
 | `max_size_mb` | `128` |
 
+## B 站动态与微博订阅
+
+在目标群或私聊发送 `#添加B站推送 图文 UID` 或 `#添加微博推送 UID`，由机器人主人设置。省略分类时添加全部动态。可按视频、图文、文章、转发订阅，B 站还支持直播。删除某类时在 `#删除B站推送` 或 `#删除微博推送` 后填写分类和 UID，省略分类时删除该账号订阅。原 `/`、`优纪` 和 `yuki` 前缀都可用。
+
+发送 `#B站订阅列表` 或 `#微博订阅列表` 查看当前会话，主人可用 `#B站全部订阅列表` 查看全部。主人用 `#执行B站任务` 或 `#执行微博任务` 手动检查订阅。另支持 `#B站UP主UID:UID`、`#B站UP主昵称:昵称`、`#微博博主UID:UID` 和 `#微博博主昵称:昵称`。
+
+沿用 `data/yuki-plugin/config/{bilibili,weibo}/` 下的 `config.yaml`、`push.yaml` 以及同名的 `*.guoba.support.yaml`，有锅巴文件时以该文件为准。可保留已有群、私聊、机器人账号、分类、关键词和定时设置。新账号订阅写入当前实际使用的推送文件。默认每 23 分钟检查，允许用旧 `checkDynamicCD` 修改，定时任务用北京时间。
+
+动态支持原图卡和文字模式。图片模式按分页设置分条发送，文字模式可合并或拆开发送文字和图片。推送沿用 Yuki 的 Valkey 已发记录，结果未确认时保留记录以避免重复。机器人需在已连接的目标群内，或与私聊对象有好友关系。上游拒绝公开请求时，手动任务会明确报告异常，稍后成功获取后仍可进入推送。
+
 ## 配置
 
 配置使用宿主的 `config/global.yaml`。常用字段如下。
@@ -70,3 +80,5 @@ Lotus-Yunzai 的 B 站、抖音和点歌模块。直接发送视频链接或 QQ 
 ## 来源
 
 解析、媒体及工具服务、指令和 Skia 卡片以 Lotus-ReFactor 的 [eaf76753](https://github.com/MOPELotus/Lotus-ReFactor/tree/eaf7675324dae64e51652bf9669ef93247d02b42) 为基线。保留 [原许可](LICENSE)。视频信息卡沿用原 `core/render/source-cards.js` 的 genshin `mysNews` 布局，从宿主已有的 `data/passport/resources` 或 `data/atlas/theme` 读取 Miao 主题和字体。Bun 环境的 SM3 哈希使用 [sm-crypto](https://github.com/JuneAndGreen/sm-crypto) 的 MIT 许可实现。
+
+动态订阅和图卡结构来源于 [snowtafir/yuki-plugin main3](https://github.com/snowtafir/yuki-plugin/tree/b1d8fecf41d03f92746bb2404b0b0381a24103a5)，保留 [MIT 许可](LICENSES/yuki-plugin.txt)。

@@ -1,0 +1,148 @@
+import { afterEach, expect, test } from "bun:test"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import YAML from "yaml"
+import { lockFile } from "../../../lib/file-lock.ts"
+import { changeTypes, createSubscriptionConfig, settingsFor } from "../services/subscriptions/config.js"
+import { createBiliProvider, biliTypes, normalizeBiliDynamic } from "../services/subscriptions/bilibili/index.js"
+import { articleContent } from "../services/subscriptions/bilibili/article.js"
+import { createSubscriptionDelivery, receiptKey } from "../services/subscriptions/delivery.js"
+import { createSubscriptionModule } from "../services/subscriptions/module.js"
+
+const temp=[]
+async function directory() {
+  const root=await mkdtemp(join(tmpdir(),"lotus-yuki-unit-"))
+  temp.push(root)
+  return root
+}
+afterEach(async()=>Promise.all(temp.splice(0).map(root=>rm(root,{force:true,recursive:true}))))
+
+const seen=1700000000
+const uid="401742377"
+const draw="DYNAMIC_TYPE_DRAW"
+const article="DYNAMIC_TYPE_ARTICLE"
+const route={kind:"group",chat:"77",bot:"99",uid,name:"原神",types:[]}
+
+function raw(type=draw,fields={}) {
+  return { id_str:"12234455",type,
+    modules:{module_author:{mid:uid,pub_ts:seen,name:"试验发布者"},module_dynamic:fields} }
+}
+
+test("B站动态解析适配 Yuki 的 Opus 图文、直播、原转发与来源域",()=>{
+  const original=raw(draw,{major:{opus:{title:"标题",summary:{rich_text_nodes:[{text:"正文"},{"text":"#话题#"}]},pics:[
+    {url:"//i0.hdslb.com/test.webp"},{url:"https://wrong.test/a.png"},
+  ]}}})
+  const forwarded=normalizeBiliDynamic({...raw("DYNAMIC_TYPE_FORWARD",{desc:{text:"转发文字"}}),id_str:"12234456",orig:original},uid)
+  expect(forwarded).toMatchObject({id:"12234456",content:"转发文字",forwarded:{content:"正文#话题#",images:["https://i0.hdslb.com/test.webp"]}})
+  const live=normalizeBiliDynamic(raw("DYNAMIC_TYPE_LIVE_RCMD",{major:{live_rcmd:{content:JSON.stringify({live_play_info:{
+    title:"直播",link:"//live.bilibili.com/12",cover:"//i0.hdslb.com/live.jpg",
+  }})}}}),uid)
+  expect(live).toMatchObject({title:"直播",url:"https://live.bilibili.com/12",cover:"https://i0.hdslb.com/live.jpg"})
+  expect(normalizeBiliDynamic(original,"123")).toBeUndefined()
+})
+
+test("B站匿名查询明确区分 HTTP 拒绝并读取原公开文章内嵌数据",async()=>{
+  const requests=[]
+  const feed=createBiliProvider({fetch:async (u,options)=>{
+    requests.push([u,options])
+    return new Response(null,{status:412})
+  }})
+  await expect(feed.fetchPosts(uid)).rejects.toThrow("HTTP 412")
+  expect(requests[0][0].searchParams.get("host_mid")).toBe(uid)
+  expect(requests[0][1].credentials).toBe("omit")
+  expect(articleContent('"readInfo":{"content":"<p>正文</p><img data-src=\\"//i0.hdslb.com/pic.jpg\\">"},"readViewInfo":{}'))
+    .toEqual({content:"正文",images:["//i0.hdslb.com/pic.jpg"]})
+  const source=raw(article,{major:{opus:{title:"文章",summary:{text:"字".repeat(480)},jump_url:"https://www.bilibili.com/opus/12234455"}}})
+  const articleProvider=createBiliProvider({fetch:async url=>url.hostname==="api.bilibili.com"
+    ? Response.json({code:0,data:{items:[source]}})
+    : new Response('"module_content":'+JSON.stringify({paragraphs:[
+      {para_type:1,text:{nodes:[{word:{words:"完整正文".repeat(200)}}]}},
+      {para_type:2,pic:{pics:[{url:"//i0.hdslb.com/new.png"}]}},
+    ]})+',"module_type":"MODULE_TYPE_CONTENT"')})
+  expect((await articleProvider.fetchPosts(uid))[0]).toMatchObject({content:"完整正文".repeat(200),images:["https://i0.hdslb.com/new.png"]})
+})
+
+test("锅巴配置优先、群与私聊分离，旧类型增删安全保留另一个机器人",async()=>{
+  const root=await directory()
+  const dir=join(root,"yuki-plugin","config","bilibili")
+  await mkdir(dir,{recursive:true})
+  await writeFile(join(dir,"push.yaml"),YAML.stringify({group:{77:[]}}))
+  await writeFile(join(dir,"config.yaml"),"pushStatus: 0\n")
+  await writeFile(join(dir,"config.guoba.support.yaml"),"pushStatus: 1\npushTransmit: 0\n")
+  await writeFile(join(dir,"push.guoba.support.yaml"),YAML.stringify({group:{77:[
+    {bot_id:99,uid,name:"原群",type:[],metadata:"留"},
+    {bot_id:98,uid,name:"另一机器人",type:[draw]},
+  ]},private:{42:[{bot_id:99,uid,name:"原私聊"}]}}))
+  const cfg=createSubscriptionConfig(root,lockFile)
+  expect(await cfg.settings("bilibili")).toMatchObject({enable:true,forwards:false})
+  expect((await cfg.routes("bilibili")).length).toBe(3)
+  expect(changeTypes([], [draw],Object.keys(biliTypes),"remove")).not.toContain(draw)
+  await cfg.update("bilibili",route,uid,"remove",[draw],Object.keys(biliTypes),uid)
+  let written=YAML.parse(await readFile(join(dir,"push.guoba.support.yaml"),"utf8"))
+  expect(written.group[77][0].metadata).toBe("留")
+  expect(written.group[77][0].type).not.toContain(draw)
+  expect(written.group[77][1].type).toEqual([draw])
+  await cfg.update("bilibili",route,uid,"remove",[],Object.keys(biliTypes),uid)
+  written=YAML.parse(await readFile(join(dir,"push.guoba.support.yaml"),"utf8"))
+  expect(written.group[77]).toEqual([{bot_id:98,uid,name:"另一机器人",type:[draw]}])
+  expect(written.private[42][0].uid).toBe(uid)
+  expect(YAML.parse(await readFile(join(dir,"push.yaml"),"utf8"))).toEqual({group:{77:[]}})
+})
+
+test("原动态订阅指令保留权限、别名、分类与当前会话",async()=>{
+  const root=await directory()
+  const provider={id:"bilibili",label:"B站",typeNames:biliTypes,profile:async uid=>({uid,name:"公开昵称"})}
+  const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
+  try {
+    const group={self_id:99,user_id:40,group_id:77,message_type:"group",isMaster:true}
+    expect(await plugin.fallback("/yuki订阅哔哩推送 图文 UID："+uid,{...group,isMaster:false})).toContain("主人")
+    expect(await plugin.fallback("/yuki订阅哔哩推送 图文 UID："+uid,group)).toContain("公开昵称")
+    expect(await plugin.fallback("#B站订阅列表",{...group,isMaster:false})).toContain("[图文]")
+    expect(await plugin.fallback("#B站订阅列表",{...group,group_id:78})).toContain("当前没有订阅")
+    expect(await plugin.fallback("#执行B站任务",group)).toBe("订阅存储未连接。")
+  } finally { await plugin.dispose() }
+})
+
+test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键词和同群多机器人重复",async()=>{
+  const confirmed=[]
+  const kv=new Map()
+  const legacy=receiptKey("bilibili",route,{id:"already"})
+  kv.set(legacy,"1")
+  const redis={
+    get:async key=>kv.get(key) ?? null,
+    eval:async (script,{keys,arguments:[token,argument]})=>{
+      if (script.includes("EXISTS")) {
+        if (keys.some(key=>kv.has(key))) return 0
+        for (const key of keys) kv.set(key,token)
+      } else if (argument==="rejected") {
+        for (const key of keys) if (kv.get(key)===token) kv.delete(key)
+      } else {
+        kv.set(keys[0],"1")
+        kv.set(keys[1],argument)
+      }
+      return 1
+    },
+  }
+  const posts = (id,options={})=>({id,uid,type:draw,createdAt:seen,content:"准入",...options})
+  let fetched=0
+  const provider={id:"bilibili",label:"B站",fetchPosts:async()=>{
+    fetched++
+    return [posts("already"),posts("fresh"),posts("old",{createdAt:seen-7300}),posts("blocked",{content:"准入屏蔽"}),
+      posts("forward",{type:"DYNAMIC_TYPE_FORWARD"}),posts("other",{content:"其他"})]
+  }}
+  const d=createSubscriptionDelivery({providers:{bilibili:provider},
+    config:{settings:async()=>settingsFor({pushTransmit:0,whiteWordslist:["准入"],banWords:["屏蔽"],pushTaskLog:0}),
+      routes:async()=>[route,{...route,bot:"98"}]},
+    groups:{onlineBots:()=>[98,99],listGroups:async()=>[{id:77}],sendGroup:async(bot,group,text)=>{confirmed.push([bot,group,text]);return 123}},
+    getRedis:()=>redis,now:()=>seen*1000,render:async (_,post)=>[post.id],
+  })
+  try {
+    const report=await d.run("bilibili")
+    expect(confirmed).toEqual([[99,77,"fresh"]])
+    expect(report.confirmed).toBe(1)
+    expect(fetched).toBe(1)
+    expect(kv.get(receiptKey("bilibili",route,{id:"fresh"}))).toBe("1")
+    expect(receiptKey("weibo",{...route,kind:"private",chat:"42"},{id:"12233"})).toBe("Yz:yuki:weibo:upPush:private:42:12233")
+  } finally { await d.dispose() }
+})

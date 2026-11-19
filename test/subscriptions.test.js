@@ -215,6 +215,22 @@ test("原动态订阅指令保留权限、别名、分类与当前会话",async(
   } finally { await plugin.dispose() }
 })
 
+test("Milky 订阅管理仅接受宿主核验的当前会话主人",async()=>{
+  const root=await directory()
+  const provider={id:"bilibili",label:"B站",typeNames:biliTypes,profile:async uid=>({uid,name:"公开昵称"})}
+  const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
+  try {
+    const owner={adapter:"milky",self_id:98,user_id:42,message_type:"private",isMaster:false,isBotMaster:user=>user===42}
+    const add="#添加B站推送 " + uid
+    expect(await plugin.fallback(add,{...owner,user_id:43,isMaster:true})).toContain("主人")
+    expect(await plugin.fallback(add,{...owner,isDelegated:true})).toContain("主人")
+    expect(await plugin.fallback(add,{...owner,adapter:undefined})).toContain("主人")
+    expect(await plugin.fallback(add,owner)).toContain("公开昵称")
+    expect(await plugin.fallback("#B站全部订阅列表",owner)).toMatchObject({type:"forward",nodes:[expect.stringContaining("公开昵称")]})
+    expect(await plugin.fallback("#执行B站任务",owner)).toBe("订阅存储未连接。")
+  } finally { await plugin.dispose() }
+})
+
 test("B站旧查人指令保留开放资料、搜索粉丝数和规范直播间链接",async()=>{
   const root=await directory()
   const paths=[]

@@ -26,6 +26,12 @@ function target(context) {
   if (chat && bot) return { kind,chat,bot }
 }
 
+function isSubscriptionOwner(context) {
+  if (context.adapter !== "milky") return context.isMaster === true
+  const user = context.user_id
+  return context.isDelegated !== true && Number.isSafeInteger(user) && user > 0 && context.isBotMaster?.(user) === true
+}
+
 function editArguments(input,provider) {
   const selected = new Set()
   let rest = input.trim()
@@ -69,7 +75,7 @@ export async function createSubscriptionModule(services, { providers = {bilibili
     const current=target(context)
     try {
       if (match) {
-        if (context.isMaster !== true) return "只有机器人主人可以修改"+describe(provider)+"。"
+        if (!isSubscriptionOwner(context)) return "只有机器人主人可以修改"+describe(provider)+"。"
         if (!current) return "请在订阅要发送的群聊或私聊中设置。"
         const args=editArguments(match[3],provider)
         if (!args) return "请在指令末尾填写有效的纯数字 UID。"
@@ -89,7 +95,7 @@ export async function createSubscriptionModule(services, { providers = {bilibili
         return updated ? "已更新"+describe(provider)+"\n"+updated.name+"："+args.uid : "当前会话没有订阅该 UID。"
       }
       if (view) {
-        if (view[2] && context.isMaster !== true) return "只有机器人主人可以查看全部"+describe(provider)+"。"
+        if (view[2] && !isSubscriptionOwner(context)) return "只有机器人主人可以查看全部"+describe(provider)+"。"
         if (!view[2] && !current) return "请在群聊或私聊中查询当前会话。"
         const all=await config.routes(provider.id)
         if (!view[2]) return display(provider,all.filter(item=>item.kind===current.kind && item.chat===current.chat && item.bot===current.bot),describe(provider))
@@ -103,7 +109,7 @@ export async function createSubscriptionModule(services, { providers = {bilibili
         return blocks.size ? {type:"forward",nodes:[...blocks].map(([name,rows])=>display(provider,rows,name))} : describe(provider)+"当前没有订阅。"
       }
       if (run) {
-        if (context.isMaster !== true) return "只有机器人主人可以执行"+describe(provider)+"任务。"
+        if (!isSubscriptionOwner(context)) return "只有机器人主人可以执行"+describe(provider)+"任务。"
         if (!getRedis()) return "订阅存储未连接。"
         const task=dispatch.run(provider.id)
         if (!task) return "订阅任务正在执行或已停止。"

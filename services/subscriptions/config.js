@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import YAML from "yaml"
 
@@ -13,7 +13,10 @@ function map(value, path) {
 }
 
 async function read(path) {
-  try { return map(YAML.parse(await readFile(path,"utf8")) ?? {}, path) }
+  try {
+    const raw = await readFile(path, "utf8")
+    return { raw, data: map(YAML.parse(raw) ?? {}, path) }
+  }
   catch (error) { if (error.code !== "ENOENT") throw error }
 }
 
@@ -90,13 +93,45 @@ export function createSubscriptionConfig(dataDirectory, lockFile) {
   async function effective(id,name) {
     const guoba = file(id,name + ".guoba.support")
     const preferred = await read(guoba)
-    if (preferred !== undefined) return { path:guoba, data:preferred }
+    if (preferred !== undefined) return { path: guoba, ...preferred }
     const path = file(id,name)
-    return {path,data:await read(path) ?? {}}
+    return { path, ...(await read(path) ?? { raw: "", data: {} }) }
   }
   return {
     async settings(id) { return settingsFor((await effective(id,"config")).data) },
     async routes(id) { return routesFrom((await effective(id,"push")).data) },
+    async editSettings(id, changes) {
+      const path = file(id, "config.guoba.support")
+      const folder = dirname(path)
+      await mkdir(folder, { recursive: true, mode: 0o700 })
+      const lock = await lockFile(join(folder, ".config-lock.sqlite"), "动态推送设置")
+      try {
+        const { raw, data } = await effective(id, "config")
+        const entries = Object.entries(changes(settingsFor(data)))
+        if (!entries.length) return
+
+        const document = YAML.parseDocument(raw)
+        if (!YAML.isMap(document.contents)) document.contents = document.createNode({})
+        for (const [field, value] of entries) document.set(field, value)
+        let mode = 0o600
+        try {
+          const current = await lstat(path)
+          if (!current.isFile()) throw new Error("锅巴覆盖配置须为普通文件。")
+          mode = current.mode & 0o777
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error
+        }
+        const temporary = path + "." + crypto.randomUUID() + ".tmp"
+        try {
+          await writeFile(temporary, document.toString(), { mode, flag: "wx" })
+          await rename(temporary, path)
+        } finally {
+          await rm(temporary, { force: true })
+        }
+      } finally {
+        lock.close()
+      }
+    },
     async update(id, destination, uid, operation, selected, allTypes, name) {
       const folder = dirname(file(id,"push"))
       await mkdir(folder,{recursive:true,mode:0o700})

@@ -7,7 +7,7 @@ import { extractDouyinTarget, resolveDouyinTarget } from "../services/douyin/lin
 import { generateABogus } from "../services/douyin/signature.js"
 import { normalizeDouyinWork } from "../services/douyin/model.js"
 import { fetchCdn } from "../services/media/cdn.js"
-import { sendMediaFile } from "../services/media/files.js"
+import { mediaDeliveryUnknown, sendMediaFile } from "../services/media/files.js"
 import { articlePages, buildMediaMessageText } from "../services/media/message.js"
 
 const directories = []
@@ -81,7 +81,7 @@ test("发送保留显示文件名并按视频阈值改用上传，未确认时�
   await sendMediaFile(event,video,{file_name:"作品 15%.mp4"})
   await sendMediaFile(event,video,{file_name:"作品 15%.mp4",video_size_limit_mb:0.000001})
   expect(sent).toEqual([["video","作品 15%.mp4","小文件"],["file","作品 15%.mp4","小文件"]])
-  await expect(sendMediaFile({...event,deliverMedia:async () => "unknown"},video)).rejects.toThrow("未确认")
+  await expect(sendMediaFile({...event,deliverMedia:async () => "unknown"},video)).rejects.toMatchObject({code:mediaDeliveryUnknown})
   expect(sent).toHaveLength(2)
 })
 

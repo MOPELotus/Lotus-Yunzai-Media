@@ -13,7 +13,7 @@ import {
   resolveCommandPath,
 } from "../services/bilibili/service.js"
 import { buildMediaMessageText } from "../services/media/message.js"
-import { sendMediaFile, mediaFailureMessage } from "../services/media/files.js"
+import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../services/media/files.js"
 import { ToolInstallerService } from "../services/tools/installer.js"
 
 const searchCache = new Map()
@@ -300,7 +300,7 @@ export class LotusBilibili extends BasePlugin {
       badge: "失败",
       message: diskFull ? "服务器磁盘空间不足，暂时无法下载或合并视频。" : error.message,
       userId: this.e.user_id,
-      items: [
+      items: error.code === mediaDeliveryUnknown ? [] : [
         { label: "建议", value: diskFull ? "请联系机器人主人清理磁盘空间后重试。" : "检查链接是否有效，或稍后重试。" },
       ],
     }, {

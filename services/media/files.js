@@ -19,6 +19,11 @@ export function safeMediaName(value = "media") {
 }
 
 const mediaUploadQueues = new Map()
+export const mediaDeliveryUnknown = "MEDIA_DELIVERY_UNKNOWN"
+
+function deliveryUnknown(message) {
+  return Object.assign(new Error(message), { code: mediaDeliveryUnknown })
+}
 
 export async function sendMediaFile(e, file, config = {}) {
   // QQ maps equal file contents to the same internal cache even when the
@@ -52,7 +57,7 @@ async function sendIsolatedMediaFile(e, file, config = {}) {
   if (e.deliverMedia) {
     const result = await e.deliverMedia({ path: file, name, type })
     if (result === "confirmed") return true
-    if (result === "unknown") throw new Error("媒体发送结果未确认，请在会话中核对。")
+    if (result === "unknown") throw deliveryUnknown("媒体发送结果未确认，请在会话中核对。")
   }
 
   // The byte transport remains available for hosts without file-backed delivery.
@@ -61,7 +66,7 @@ async function sendIsolatedMediaFile(e, file, config = {}) {
   if (type === "file" && e.uploadFile) {
     const result = await e.uploadFile({ name, bytes })
     if (result === "confirmed") return true
-    if (result === "unknown") throw new Error("文件发送结果未确认，请在会话中核对。")
+    if (result === "unknown") throw deliveryUnknown("文件发送结果未确认，请在会话中核对。")
   } else if (type !== "file" && await e.reply({ type, data: { file: bytes, name } })) {
     return true
   }

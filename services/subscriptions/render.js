@@ -69,12 +69,27 @@ function mediaFor(provider, item, settings) {
     .slice(0,settings.pictureLimit)
 }
 
+function textDetails(post) {
+  const details = post.activity
+  if (!details) return []
+  if (post.type === "DYNAMIC_TYPE_AV") {
+    const stats = [["弹幕", details.bullets], ["播放", details.views], ["点赞", details.likes],
+      ["评论", details.comments], ["转发", details.shares]]
+    return [stats.filter(([,value]) => value !== undefined).map(([label,value]) => value + label).join(" • ")]
+  }
+  if (post.type === "DYNAMIC_TYPE_LIVE_RCMD") {
+    return [details.area && `分区：${details.area}`, details.viewers !== undefined && `${details.viewers}人看过`]
+  }
+  return []
+}
+
 function textMessages(provider, post, settings) {
   const heading = "【" + provider.label + (provider.typeNames[post.type] || "动态") + "】" + post.author
-  const elements = [heading,time.format(post.createdAt*1000),textBlock(post,settings)]
+  const posted = post.activity?.openedAt ? "开播：" + time.format(post.activity.openedAt*1000) : time.format(post.createdAt*1000)
+  const elements = [heading,posted,textBlock(post,settings),...textDetails(post)]
   if (post.forwarded) elements.push("转发 · " + post.forwarded.author,textBlock(post.forwarded,settings))
-  elements.push(post.url)
-  const message = elements.filter(Boolean).join("\n")
+  elements.push(post.activity?.roomUrl ? "直播链接：" + post.activity.roomUrl : post.url)
+  const message = {type:"text",text:elements.filter(Boolean).join("\n")}
   const media = [...new Set([...mediaFor(provider,post,settings),...(post.forwarded?mediaFor(provider,post.forwarded,settings):[])])]
     .slice(0,settings.pictureLimit).map(file=>({type:"image",file}))
   return media.length ? (settings.merge ? [[message,...media]] : [message,...media]) : [message]

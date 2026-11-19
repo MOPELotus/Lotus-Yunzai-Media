@@ -38,6 +38,29 @@ function liveInfo(content) {
   catch { return }
 }
 
+function archiveActivity(archive, dynamicStats) {
+  return {
+    views: publicCount(archive?.stat?.play),
+    bullets: publicCount(archive?.stat?.danmaku),
+    likes: publicCount(dynamicStats?.like?.count),
+    comments: publicCount(dynamicStats?.comment?.count),
+    shares: publicCount(dynamicStats?.forward?.count),
+  }
+}
+
+function streamActivity(live, roomUrl) {
+  const parent = typeof live?.parent_area_name === "string" ? live.parent_area_name.trim().slice(0, 80) : ""
+  const child = typeof live?.area_name === "string" ? live.area_name.trim().slice(0, 80) : ""
+  const value = live?.live_start_time
+  const start = typeof value === "string" && /^\d+$/u.test(value) ? Number(value) : value
+  return {
+    area: parent && child && parent !== child ? `${parent} (${child})` : child || parent,
+    openedAt: Number.isSafeInteger(start) && start > 0 && Number.isFinite(new Date(start * 1000).getTime()) ? start : undefined,
+    viewers: publicCount(live?.watched_show?.num),
+    roomUrl: roomUrl && URL.parse(roomUrl)?.hostname === "live.bilibili.com" ? roomUrl : undefined,
+  }
+}
+
 function profileLive(value) {
   const roomId = accountId(value?.roomid)
   if (!roomId) return
@@ -69,11 +92,13 @@ export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
   const list = opus?.pics ?? major.draw?.items
   let images = Array.isArray(list) ? list.map(item => picture(item?.url ?? item?.src)).filter(Boolean) : []
   let cover
+  let activity
   if (type === "DYNAMIC_TYPE_AV") {
     title = major.archive?.title ?? title
     content = richText(major.archive?.desc) || content
     url = page(major.archive?.jump_url) || url
     cover = picture(major.archive?.cover)
+    activity = archiveActivity(major.archive, raw.modules?.module_stat)
   } else if (type === "DYNAMIC_TYPE_ARTICLE") {
     title = major.article?.title ?? title
     content ||= richText(major.article?.desc)
@@ -82,12 +107,14 @@ export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
   } else if (type === "DYNAMIC_TYPE_LIVE_RCMD") {
     const live = liveInfo(major.live_rcmd?.content)
     title = live?.title ?? major.live?.title ?? title
-    url = page(live?.link ?? major.live?.jump_url) || url
+    const roomUrl = page(live?.link ?? major.live?.jump_url)
+    url = roomUrl || url
     cover = picture(live?.cover ?? major.live?.cover)
+    activity = streamActivity(live ?? major.live, roomUrl)
   }
   return {
     id, uid, author: typeof author.name === "string" ? author.name : uid, createdAt, type,
-    title: typeof title === "string" ? title : "", content, url, images, cover, avatar: picture(author.face),
+    title: typeof title === "string" ? title : "", content, url, images, cover, activity, avatar: picture(author.face),
     forwarded: allowForward && type === "DYNAMIC_TYPE_FORWARD" ? normalizeBiliDynamic(raw.orig, undefined, false) : undefined,
   }
 }

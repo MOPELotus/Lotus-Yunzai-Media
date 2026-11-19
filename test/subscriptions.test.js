@@ -9,6 +9,7 @@ import { createBiliProvider, biliTypes, normalizeBiliDynamic } from "../services
 import { articleContent } from "../services/subscriptions/bilibili/article.js"
 import { createSubscriptionDelivery, receiptKey, useDynamicForward } from "../services/subscriptions/delivery.js"
 import { createSubscriptionModule } from "../services/subscriptions/module.js"
+import { makeDynamicMessages } from "../services/subscriptions/render.js"
 
 const temp=[]
 async function directory() {
@@ -40,6 +41,37 @@ test("B站动态解析适配 Yuki 的 Opus 图文、直播、原转发与来源�
   }})}}}),uid)
   expect(live).toMatchObject({title:"直播",url:"https://live.bilibili.com/12",cover:"https://i0.hdslb.com/live.jpg"})
   expect(normalizeBiliDynamic(original,"123")).toBeUndefined()
+})
+
+test("B站视频和直播的文字推送保留原动态类别字段和明确的链接",async()=>{
+  const provider=createBiliProvider()
+  const settings=settingsFor({pushMsgMode:0,mergeTextPic:0})
+  const videoRaw=raw("DYNAMIC_TYPE_AV",{major:{archive:{title:"视频标题",desc:"视频简介",jump_url:"//www.bilibili.com/video/BV1234567890",
+    cover:"//i0.hdslb.com/video.jpg",stat:{play:"1.2万",danmaku:"0"},
+  }}})
+  videoRaw.modules.module_stat={like:{count:23},comment:{count:0},forward:{count:"无数据"}}
+  const [video,attachment]=await makeDynamicMessages(provider,normalizeBiliDynamic(videoRaw,uid),settings)
+  expect(video.type).toBe("text")
+  expect(video.text).toContain("0弹幕 • 1.2万播放 • 23点赞 • 0评论")
+  expect(video.text).not.toContain("转发")
+  expect(video.text).toEndWith("https://www.bilibili.com/video/BV1234567890")
+  expect(attachment).toEqual({type:"image",file:"https://i0.hdslb.com/video.jpg"})
+
+  const liveRaw=({link,live_start_time})=>raw("DYNAMIC_TYPE_LIVE_RCMD",{major:{live_rcmd:{content:JSON.stringify({live_play_info:{
+    title:"直播标题",link,parent_area_name:"单机游戏",area_name:"原神",live_start_time,watched_show:{num:0},
+  }})}}})
+  const [live]=await makeDynamicMessages(provider,normalizeBiliDynamic(liveRaw({
+    link:"//live.bilibili.com/12",live_start_time:seen-60,
+  }),uid),settings)
+  expect(live.text).toContain("开播：2023/11/15 06:12:20")
+  expect(live.text).toContain("分区：单机游戏 (原神)\n0人看过")
+  expect(live.text).toEndWith("直播链接：https://live.bilibili.com/12")
+  const [fallback]=await makeDynamicMessages(provider,normalizeBiliDynamic(liveRaw({
+    link:"https://other.invalid/12",live_start_time:true,
+  }),uid),settings)
+  expect(fallback.text).not.toContain("开播：")
+  expect(fallback.text).not.toContain("直播链接：")
+  expect(fallback.text).toEndWith("https://m.bilibili.com/dynamic/12234455")
 })
 
 test("B站匿名查询明确区分 HTTP 拒绝并读取原公开文章内嵌数据",async()=>{

@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test"
 import { createWeiboProvider } from "../services/subscriptions/weibo/index.js"
+import { settingsFor } from "../services/subscriptions/config.js"
+import { makeDynamicMessages } from "../services/subscriptions/render.js"
 
 const uid = "2803301701"
 const created_at = "Thu Nov 19 09:20:00 +0800 2026"
@@ -56,6 +58,9 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
     })
     expect(posts[1]).toMatchObject({ type: "DYNAMIC_TYPE_ARTICLE", content: "只有正文", url: "https://m.weibo.cn/detail/12345" })
     expect(posts[2]).toMatchObject({ type: "DYNAMIC_TYPE_AV", title: "视频标题", cover: "https://wx1.sinaimg.cn/cover.jpg" })
+    const [repost]=await makeDynamicMessages(source,posts[0],settingsFor({pushMsgMode:0,mergeTextPic:0}))
+    expect(repost.text).toContain(`转发链接：https://weibo.com/${uid}/Qq012Aa\n原帖 · 图文 · 来源账号`)
+    expect(repost.text).toEndWith("原帖 <文字>\n原帖链接：https://weibo.com/42/Qq012Ba")
     expect(requests.map(({ url }) => Object.fromEntries(url.searchParams))).toEqual([
       { type: "uid", value: uid, containerid: `100505${uid}` }, { containerid: `107603${uid}` },
     ])

@@ -74,6 +74,19 @@ test("B站视频和直播的文字推送保留原动态类别字段和明确的�
   expect(fallback.text).toEndWith("https://m.bilibili.com/dynamic/12234455")
 })
 
+test("B站转发先给转发帖链接，再给原帖类别、正文和原帖链接",async()=>{
+  const provider=createBiliProvider()
+  const settings=settingsFor({pushMsgMode:0})
+  const original=raw("DYNAMIC_TYPE_WORD",{desc:{text:"原帖正文"}})
+  const repost={...raw("DYNAMIC_TYPE_FORWARD",{desc:{text:"转发正文"}}),id_str:"12234456",orig:original}
+  const [message]=await makeDynamicMessages(provider,normalizeBiliDynamic(repost,uid),settings)
+  expect(message.text).toContain("转发正文\n转发链接：https://m.bilibili.com/dynamic/12234456\n原帖 · 图文 · 试验发布者")
+  expect(message.text).toEndWith("原帖正文\n原帖链接：https://m.bilibili.com/dynamic/12234455")
+  const [unavailable]=await makeDynamicMessages(provider,normalizeBiliDynamic({...repost,orig:null},uid),settings)
+  expect(unavailable.text).toEndWith("转发链接：https://m.bilibili.com/dynamic/12234456")
+  expect(unavailable.text).not.toContain("原帖链接")
+})
+
 test("B站匿名查询明确区分 HTTP 拒绝并读取原公开文章内嵌数据",async()=>{
   const requests=[]
   const feed=createBiliProvider({fetch:async (u,options)=>{

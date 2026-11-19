@@ -83,12 +83,28 @@ function textDetails(post) {
   return []
 }
 
+function category(provider, post) {
+  return provider.typeNames[post.type] || "动态"
+}
+
+function published(post) {
+  return post.activity?.openedAt ? "开播：" + time.format(post.activity.openedAt*1000) : time.format(post.createdAt*1000)
+}
+
 function textMessages(provider, post, settings) {
-  const heading = "【" + provider.label + (provider.typeNames[post.type] || "动态") + "】" + post.author
-  const posted = post.activity?.openedAt ? "开播：" + time.format(post.activity.openedAt*1000) : time.format(post.createdAt*1000)
-  const elements = [heading,posted,textBlock(post,settings),...textDetails(post)]
-  if (post.forwarded) elements.push("转发 · " + post.forwarded.author,textBlock(post.forwarded,settings))
-  elements.push(post.activity?.roomUrl ? "直播链接：" + post.activity.roomUrl : post.url)
+  const heading = `【${provider.label}${category(provider,post)}】${post.author}`
+  const repost = post.type === "DYNAMIC_TYPE_FORWARD"
+  const linkLabel = post.activity?.roomUrl ? "直播链接" : repost ? "转发链接" : "链接"
+  const elements = [heading,published(post),textBlock(post,settings),...textDetails(post),`${linkLabel}：${post.url}`]
+  const original = post.forwarded
+  if (original) {
+    elements.push(`原帖 · ${category(provider,original)} · ${original.author}`,published(original),
+      textBlock(original,settings),...textDetails(original))
+    if (original.url !== post.url) {
+      const label = original.activity?.roomUrl ? "原帖直播链接" : "原帖链接"
+      elements.push(`${label}：${original.url}`)
+    }
+  }
   const message = {type:"text",text:elements.filter(Boolean).join("\n")}
   const media = [...new Set([...mediaFor(provider,post,settings),...(post.forwarded?mediaFor(provider,post.forwarded,settings):[])])]
     .slice(0,settings.pictureLimit).map(file=>({type:"image",file}))
@@ -169,8 +185,11 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
   }
   pushImages(images)
   if (post.forwarded) {
-    drawBlocks.push({lines:breakLines(metrics,"转发 · "+post.forwarded.author,22,748,true),size:22,bold:true,gap:12})
-    const content=textBlock(post.forwarded,settings)
+    const original = post.forwarded
+    const heading = `原帖 · ${category(provider,original)} · ${original.author}`
+    drawBlocks.push({lines:breakLines(metrics,heading,22,748,true),size:22,bold:true,gap:2})
+    drawBlocks.push({lines:[published(original)],size:16,gap:10,color:"#666"})
+    const content=textBlock(original,settings)
     if (content) drawBlocks.push({lines:breakLines(metrics,content,22,748),size:22,gap:12})
     pushImages(forwarded)
   }
@@ -209,12 +228,12 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
       const name=breakLines(metrics,post.author,25,520,true).slice(0,1)
       linesAt(ctx,name,left,51,25,ink,true)
       linesAt(ctx,[time.format(post.createdAt*1000)],left,88,16,"#666")
-      linesAt(ctx,[provider.label+" · "+(provider.typeNames[post.type]||"动态")],625,59,20,"#bb507e",true)
+      linesAt(ctx,[provider.label+" · "+category(provider,post)],625,59,20,"#bb507e",true)
       ctx.setLineDash([6,5]);ctx.strokeStyle=divider
       ctx.beginPath();ctx.moveTo(40,142);ctx.lineTo(788,142);ctx.stroke()
       let y=158
       for(const block of blocks){
-        if(block.lines) linesAt(ctx,block.lines,40,y,block.size,ink,block.bold)
+        if(block.lines) linesAt(ctx,block.lines,40,y,block.size,block.color || ink,block.bold)
         else if(block.row) for(const [column,img] of block.row.entries()){
           drawPicture(ctx,img,40+column*(block.cellWidth+8),y,block.cellWidth,block.height,6,block.row.length>1)
         }
@@ -222,7 +241,8 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
       }
       ctx.strokeStyle=pink;ctx.beginPath();ctx.moveTo(40,y+4);ctx.lineTo(788,y+4);ctx.stroke();ctx.setLineDash([])
       drawPicture(ctx,qr,40,y+18,114,114,4)
-      linesAt(ctx,["扫码查看原动态",pages.length>1?"第 "+(index+1)+" / "+pages.length+" 页":provider.label+"动态订阅"],179,y+49,20,"#555")
+      const qrCaption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
+      linesAt(ctx,[qrCaption,pages.length>1?"第 "+(index+1)+" / "+pages.length+" 页":provider.label+"动态订阅"],179,y+49,20,"#555")
     },process.env.LOTUS_SKIA_MODE||"auto")
     onRender?.(rendered.engine)
     return rendered.png

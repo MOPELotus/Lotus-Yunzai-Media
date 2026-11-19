@@ -40,6 +40,26 @@ function result() {
   return { confirmed:0, rejected:0, unknown:0, skipped:0, failed:0 }
 }
 
+const maxForwardPosts = 99
+
+function postNode(payloads) {
+  return payloads.flatMap(payload => Array.isArray(payload) ? payload : [payload])
+}
+
+// Yuki aggregates all unrepeated posts in the destination, using a strict threshold.
+export function useDynamicForward(posts, settings) {
+  if (!settings.mergeForward) return false
+  let images = 0, textLength = 0
+  for (const {payloads} of posts) {
+    for (const part of postNode(payloads)) {
+      if (typeof part === "string") textLength += part.length
+      else if (part?.type === "image") images++
+      else if (part?.type === "text") textLength += (part.text ?? part.data?.text ?? "").length
+    }
+  }
+  return images > settings.forwardPictureThreshold || textLength > settings.forwardTextThreshold
+}
+
 function destinationKey(route) {
   return [route.kind,route.chat,route.bot].join(":")
 }
@@ -54,13 +74,15 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     const bot = Number(route.bot), chat = Number(route.chat)
     if (!Number.isSafeInteger(bot) || !Number.isSafeInteger(chat)) return
     const session = current.find(session => session.botId === bot)
+    const forwardTarget = route.kind === "group" ? {groupId:chat} : {userId:chat}
+    const forward = session?.sendForward ? nodes => session.sendForward(forwardTarget,nodes) : undefined
     if (route.kind === "private") {
-      if (session && await session.isFriend(chat)) return message => session.sendPrivate(chat,message)
+      if (session && await session.isFriend(chat)) return {send:message=>session.sendPrivate(chat,message),forward}
       return
     }
 
     if (session) {
-      if (await session.isGroupMember(chat,bot)) return message => session.sendGroup(chat,message)
+      if (await session.isGroupMember(chat,bot)) return {send:message=>session.sendGroup(chat,message),forward}
       return
     }
     if (groups?.onlineBots?.().includes(bot)) {
@@ -70,10 +92,63 @@ export function createSubscriptionDelivery({providers,config,groups,notification
           .then(values => new Set(values.map(value=>value.id))).catch(()=>new Set()))
       }
       if (!(await groupChecks.get(key)).has(chat)) return
-      return async message => {
+      return {send:async message => {
         try { return Number.isSafeInteger(await groups.sendGroup(bot,chat,message)) ? "confirmed" : "unknown" }
         catch (error) { return error?.delivery === "not-sent" ? "rejected" : "unknown" }
+      }}
+    }
+  }
+
+  async function finish(redis, item, state) {
+    await redis.eval(settleLua,{keys:item.keys,arguments:[item.token,state]})
+  }
+
+  async function sendSeparately(send,item) {
+    let sent = 0
+    for (const payload of item.payloads) {
+      if (active.aborted) return sent ? "unknown" : "rejected"
+      try {
+        const state = await send(payload)
+        if (state !== "confirmed") return state === "rejected" && !sent ? "rejected" : "unknown"
+        sent++
+      } catch { return "unknown" }
+    }
+    return sent ? "confirmed" : "rejected"
+  }
+
+  async function dispatchTarget(provider, redis, sender, entries, settings, report) {
+    if (!entries.length) return
+    const route=entries[0].route
+    if (!active.aborted && route.kind === "group" && settings.liveAtAll && settings.liveGroups.has(route.chat) &&
+        entries.some(entry=>entry.post.type === "DYNAMIC_TYPE_LIVE_RCMD")) {
+      const mark = "Yz:yuki:bili:upPush:group:" + route.chat + ":liveAtAllMark"
+      try {
+        if (await redis.set(mark,"1",{NX:true,EX:settings.liveCooldown}) === "OK") {
+          await sender.send([{type:"at",qq:"all"}," "+provider.label+" 直播提醒"])
+        }
+      } catch { /* The dynamic itself is still deliverable. */ }
+    }
+
+    if (sender.forward && useDynamicForward(entries,settings)) {
+      for (let index=0;index<entries.length;index+=maxForwardPosts) {
+        const batch=entries.slice(index,index+maxForwardPosts)
+        let status = "rejected"
+        if (!active.aborted) {
+          try { status = await sender.forward(["有新的"+provider.label+"动态了~",...batch.map(item=>postNode(item.payloads))]) }
+          catch { status = "unknown" }
+        }
+        for (const item of batch) {
+          const state = status === "rejected" ? await sendSeparately(sender.send,item) : status === "confirmed" ? "confirmed" : "unknown"
+          await finish(redis,item,state)
+          report[state]++
+        }
       }
+      return
+    }
+    for (const item of entries) {
+      const state = await sendSeparately(sender.send,item)
+      await finish(redis,item,state)
+      report[state]++
     }
   }
 
@@ -84,68 +159,75 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     const [settings,routes] = await Promise.all([config.settings(provider.id),config.routes(provider.id)])
     const current = notifications?.() ?? []
     const groupChecks = new Map(), destinations = new Map(), postsByUid = new Map()
+    for (const route of routes) {
+      const key = destinationKey(route)
+      let list = destinations.get(key)
+      if (!list) { list=[]; destinations.set(key,list) }
+      list.push(route)
+    }
     const wall = Math.floor(now()/1000)
     let requested = false
-    for (const route of routes) {
+    async function postsFor(uid) {
+      if (!postsByUid.has(uid)) {
+        if (requested && settings.delay > 0) {
+          const min = Math.min(settings.delay,2000)
+          await pause(min + Math.floor(Math.random()*(settings.delay-min+1)),undefined,{signal:active})
+        }
+        requested = true
+        try { postsByUid.set(uid,await provider.fetchPosts(uid,{signal:active,oldest:wall-settings.horizon})) }
+        catch (error) {
+          postsByUid.set(uid,[])
+          if (!active.aborted) {
+            report.failed++
+            console.warn("[媒体订阅] " + provider.label + "动态读取失败：" + error.message)
+          }
+        }
+      }
+      return postsByUid.get(uid)
+    }
+    for (const [target,subscriptions] of destinations) {
       if (active.aborted) break
-      const target = destinationKey(route)
       try {
-        if (!destinations.has(target)) destinations.set(target,await senderFor(route,current,groupChecks))
-        const send = destinations.get(target)
-        if (!send) { report.skipped++; continue }
-        if (!postsByUid.has(route.uid)) {
-          if (requested && settings.delay > 0) {
-            const min = Math.min(settings.delay,2000)
-            await pause(min + Math.floor(Math.random()*(settings.delay-min+1)),undefined,{signal:active})
-          }
-          requested = true
-          try { postsByUid.set(route.uid,await provider.fetchPosts(route.uid,{signal:active,oldest:wall-settings.horizon})) }
-          catch (error) {
-            postsByUid.set(route.uid,[])
-            if (!active.aborted) {
-              report.failed++
-              console.warn("[媒体订阅] " + provider.label + "动态读取失败：" + error.message)
+        const sender = await senderFor(subscriptions[0],current,groupChecks)
+        if (!sender) { report.skipped+=subscriptions.length; continue }
+        const candidates = new Map()
+        for (const route of subscriptions) {
+          if (active.aborted) break
+          for (const post of await postsFor(route.uid)) {
+            if (active.aborted) break
+            if (!allowedPost(post,route,settings,wall) || candidates.has(post.id)) continue
+            const legacy = receiptKey(provider.id,route,post)
+            if (await redis.get(legacy) !== null) { report.skipped++; continue }
+            try {
+              const payloads=await render(provider,post,settings,{signal:active})
+              candidates.set(post.id,{route,post,payloads,legacy})
+            } catch (error) {
+              if (!active.aborted) {
+                report.failed++
+                console.warn("[媒体订阅] " + provider.label + "动态构建失败：" + error.message)
+              }
             }
           }
         }
-        const posts = postsByUid.get(route.uid)
-        for (const post of [...posts].sort((a,b)=>a.createdAt-b.createdAt)) {
-          if (active.aborted) return report
-          if (!allowedPost(post,route,settings,wall)) continue
-          const legacy = receiptKey(provider.id,route,post)
-          const journal = "lotus-yunzai:media:subscription:" + provider.id + ":" + route.kind + ":" + route.chat + ":" + post.id
-          if (await redis.get(legacy) !== null) { report.skipped++; continue }
-          const payloads = await render(provider,post,settings,{signal:active})
-          const currentRoutes = await config.routes(provider.id)
-          if (active.aborted || !currentRoutes.some(item => destinationKey(item) === target && item.uid === post.uid &&
-              (!item.types.length || item.types.includes(post.type)))) continue
-          const token = "pending:" + crypto.randomUUID()
-          const keys = [legacy,journal]
-          if (await redis.eval(claimLua,{keys,arguments:[token,String(holdSeconds)]}) !== 1) { report.skipped++; continue }
-          let state = "rejected", sent = 0
-          try {
-            if (!active.aborted && route.kind === "group" && post.type === "DYNAMIC_TYPE_LIVE_RCMD" &&
-                settings.liveAtAll && settings.liveGroups.has(route.chat)) {
-              const mark = "Yz:yuki:bili:upPush:group:" + route.chat + ":liveAtAllMark"
-              if (await redis.set(mark,"1",{NX:true,EX:settings.liveCooldown}) === "OK") {
-                try { await send([{type:"at",qq:"all"}," "+provider.label+" 直播提醒"]) }
-                catch { /* The dynamic itself is still deliverable. */ }
-              }
-            }
-            for (const payload of payloads) {
-              if (active.aborted) { state = sent ? "unknown" : "rejected"; break }
-              const next = await send(payload)
-              if (next !== "confirmed") {
-                state = next === "rejected" && !sent ? "rejected" : "unknown"
-                break
-              }
-              state = "confirmed"
-              sent++
-            }
-          } catch { state = "unknown" }
-          await redis.eval(settleLua,{keys,arguments:[token,state]})
-          report[state]++
+        if (!candidates.size || active.aborted) continue
+        const currentRoutes = (await config.routes(provider.id)).filter(route=>destinationKey(route)===target)
+        const entries=[]
+        try {
+          for (const item of [...candidates.values()].sort((a,b)=>a.post.createdAt-b.post.createdAt)) {
+            if (active.aborted) break
+            const {post,route,legacy}=item
+            if (!currentRoutes.some(route=>route.uid===post.uid && (!route.types.length || route.types.includes(post.type)))) continue
+            const journal = "lotus-yunzai:media:subscription:" + provider.id + ":" + route.kind + ":" + route.chat + ":" + post.id
+            const token = "pending:" + crypto.randomUUID()
+            const keys = [legacy,journal]
+            if (await redis.eval(claimLua,{keys,arguments:[token,String(holdSeconds)]}) !== 1) { report.skipped++; continue }
+            entries.push({...item,token,keys})
+          }
+        } catch (error) {
+          await Promise.allSettled(entries.map(item=>finish(redis,item,"rejected")))
+          throw error
         }
+        await dispatchTarget(provider,redis,sender,entries,settings,report)
       } catch (error) {
         if (!active.aborted) {
           report.failed++

@@ -7,7 +7,7 @@ import { lockFile } from "../../../lib/file-lock.ts"
 import { changeTypes, createSubscriptionConfig, settingsFor } from "../services/subscriptions/config.js"
 import { createBiliProvider, biliTypes, normalizeBiliDynamic } from "../services/subscriptions/bilibili/index.js"
 import { articleContent } from "../services/subscriptions/bilibili/article.js"
-import { createSubscriptionDelivery, receiptKey } from "../services/subscriptions/delivery.js"
+import { createSubscriptionDelivery, receiptKey, useDynamicForward } from "../services/subscriptions/delivery.js"
 import { createSubscriptionModule } from "../services/subscriptions/module.js"
 
 const temp=[]
@@ -109,21 +109,7 @@ test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键�
   const kv=new Map()
   const legacy=receiptKey("bilibili",route,{id:"already"})
   kv.set(legacy,"1")
-  const redis={
-    get:async key=>kv.get(key) ?? null,
-    eval:async (script,{keys,arguments:[token,argument]})=>{
-      if (script.includes("EXISTS")) {
-        if (keys.some(key=>kv.has(key))) return 0
-        for (const key of keys) kv.set(key,token)
-      } else if (argument==="rejected") {
-        for (const key of keys) if (kv.get(key)===token) kv.delete(key)
-      } else {
-        kv.set(keys[0],"1")
-        kv.set(keys[1],argument)
-      }
-      return 1
-    },
-  }
+  const redis=mockReceipts(kv)
   const posts = (id,options={})=>({id,uid,type:draw,createdAt:seen,content:"准入",...options})
   let fetched=0
   const provider={id:"bilibili",label:"B站",fetchPosts:async()=>{
@@ -146,3 +132,67 @@ test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键�
     expect(receiptKey("weibo",{...route,kind:"private",chat:"42"},{id:"12233"})).toBe("Yz:yuki:weibo:upPush:private:42:12233")
   } finally { await d.dispose() }
 })
+
+
+function mockReceipts(kv) {
+  return {
+    get:async key=>kv.get(key) ?? null,
+    eval:async (script,{keys,arguments:[token,argument]})=>{
+      if (script.includes("EXISTS")) {
+        if (keys.some(key=>kv.has(key))) return 0
+        for (const key of keys) kv.set(key,token)
+      } else if (argument==="rejected") {
+        for (const key of keys) if (kv.get(key)===token) kv.delete(key)
+      } else {
+        kv.set(keys[0],"1")
+        kv.set(keys[1],argument)
+      }
+      return 1
+    },
+  }
+}
+
+test("沿用旧严格阈值，按会话累计文字和图数",()=>{
+  const settings=settingsFor({})
+  const img={type:"image",file:"https://i0.hdslb.com/demo.png"}
+  const first={payloads:[["A".repeat(150),img]]}
+  const second={payloads:[["B".repeat(150),img]]}
+  expect(useDynamicForward([first,second],settings)).toBe(false)
+  expect(useDynamicForward([first,second,{payloads:[img]}],settings)).toBe(true)
+  expect(useDynamicForward([first,second,{payloads:["C"]}],settings)).toBe(true)
+  expect(useDynamicForward([first,second,{payloads:[img]}],settingsFor({forwardSendDynamic:0}))).toBe(false)
+})
+
+for (const [decision,expected,groups] of [["confirmed","confirmed",0],["rejected","confirmed",2],["unknown","unknown",0]]) {
+  test("后台长动态合并转发结果 "+decision+" 决定是否改用单条",async()=>{
+    const kv=new Map(), calls=[]
+    const second={...route,uid:"4051"}
+    const provider={id:"bilibili",label:"B站",fetchPosts:async user=>[
+      {id:"post-"+user,uid:user,type:draw,createdAt:user===uid?seen:seen-1,content:"批准"},
+    ]}
+    const delivery=createSubscriptionDelivery({
+      providers:{bilibili:provider},
+      config:{settings:async()=>settingsFor({getDataRandomDelay:0,pushTaskLog:0}),
+        routes:async()=>[route,second]},
+      notifications:()=>[{
+        botId:99,
+        isGroupMember:async (group,bot)=>group===77&&bot===99,
+        sendGroup:async (group,payload)=>{calls.push(["group",group,payload]);return "confirmed"},
+        sendForward:async (target,nodes)=>{calls.push(["forward",target,nodes]);return decision},
+      }],
+      getRedis:()=>mockReceipts(kv),now:()=>seen*1000,
+      render:async (_,post)=>[[post.id,"传输内容".repeat(65)]],
+    })
+    try {
+      const record=await delivery.run("bilibili")
+      expect(record[expected]).toBe(2)
+      expect(calls.filter(call=>call[0]==="group")).toHaveLength(groups)
+      expect(calls[0]).toMatchObject(["forward",{groupId:77},["有新的B站动态了~",
+        ["post-4051","传输内容".repeat(65)],["post-"+uid,"传输内容".repeat(65)]]])
+      expect((await delivery.run("bilibili")).skipped).toBe(2)
+      expect(calls.filter(call=>call[0]==="forward")).toHaveLength(1)
+      expect(kv.get("lotus-yunzai:media:subscription:bilibili:group:77:post-"+uid)).toBe(expected)
+      expect(kv.get(receiptKey("bilibili",route,{id:"post-"+uid}))).toBe("1")
+    } finally { await delivery.dispose() }
+  })
+}

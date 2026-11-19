@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import YAML from "yaml"
@@ -133,6 +133,72 @@ test("锅巴配置优先、群与私聊分离，旧类型增删安全保留另�
   expect(written.group[77]).toEqual([{bot_id:98,uid,name:"另一机器人",type:[draw]}])
   expect(written.private[42][0].uid).toBe(uid)
   expect(YAML.parse(await readFile(join(dir,"push.yaml"),"utf8"))).toEqual({group:{77:[]}})
+})
+
+test("聊天指令修改旧订阅文档时保留注释、文件权限和相邻路由",async()=>{
+  const root=await directory()
+  const dir=join(root,"yuki-plugin","config","bilibili")
+  await mkdir(dir,{recursive:true})
+  const override=join(dir,"push.guoba.support.yaml")
+  const original=`# 文件说明
+group:
+  77: # 目标群
+    - bot_id: 99
+      uid: '401742377'
+      name: '原神' # 订阅名称
+      type: [DYNAMIC_TYPE_WORD] # 原分类
+    - {bot_id: 98, uid: '401742377', name: '另一机器人', type: []} # 另一机器人配置
+  '78': [] # 保留空群
+private:
+  '42': # 私聊配置
+    - {bot_id: 99, uid: '42', name: '好友', type: []}
+custom: &custom {mode: legacy}
+alias: *custom # 保留未使用的配置
+`
+  await writeFile(override,original)
+  await chmod(override,0o664)
+  const config=createSubscriptionConfig(root,lockFile)
+  await config.update("bilibili",route,uid,"add",[draw],Object.keys(biliTypes),"不会覆盖旧显示名")
+  const written=await readFile(override,"utf8")
+  for (const comment of ["文件说明","目标群","订阅名称","原分类","另一机器人配置","保留空群","私聊配置","保留未使用的配置"]) {
+    expect(written).toContain("# "+comment)
+  }
+  expect(written).toContain("*custom")
+  expect(written).toContain("'78': []")
+  expect((await stat(override)).mode & 0o777).toBe(0o664)
+  const persisted=YAML.parse(written), before=YAML.parse(original)
+  before.group[77][0].type.push(draw)
+  expect(persisted).toEqual(before)
+
+  await config.update("bilibili",route,uid,"add",[draw],Object.keys(biliTypes),"不变")
+  expect(await readFile(override,"utf8")).toBe(written)
+  await config.update("bilibili",route,uid,"remove",[],Object.keys(biliTypes),uid)
+  const deleted=await readFile(override,"utf8")
+  expect(deleted).toContain("# 另一机器人配置")
+  expect(YAML.parse(deleted).group[77]).toEqual([before.group[77][1]])
+})
+
+test("旧 YAML 锚点复用的会话在修改或移除来源时保留自己的订阅",async()=>{
+  const root=await directory()
+  const dir=join(root,"yuki-plugin","config","bilibili")
+  await mkdir(dir,{recursive:true})
+  const file=join(dir,"push.yaml")
+  const initial=`group:
+  77: &shared
+    - {bot_id: 99, uid: '${uid}', name: 原配置, type: [DYNAMIC_TYPE_WORD]}
+  78: *shared # 另一个群
+`
+  const config=createSubscriptionConfig(root,lockFile)
+  await writeFile(file,initial)
+  await config.update("bilibili",route,uid,"add",[draw],Object.keys(biliTypes),uid)
+  const edited=YAML.parse(await readFile(file,"utf8"))
+  expect(edited.group[77][0].type).toEqual(["DYNAMIC_TYPE_WORD",draw])
+  expect(edited.group[78][0].type).toEqual(["DYNAMIC_TYPE_WORD"])
+  await writeFile(file,initial)
+  await config.update("bilibili",route,uid,"remove",[],Object.keys(biliTypes),uid)
+  const deleted=await readFile(file,"utf8")
+  expect(deleted).toContain("# 另一个群")
+  expect(YAML.parse(deleted)).toEqual({group:{78:[{bot_id:99,uid,name:"原配置",type:["DYNAMIC_TYPE_WORD"]}]}})
 })
 
 test("原动态订阅指令保留权限、别名、分类与当前会话",async()=>{

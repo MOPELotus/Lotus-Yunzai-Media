@@ -26,6 +26,8 @@ Lotus-Yunzai 的 B 站、抖音、动态订阅和点歌模块。直接发送视�
 
 机器人主人可以私聊发送 `#音乐登录`。选择平台后，按提示继续选择扫码方式。网易云沿用合伙人账号别名，只有一条已关联的旧账号记录时会自动接续。账号引用和平台凭据保存在宿主的 `data/music/accounts.yaml`，网易云合伙人引用同步到 `data/netease/accounts.yaml`。
 
+在已绑定的主人会话中，`#TuneWeave状态` 检查网易云登录和扩展接口，`#初始化TuneWeave` 检查或初始化 TuneWeave。合伙人账号可以在主人私聊直接发送 `#合伙人登录`，等待时间和轮询间隔沿用 `netease_partner.login_timeout_ms` 与 `login_poll_ms`。这些指令沿用 `permissions.scopes.netease.partner`，扫码只更新账号记录。
+
 `config/global.yaml` 的 `music` 配置支持以下字段。
 
 | 字段 | 默认值 |

@@ -2,6 +2,8 @@ const BasePlugin = globalThis.plugin
 import { LOTUS_INTERCEPT_PRIORITY } from "../core/intercept/priority.js"
 import { canManagePackages } from "../../../lib/command-permissions.ts"
 import { readLocalConfig } from "../../../lib/config.ts"
+import { PermissionService } from "../core/permissions/service.js"
+import { TuneWeaveService } from "../services/tuneweave/service.js"
 import { safeMediaName } from "../services/media/files.js"
 import { renderStatusCard, renderTemplate } from "../core/render/service.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
@@ -12,6 +14,23 @@ const activeLogins = new Map()
 const root = new URL("../../../", import.meta.url)
 const maxInlineBytes = 16 * 1024 * 1024
 const canManageMusic = e => e.isPrivate && canManagePackages(e)
+
+function ownerPermission(event, config) {
+  if (!canManagePackages(event)) return false
+  const { scopes, ...permissions } = config.permissions || {}
+  return new PermissionService({
+    permissions: { ...permissions, scopes: { "netease.partner": { policy: "master_only" }, ...scopes } },
+  }).can(event, "netease.partner")
+}
+
+function apiOrigin(address) {
+  const url = typeof address === "string" && URL.parse(address)
+  return url && ["http:", "https:"].includes(url.protocol) ? url.origin : "地址未配置"
+}
+
+function loginTime(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : fallback
+}
 
 async function sendVoice(e, media) {
   const name = `${safeMediaName(media.track.name)}.wav`
@@ -70,6 +89,9 @@ export class LotusMusic extends BasePlugin {
         { reg: "^#(?:荷花)?音乐登录$", fnc: "login" },
         { reg: "^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$", fnc: "choice" },
         { reg: "^#音乐帮助$", fnc: "help" },
+        { reg: "^#合伙人登录$", fnc: "partnerLogin" },
+        { reg: "^#初始化TuneWeave$", fnc: "initializeTuneWeave" },
+        { reg: "^#TuneWeave状态$", fnc: "tuneWeaveStatus" },
       ] })
   }
   async init() {
@@ -141,6 +163,60 @@ export class LotusMusic extends BasePlugin {
     } catch (error) { await replyText(e, `[荷花音乐]${error.message}`) }
     return true
   }
+  async partnerLogin() {
+    const e = this.e
+    const config = await readLocalConfig(root, "global")
+    if (!e.isPrivate || !ownerPermission(e, config)) {
+      await replyText(e, "请由机器人主人在私聊登录音乐合伙人账号。")
+      return true
+    }
+
+    const key = musicSessionKey(e)
+    sessions.get(key)?.controller?.abort()
+    const api = new MusicService({ tuneweaveConfig: config.tuneweave })
+    const session = {
+      api, platform: "netease", partner: true,
+      timeoutMs: loginTime(config.netease_partner?.login_timeout_ms, 300000),
+      pollMs: loginTime(config.netease_partner?.login_poll_ms, 3000),
+    }
+    sessions.set(key, session)
+    try { await this.qr(session, key, undefined, e) }
+    catch (error) {
+      if (sessions.get(key) === session) sessions.delete(key)
+      await replyText(e, "[荷花音乐]合伙人登录失败："+error.message)
+    }
+    return true
+  }
+
+  async initializeTuneWeave() {
+    const e = this.e
+    const config = await readLocalConfig(root, "global")
+    if (!ownerPermission(e, config)) {
+      await replyText(e, "只有机器人主人可以初始化 TuneWeave。")
+      return true
+    }
+    try {
+      const api = new TuneWeaveService({ config:config.tuneweave })
+      const result = await api.initialize({ platform:"netease", onProgress:text=>replyText(e,"[荷花插件]"+text) })
+      await replyText(e, "[荷花插件]TuneWeave 初始化完成 · "+result.version+" · "+apiOrigin(result.apiUrl))
+    } catch (error) { await replyText(e,"[荷花插件]TuneWeave 初始化失败："+error.message) }
+    return true
+  }
+
+  async tuneWeaveStatus() {
+    const e = this.e
+    const config = await readLocalConfig(root, "global")
+    if (!ownerPermission(e, config)) {
+      await replyText(e, "只有机器人主人可以查看 TuneWeave 状态。")
+      return true
+    }
+    const result = await new TuneWeaveService({config:config.tuneweave}).status("netease")
+    const status = result.requiresUpdate ? "待更新" : result.ok ? "就绪" : "未就绪"
+    await replyText(e,"[荷花插件]TuneWeave "+status+" · "+(result.version || "未知版本")+"\n"+
+      apiOrigin(result.apiUrl)+"\n"+result.message)
+    return true
+  }
+
   async choice() {
     const e = this.e
     const key = musicSessionKey(e), session = sessions.get(key)
@@ -181,20 +257,26 @@ export class LotusMusic extends BasePlugin {
     if (activeLogins.has(session.platform)) throw new Error("这个平台已有扫码操作，请等它结束。")
     activeLogins.set(session.platform, session)
     session.stage = "polling"
-    session.expires = Date.now() + 180000
+    session.expires = Date.now() + (session.timeoutMs || 180000)
     session.controller = new AbortController()
     const signal = e.privateCredentialSignal
       ? AbortSignal.any([session.controller.signal, e.privateCredentialSignal]) : session.controller.signal
     try {
+      if (session.partner) await session.api.tuneweave.requireReady("netease")
+      if (signal.aborted || sessions.get(key) !== session) return
       const login=await session.api.createLogin(session.platform,e.user_id,type)
       if (signal.aborted || sessions.get(key) !== session) return
-      const image = await renderTemplate("qr-login",{title:MUSIC_PLATFORMS[session.platform]+"登录",subtitle:"公共音乐账号",badge:"SCAN",notice:"建议使用对应平台 App 扫码确认。账号供机器人点歌使用，#取消 可结束等待。",qrDataUrl:login.image,profileId:session.platform}).catch(() => undefined)
+      const image = await renderTemplate("qr-login",{title:MUSIC_PLATFORMS[session.platform]+"登录",subtitle:session.partner ? "音乐合伙人" : "公共音乐账号",badge:"SCAN",notice:"建议使用对应平台 App 扫码确认。账号供机器人点歌使用，#取消 可结束等待。",qrDataUrl:login.image,profileId:session.platform}).catch(() => undefined)
       if (signal.aborted || sessions.get(key) !== session) return
       const prefix = "data:image/png;base64,"
       const qr = image || (login.image.startsWith(prefix) && Buffer.from(login.image.slice(prefix.length), "base64"))
       if (!qr || !await e.reply(globalThis.segment.image(qr))) throw new Error("音乐登录二维码发送失败。")
-      await session.api.waitLogin(login, { signal })
-      if(!signal.aborted)await replyText(e,`${MUSIC_PLATFORMS[session.platform]}公共音乐账号已登录。`)
+      await session.api.waitLogin(login, { signal, timeoutMs:session.timeoutMs, pollMs:session.pollMs })
+      if (!signal.aborted && session.partner) {
+        const done = "网易云合伙人账号已登录。"
+        const image = await renderStatusCard({title:"合伙人登录",subtitle:"音乐合伙人",message:done}).catch(()=>undefined)
+        if (!signal.aborted) await replyImage(e,image,done)
+      } else if(!signal.aborted)await replyText(e,`${MUSIC_PLATFORMS[session.platform]}公共音乐账号已登录。`)
     } catch(error) {if(!signal.aborted)throw error}
     finally {
       if (activeLogins.get(session.platform) === session) activeLogins.delete(session.platform)

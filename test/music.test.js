@@ -99,3 +99,29 @@ test("取消与串号确认保留原音乐身份和凭据", async () => {
   await expect(service.waitLogin(login)).rejects.toThrow("账号不匹配")
   expect((await readMusicAccounts(accountsFile)).qq).toEqual(current)
 })
+
+test("TuneWeave 的 B 站和网易云就绪检查使用各自已注册的能力",async()=>{
+  const { TuneWeaveService } = await import("../services/tuneweave/service.js")
+  const endpoints = []
+  let version = "1.0.0-beta.3"
+  const api = new TuneWeaveService({
+    config: {api_url:"http://localhost/fixture"},
+    fetch:async input=>{
+      const url=new URL(input)
+      endpoints.push(url.pathname+url.search)
+      const data=url.pathname.endsWith("healthz") ? {version} : [
+        {registered:true,platform:"bilibili",capabilities:["qr_login","account_profile"]},
+        {registered:true,platform:"netease",capabilities:["platform_api","qr_login","account_profile","caller_managed_credentials"]},
+      ]
+      return Response.json({ok:true,data})
+    },
+  })
+  expect((await api.status()).ok).toBe(false)
+  expect((await api.status("netease")).ok).toBe(true)
+  expect((await api.initialize({platform:"netease"})).already).toBe(true)
+  version = "1.0.0-beta.2"
+  expect((await api.status("netease")).requiresUpdate).toBe(true)
+  await expect(api.requireReady("netease")).rejects.toThrow("低于要求")
+  expect(endpoints).toContain("/fixture/v1/capabilities?platform=bilibili")
+  expect(endpoints).toContain("/fixture/v1/capabilities?platform=netease")
+})

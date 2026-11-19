@@ -231,6 +231,35 @@ test("Milky 订阅管理仅接受宿主核验的当前会话主人",async()=>{
   } finally { await plugin.dispose() }
 })
 
+test("全部订阅列表只列聊天所在机器人，授权终端可核对全部",async()=>{
+  const root=await directory()
+  const dir=join(root,"yuki-plugin","config","bilibili")
+  await mkdir(dir,{recursive:true})
+  await writeFile(join(dir,"push.yaml"),YAML.stringify({
+    group:{77:[{bot_id:99,uid,name:"OneBot 群订阅",type:[draw]},{bot_id:98,uid,name:"Milky 群订阅",type:[]}]},
+    private:{42:[{bot_id:98,uid,name:"Milky 私聊订阅",type:[article]}]},
+  }))
+  const provider={id:"bilibili",label:"B站",typeNames:biliTypes}
+  const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
+  try {
+    const command="/yukiB站全部推送列表"
+    const oneBot={self_id:99,user_id:42,group_id:77,message_type:"group",isMaster:true}
+    const milky={adapter:"milky",self_id:98,user_id:42,message_type:"private",isMaster:false,isBotMaster:id=>id===42}
+    expect(await plugin.fallback(command,oneBot)).toEqual({type:"forward",nodes:[
+      `群 77 · 机器人 99\n${uid}：OneBot 群订阅 [图文]`,
+    ]})
+    expect(await plugin.fallback(command,milky)).toEqual({type:"forward",nodes:[
+      `群 77 · 机器人 98\n${uid}：Milky 群订阅 [全部动态]`,
+      `私聊 42 · 机器人 98\n${uid}：Milky 私聊订阅 [文章]`,
+    ]})
+    expect(await plugin.fallback(command,{...oneBot,self_id:undefined})).toMatch(/查询当前会话/u)
+    expect(await plugin.fallback(command,{...oneBot,self_id:97})).toMatch(/当前没有订阅/u)
+    const terminal=await plugin.fallback(command,{message_type:"terminal",isMaster:true})
+    expect(terminal.nodes).toHaveLength(3)
+    expect(await plugin.fallback(command,{message_type:"terminal",isMaster:false})).toMatch(/只有机器人主人/u)
+  } finally { await plugin.dispose() }
+})
+
 test("B站旧查人指令保留开放资料、搜索粉丝数和规范直播间链接",async()=>{
   const root=await directory()
   const paths=[]

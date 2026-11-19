@@ -96,11 +96,12 @@ export async function createSubscriptionModule(services, { providers = {bilibili
       }
       if (view) {
         if (view[2] && !isSubscriptionOwner(context)) return "只有机器人主人可以查看全部"+describe(provider)+"。"
-        if (!view[2] && !current) return "请在群聊或私聊中查询当前会话。"
+        if (!current && (!view[2] || context.message_type !== "terminal")) return "请在群聊或私聊中查询当前会话。"
         const all=await config.routes(provider.id)
         if (!view[2]) return display(provider,all.filter(item=>item.kind===current.kind && item.chat===current.chat && item.bot===current.bot),describe(provider))
         const blocks=new Map()
         for (const item of all) {
+          if (current && item.bot !== current.bot) continue
           const name=(item.kind==="group"?"群 ":"私聊 ")+item.chat+" · 机器人 "+item.bot
           let rows=blocks.get(name)
           if (!rows) { rows=[]; blocks.set(name,rows) }

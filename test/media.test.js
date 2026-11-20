@@ -54,6 +54,27 @@ test("短链指到站外和抖音 CDN 跨域跳转时停止请求", async () => 
   expect(requests).toEqual(["https://b23.tv/out", "https://v.douyin.com/test/", "https://p3.douyinpic.com/test.png"])
 })
 
+test("B 站裸短链可从分享文案与显式目标解析，仍只请求可信短链站点", async () => {
+  const requests = []
+  const canonical = "https://b23.tv/a1B2c3"
+  const bvid = "BV1dAxE6VErW"
+  const service = new BilibiliService({ fetch: async (url, options) => {
+    requests.push([url.href, options.method, options.redirect])
+    return new Response(null, { status:302, headers:{ location:"https://www.bilibili.com/video/" + bvid } })
+  } })
+  expect(service.extractTarget("视频：【b23.tv/a1B2c3?share_source=copy】，也可搜 " + bvid)).toBe(canonical)
+  expect(service.extractTarget("链接（b23.tv/a1B2c3）")).toBe(canonical)
+  expect(service.extractTarget("链接 //b23.tv/a1B2c3.")).toBe(canonical)
+  expect(await service.resolveTarget("b23.tv/a1B2c3?share_source=copy")).toEqual({ type:"video", bvid })
+  expect(await service.resolveTarget("//b23.tv/a1B2c3")).toEqual({ type:"video", bvid })
+  for (const invalid of ["https://example.test/b23.tv/a1B2c3", "evil-b23.tv/a1B2c3",
+    "http://user@b23.tv/a1B2c3", "b23.tv:8080/a1B2c3", "b23.tv/a1B2c3/path", "b23.tv/a1B2c3.exe"]) {
+    expect(service.extractTarget(invalid)).toBe("")
+    await expect(service.resolveTarget(invalid)).rejects.toThrow("不支持的 B 站链接")
+  }
+  expect(requests).toEqual([[canonical, "HEAD", "manual"], [canonical, "HEAD", "manual"]])
+})
+
 test("B 站文字预览沿用旧字段和时间顺序，保留零值并省略缺失数据", async () => {
   const bvid = "BV1dAxE6VErW"
   const service = new BilibiliService()

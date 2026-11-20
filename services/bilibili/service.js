@@ -13,6 +13,8 @@ import { packMediaFiles, runMediaProcess, mediaLimitFailure, safeMediaName } fro
 const BILI_SHORT_HOSTS = new Set(["b23.tv", "bili2233.cn"])
 const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "live.bilibili.com", ...BILI_SHORT_HOSTS])
 const LIVE_INFO_API = "https://api.live.bilibili.com/room/v1/Room/get_info"
+const bareB23InText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:\/\/)?b23\.tv\/([a-z0-9]+)(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
+const bareB23Target = /^(?:\/\/)?b23\.tv\/([a-z0-9]+)(?:[?#]\S*)?$/iu
 
 const COMMON_HEADERS = Object.freeze({
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -46,6 +48,8 @@ export class BilibiliService {
 
     const clean = raw.replace(/\\\//g, "/")
     const match = clean.match(/https?:\/\/(?:www\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)
+    const bare = bareB23InText.exec(clean)
+    if (bare && (!match || bare.index < match.index)) return "https://b23.tv/" + bare[1]
     return match?.[0] || ""
   }
 
@@ -54,7 +58,8 @@ export class BilibiliService {
     if (!text) throw new Error("empty bilibili target")
     if (/^BV[1-9A-Za-z]{10}$/i.test(text)) return { type: "video", bvid: text }
     if (/^av\d+$/i.test(text)) return { type: "video", aid: text.slice(2) }
-    const parsed = parseBiliUrl(text)
+    const bare = bareB23Target.exec(text)
+    const parsed = parseBiliUrl(bare ? "https://b23.tv/" + bare[1] : text)
     if (!parsed) throw new Error("不支持的 B 站链接")
     const url = await this.resolveShortLink(parsed)
     const destination = url.href

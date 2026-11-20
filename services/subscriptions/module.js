@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url"
+import { biliSubscriptionLogin } from "./bilibili/login.js"
 import { createBiliProvider } from "./bilibili/index.js"
 import { createWeiboProvider } from "./weibo/index.js"
 import { createSubscriptionConfig, numericId } from "./config.js"
@@ -62,6 +63,7 @@ export async function createSubscriptionModule(services, { providers, directory=
     bilibili: createBiliProvider({ session: subscriptionSession("bilibili", directory, getRedis) }),
     weibo: createWeiboProvider({ session: subscriptionSession("weibo", directory, getRedis) }),
   }
+  const biliLogin = biliSubscriptionLogin({ getRedis, owner:isSubscriptionOwner, signal:services.signal })
   const config = createSubscriptionConfig(directory,services.lockFile)
   const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
@@ -77,7 +79,7 @@ export async function createSubscriptionModule(services, { providers, directory=
     const run=manual.exec(command)
     const lookup=profile.exec(command)
     const selected=match?.[2]||view?.[1]||run?.[1]||lookup?.[1]
-    if (!selected) return
+    if (!selected) return biliLogin(message,context)
     const provider=providers[platform(selected)]
     if (!provider) return
     const current=target(context)

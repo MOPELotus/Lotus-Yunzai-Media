@@ -223,3 +223,80 @@ export async function readWithSubscriptionSession(transport, sessions, url, opti
     }
   }
 }
+
+const biliAccountFields = ["SESSDATA", "DedeUserID", "DedeUserID__ckMd5", "bili_jct", "bili_ticket", "bili_ticket_expires"]
+const biliLoginLock = "lotus-yunzai:media:dynamic:bilibili:signin"
+const releaseBiliLock = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
+const biliFeedURL = new URL("/x/polymer/web-dynamic/v1/feed/space", platforms.bilibili.origin)
+
+function biliFieldKeys(names) {
+  const platform = platforms.bilibili
+  return names.flatMap((name) => platform.domains.flatMap((domain) => [
+    keyFor(platform, "." + domain, name), keyFor(platform, domain, name),
+  ]))
+}
+
+const replaceBiliIdentity = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+for i = 1, tonumber(ARGV[2]) do
+  if (redis.call('GET', KEYS[i + 1]) or '') ~= ARGV[i + 2] then return 0 end
+end
+for i = 1, tonumber(ARGV[3 + tonumber(ARGV[2])]) do
+  redis.call('DEL', KEYS[i + 1], KEYS[i + 1] .. ':meta')
+end
+local start = 4 + tonumber(ARGV[2])
+for i = 2 + tonumber(ARGV[start - 1]), #KEYS do
+  local offset = start + (i - (2 + tonumber(ARGV[start - 1]))) * 3
+  redis.call('SET', KEYS[i], ARGV[offset], 'EX', ARGV[offset + 1])
+  redis.call('SET', KEYS[i] .. ':meta', ARGV[offset + 2], 'EX', ARGV[offset + 1])
+end
+return 1`
+
+export async function readBiliLogin(redis) {
+  const session = await storedSession(redis, platforms.bilibili, biliFeedURL)
+  if (!session) return
+  const ttl = typeof redis.pTTL === "function" ? await redis.pTTL(session.proof.key) : undefined
+  const expiresAt = ttl === -1 ? null : ttl > 0 ? Date.now() + ttl : undefined
+  return { ...session, expiresAt }
+}
+
+export function biliIssuedLogin(headers, url) {
+  const issued = new Map()
+  for (const cookie of rotation(platforms.bilibili, url, headers).values()) {
+    if (cookie.seconds <= 0 || !matchesPath(cookie.path, biliFeedURL.pathname)) continue
+    issued.set(cookie.name, cookie)
+  }
+  const uid = issued.get("DedeUserID")?.value
+  if (!issued.has("SESSDATA") || !uid || !/^\d{1,20}$/u.test(uid) || !issued.has("bili_jct")) return
+  return issued
+}
+
+export async function lockBiliLogin(redis) {
+  const token = crypto.randomUUID()
+  if (await redis.set(biliLoginLock, token, { NX: true, EX: 240 }) !== "OK") return
+  try {
+    const guard = biliFieldKeys(["SESSDATA"])
+    const snapshot = (await redis.mGet(guard)).map(value => value ?? "")
+    return {
+      async replace(issued = new Map()) {
+        const platform = platforms.bilibili
+        const clear = [...new Set([...guard, ...biliFieldKeys(biliAccountFields)])]
+        const values = [...issued.values()]
+        const keys = [biliLoginLock, ...clear, ...values.map(({ name, domain }) => keyFor(platform, "." + domain, name))]
+        const args = [token, String(guard.length), ...snapshot, String(clear.length)]
+        for (const { value, path, seconds } of values) {
+          args.push(value, String(Math.min(seconds ?? 15_552_000, 31_536_000)), JSON.stringify({ path, secure: true }))
+        }
+        return await redis.eval(replaceBiliIdentity, { keys, arguments: args }) === 1
+      },
+      async close() {
+        await redis.eval(releaseBiliLock,
+          { keys: [biliLoginLock], arguments: [token] })
+      },
+    }
+  } catch (error) {
+    await redis.eval(releaseBiliLock,
+      { keys: [biliLoginLock], arguments: [token] }).catch(() => {})
+    throw error
+  }
+}

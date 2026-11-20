@@ -9,7 +9,7 @@ import { renderStatusCard, renderTemplate } from "../core/render/service.js"
 import { formatLocalDateTime } from "../core/time.js"
 import { loadGlobalConfig } from "../core/config/global.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
-import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicSessionKey, musicShare } from "../services/music/service.js"
+import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare } from "../services/music/service.js"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.js"
 
 const sessions = new Map(), aliases = { 网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq", 酷狗: "kugou", 酷我: "kuwo", 咪咕: "migu", 汽水: "soda" }
@@ -189,7 +189,7 @@ export class MusicMedia extends BasePlugin {
     const api = new MusicService({ tuneweaveConfig: config.tuneweave })
     const session = {
       api, platform: "netease", partner: true,
-      timeoutMs: loginTime(config.netease_partner?.login_timeout_ms, 300000),
+      timeoutMs: loginTime(config.netease_partner?.login_timeout_ms, musicLoginTimeout("netease")),
       pollMs: loginTime(config.netease_partner?.login_poll_ms, 3000),
     }
     sessions.set(key, session)
@@ -296,7 +296,8 @@ export class MusicMedia extends BasePlugin {
     if (activeLogins.has(session.platform)) throw new Error("这个平台已有扫码操作，请等它结束。")
     activeLogins.set(session.platform, session)
     session.stage = "polling"
-    session.expires = Date.now() + (session.timeoutMs || 180000)
+    const timeoutMs = session.timeoutMs ?? musicLoginTimeout(session.platform)
+    session.expires = Date.now() + timeoutMs
     session.controller = new AbortController()
     const signal = e.privateCredentialSignal
       ? AbortSignal.any([session.controller.signal, e.privateCredentialSignal]) : session.controller.signal
@@ -310,7 +311,8 @@ export class MusicMedia extends BasePlugin {
       const prefix = "data:image/png;base64,"
       const qr = image || (login.image.startsWith(prefix) && Buffer.from(login.image.slice(prefix.length), "base64"))
       if (!qr || !await e.reply(globalThis.segment.image(qr))) throw new Error("音乐登录二维码发送失败。")
-      await session.api.waitLogin(login, { signal, timeoutMs:session.timeoutMs, pollMs:session.pollMs })
+      session.expires = Date.now() + timeoutMs
+      await session.api.waitLogin(login, { signal, timeoutMs, pollMs:session.pollMs })
       if (!signal.aborted && session.partner) {
         const done = "网易云合伙人账号已登录。"
         const image = await renderStatusCard({title:"合伙人登录",subtitle:"音乐合伙人",message:done}).catch(()=>undefined)

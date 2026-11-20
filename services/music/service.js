@@ -15,6 +15,7 @@ import { readMusicAccounts, saveMusicAccount } from "./accounts.js"
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
 export const musicSessionKey = e => `${e.self_id || ""}:${e.group_id || "private"}:${e.user_id}`
+export const musicLoginTimeout = platform => platform === "netease" ? 300000 : 180000
 export class MusicService {
   constructor(options = {}) {
     this.tuneweave = options.tuneweave || new TuneWeaveService({ config: options.tuneweaveConfig })
@@ -114,7 +115,7 @@ export class MusicService {
     if (!qr.transaction_id || !qr.url && !qr.image_data_url) throw new Error("平台没有返回可用二维码")
     return { platform, key: qr.transaction_id, alias, image: qr.image_data_url || await QRCode.toDataURL(qr.url), owner }
   }
-  async waitLogin(login, { signal, timeoutMs = 180000, pollMs = 3000 } = {}) {
+  async waitLogin(login, { signal, timeoutMs = musicLoginTimeout(login.platform), pollMs = 3000 } = {}) {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       if (signal?.aborted) throw new Error("扫码登录已取消")

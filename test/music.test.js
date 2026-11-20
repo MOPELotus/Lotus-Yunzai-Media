@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -166,6 +166,24 @@ test("取消与串号确认保留原音乐身份和凭据", async () => {
   await expect(service.waitLogin(login,{signal:signal.signal})).rejects.toThrow("取消")
   await expect(service.waitLogin(login)).rejects.toThrow("账号不匹配")
   expect((await readMusicAccounts(accountsFile)).qq).toEqual(current)
+})
+
+test("点歌扫码保留网易云五分钟等候和其他平台三分钟等候", async () => {
+  const now = spyOn(Date, "now")
+  const calls = []
+  const service = new MusicService({ tuneweave:{ request:async path => {
+    calls.push(path)
+    return {state:"expired"}
+  } } })
+  try {
+    now.mockReturnValueOnce(0).mockReturnValue(200000)
+    await expect(service.waitLogin({platform:"netease",key:"netease"})).rejects.toThrow("二维码已过期")
+    now.mockReturnValueOnce(0).mockReturnValue(200000)
+    await expect(service.waitLogin({platform:"qq",key:"qq"})).rejects.toThrow("扫码登录超时")
+    now.mockReturnValueOnce(0).mockReturnValue(300000)
+    await expect(service.waitLogin({platform:"netease",key:"late"})).rejects.toThrow("扫码登录超时")
+    expect(calls).toEqual(["/v1/auth/qr/netease"])
+  } finally { now.mockRestore() }
 })
 
 test("TuneWeave 的 B 站和网易云就绪检查使用各自已注册的能力",async()=>{

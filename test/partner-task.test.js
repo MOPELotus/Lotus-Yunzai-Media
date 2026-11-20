@@ -1,0 +1,146 @@
+import { expect, test } from "bun:test"
+import { EventEmitter } from "node:events"
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { PassThrough } from "node:stream"
+import YAML from "yaml"
+import { NeteasePartnerAccounts } from "../services/music/partner-account.js"
+import { NeteasePartnerTask } from "../services/music/partner-task.js"
+import { PartnerReviewService } from "../services/music/partner-review.js"
+import { partnerLogNodes, readPartnerLog } from "../services/music/partner-log.js"
+
+test("合伙人先核验旧账号，沿用任务顺序、账号偏好和未确认评分记录", async () => {
+  const dir = await mkdtemp(join(tmpdir(),"lotus-partner-task-"))
+  const stateFile = join(dir,"state.yaml"), accountsFile = join(dir,"accounts.yaml")
+  const account = { uid:"1042", nickname:"合成账号", cookie:"fixture-source-cookie", extraCount:1, comment:false }
+  await writeFile(accountsFile,YAML.stringify({ accounts:[account] }))
+  await writeFile(stateFile,"last_run_date: 2026-11-19\nold_field: keep\n")
+  const calls = [], ratings = []
+  let daily = 0, identity = "1042"
+  const server = Bun.serve({ hostname:"127.0.0.1", port:0, async fetch(request) {
+    const url = new URL(request.url)
+    expect(request.headers.has("cookie")).toBe(false)
+    expect(request.headers.has("x-tuneweave-credential")).toBe(false)
+    const ok = data => Response.json({ ok:true, data })
+    if (url.pathname === "/healthz") return ok({ version:"1.0.0-beta.3" })
+    if (url.pathname === "/v1/capabilities") return ok([{ platform:"netease", registered:true,
+      capabilities:["platform_api","qr_login","account_profile","caller_managed_credentials"] }])
+    if (url.pathname === "/v1/account") {
+      expect(url.searchParams.get("account")).toBe("default")
+      return ok({ authenticated:true, user_id:identity })
+    }
+    expect(url.pathname).toBe("/v1/extensions/netease/api")
+    const raw = await request.text()
+    expect(raw).not.toContain("fixture-source-cookie")
+    const { uri, data, account:alias } = JSON.parse(raw)
+    expect(alias).toBe("default")
+    calls.push(uri.split("/").at(-1))
+    if (uri.endsWith("/daily/task/get")) {
+      daily++
+      return ok({ code:200, data:{ id:42, works:[
+        { work:{id:1,name:"此前完成"}, completed:true },
+        { work:{id:2,name:"首次提交",supportExtraEvaTypes:["作词", {dimensionId:7}]}, dimensions:["忽略旧维度"] },
+        { work:{id:3,name:"回执中断"} },
+        { work:{id:4,name:"额度轮询"} },
+      ] } })
+    }
+    if (uri.endsWith("/extra/wait/evaluate/work/list")) return ok({code:200,data:[{id:5,name:"额外曲目"},{id:6,name:"超额曲目"}]})
+    const state = YAML.parse(await readFile(stateFile,"utf8"))
+    expect(state.evaluation_receipts).toContainEqual(["1042:"+data.workId,"pending"])
+    ratings.push(data)
+    if (data.workId === 3) return Response.json({ ok:false,error:{code:"upstream_error",message:"cookie=should-never-log"} }, {status:502})
+    if (data.workId === 4 && daily === 1) return Response.json({ ok:false,error:{code:"upstream_error",details:{upstream_code:405}} }, {status:502})
+    return ok({ code:200 })
+  } })
+  try {
+    const config = { delay_ms_min:0, delay_ms_max:0, comments:["本测试不能发布评论"] }
+    const task = () => new NeteasePartnerTask({
+      tuneweaveConfig:{api_url:`http://127.0.0.1:${server.port}`},
+      accounts:new NeteasePartnerAccounts(accountsFile), stateFile, logDir:dir,
+      now:()=>new Date(2026,10,20,12), scorer:()=>4,
+    })
+    const first = await task().execute(config)
+    expect(daily).toBe(2)
+    expect(ratings.map(rating=>rating.workId)).toEqual([2,3,4,4,5])
+    expect(ratings.every(rating=>!rating.comment && rating.syncComment==="false" && rating.taskId===42)).toBe(true)
+    expect(JSON.parse(ratings[0].extraScore)).toEqual({"作词":4,"7":4})
+    expect(ratings.at(-1).extraResource).toBe("true")
+    expect(first.accounts[0]).toMatchObject({success:4,skip:1,fail:16,attempts:2})
+    expect(first.accounts[0].evaluations.find(item=>item.workId==="3").status).toBe("unknown")
+    expect(partnerLogNodes(first).some(item=>item.text.includes("结果未确认"))).toBe(true)
+    const persisted = YAML.parse(await readFile(accountsFile,"utf8")).accounts[0]
+    expect(persisted).toMatchObject({uid:"1042",tuneweave_account:"default",extraCount:1,comment:false})
+    expect(persisted.cookie).toBeUndefined()
+    expect(YAML.parse(await readFile(stateFile,"utf8"))).toMatchObject({last_run_date:"2026-11-20",old_field:"keep"})
+    expect((await stat(join(dir,"nep-latest.json"))).mode & 0o777).toBe(0o600)
+    expect(JSON.stringify(await readPartnerLog(dir))).not.toContain("should-never-log")
+
+    expect(await task().execute(config,"自动任务",{once:true})).toEqual({skipped:true,reason:"already_run_today"})
+    expect(daily).toBe(2)
+    await task().execute(config)
+    expect(daily).toBe(4)
+    expect(ratings).toHaveLength(5)
+    identity = "other-account"
+    await task().execute(config)
+    expect(daily).toBe(4)
+    expect(ratings).toHaveLength(5)
+    expect(calls.filter(route=>route==="evaluate")).toHaveLength(5)
+  } finally { server.stop(true); await rm(dir,{recursive:true,force:true}) }
+})
+
+test("空合伙人档案保存说明，未连接平台", async () => {
+  const dir = await mkdtemp(join(tmpdir(),"lotus-partner-empty-"))
+  try {
+    const task = new NeteasePartnerTask({
+      accounts:new NeteasePartnerAccounts(join(dir,"missing.yaml")), stateFile:join(dir,"state.yaml"), logDir:dir,
+      tuneweave:{ request() { throw new Error("不应联网") }, requireReady() { throw new Error("不应联网") } },
+    })
+    const report = await task.execute()
+    expect(report.accounts[0]).toMatchObject({nickname:"未配置账号",success:0,fail:0})
+    expect(await readPartnerLog(dir)).toEqual(report)
+  } finally { await rm(dir,{recursive:true,force:true}) }
+})
+
+test("合伙人乐评只接受本次联网证据中的来源", async () => {
+  let source = "https://music.example/track", searched = source
+  const comment = "围绕离别与重逢的歌词来写，这个故事在第二段留下了更多余地。"
+  const service = new PartnerReviewService({ fetch:async (_url, init) => {
+    expect(init.redirect).toBe("error")
+    expect(JSON.parse(init.body).store).toBe(false)
+    return Response.json({status:"completed",output:[
+      {type:"web_search_call",status:"completed",action:{sources:[{url:searched}]}},
+      {type:"message",content:[{type:"output_text",text:JSON.stringify({comment,sources:[source]})}]},
+    ]})
+  } })
+  const config = {mode:"responses",model:"合成模型",api_key:"fixture-api-key",api_url:"http://127.0.0.1:1"}
+  expect(await service.generate({title:"合成歌曲"},config)).toEqual({comment,sources:[source]})
+  searched = "https://music.example/elsewhere"
+  await expect(service.generate({title:"合成歌曲"}, config)).rejects.toThrow("未出现在实际联网结果")
+})
+
+test("Codex 乐评沿用只读模式并要求可见的联网执行证据", async () => {
+  let searched = true
+  const review = {comment:"把未寄出的信放在结尾，让词里那个迟迟没有说开的人有了落点。",sources:["https://music.example/song"]}
+  const service = new PartnerReviewService({ spawnProcess(command, args, options) {
+    expect(command).toBe("mock-codex")
+    expect(args).toContain("read-only")
+    expect(args).toContain("features.shell_tool=false")
+    expect(options.shell).toBe(false)
+    const child = new EventEmitter()
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.stdin.resume()
+    child.stdin.on("end", async () => {
+      await writeFile(args[args.indexOf("--output-last-message")+1],JSON.stringify(review))
+      if (searched) child.stdout.write('{"type":"item.completed","item":{"type":"web_search"}}\n')
+      child.emit("close",0)
+    })
+    return child
+  } })
+  const config = {mode:"codex",codex_command:"mock-codex"}
+  expect(await service.generate({title:"合成歌曲"},config)).toEqual(review)
+  searched = false
+  await expect(service.generate({title:"合成歌曲"},config)).rejects.toThrow("未执行联网搜索")
+})

@@ -11,9 +11,11 @@ import { loadGlobalConfig } from "../core/config/global.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare } from "../services/music/service.js"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.js"
+import { NeteasePartnerTask } from "../services/music/partner-task.js"
 
 const sessions = new Map(), aliases = { 网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq", 酷狗: "kugou", 酷我: "kuwo", 咪咕: "migu", 汽水: "soda" }
 const activeLogins = new Map()
+let partnerJob
 const maxInlineBytes = 16 * 1024 * 1024
 const canManageMusic = e => e.isPrivate && canManagePackages(e)
 const searchAccountNotes = {
@@ -97,6 +99,7 @@ export class MusicMedia extends BasePlugin {
         { reg: "^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$", fnc: "choice" },
         { reg: "^#音乐帮助$", fnc: "help" },
         { reg: "^#合伙人登录$", fnc: "partnerLogin" },
+        { reg: "^#合伙人测试(?:[（(]执行[）)])?$", fnc: "partnerManual" },
         { reg: "^#合伙人日志$", fnc: "partnerLog" },
         { reg: "^#初始化TuneWeave$", fnc: "initializeTuneWeave" },
         { reg: "^#TuneWeave状态$", fnc: "tuneWeaveStatus" },
@@ -111,11 +114,14 @@ export class MusicMedia extends BasePlugin {
         }
       }
     }, 30000).unref()
-    this.addCleanup(() => {
+    this.addCleanup(async () => {
       clearInterval(timer)
       for (const session of sessions.values()) session.controller?.abort()
       sessions.clear()
       activeLogins.clear()
+      const job = partnerJob
+      job?.controller.abort()
+      await job?.promise?.catch(() => undefined)
     })
     try {
       const { service: api } = await service()
@@ -227,6 +233,44 @@ export class MusicMedia extends BasePlugin {
     return true
   }
 
+  async partnerManual() {
+    const e = this.e
+    const config = await loadGlobalConfig()
+    if (e.isDelegated || !ownerPermission(e, config)) {
+      await replyText(e, "仅机器人主人可执行合伙人任务。")
+      return true
+    }
+    if (partnerJob || activeLogins.has("netease")) {
+      await replyText(e, "合伙人任务或网易云登录正在进行，请稍候。")
+      return true
+    }
+    const job = { controller:new AbortController(), promise:undefined }
+    partnerJob = job
+    const signal = e.privateCredentialSignal ?
+      AbortSignal.any([job.controller.signal,e.privateCredentialSignal]) : job.controller.signal
+    try {
+      await replyText(e, "网易云合伙人任务开始，将按账号配置提交评分和乐评。")
+      const task = new NeteasePartnerTask({ tuneweaveConfig:config.tuneweave })
+      job.promise = task.execute(config.netease_partner, "手动执行", { signal })
+      const report = await job.promise
+      const items = report.accounts.map(account => ({
+        label: account.nickname,
+        value: `成功 ${account.success} · 失败 ${account.fail}`,
+      }))
+      const failed = report.accounts.some(account => account.fail)
+      const title = "合伙人测试"
+      const image = await renderStatusCard({ title, subtitle:report.trigger, badge:failed ? "有失败" : "完成",
+        message:`生成时间：${report.time}`, userId:e.user_id, items,
+      }).catch(() => undefined)
+      if (!signal.aborted) await replyImage(e, image, [title,...items.map(item=>`${item.label}：${item.value}`)].join("\n"))
+    } catch {
+      if (!signal.aborted) await replyText(e, "合伙人任务未完成，请检查 TuneWeave 状态和最近日志。")
+    } finally {
+      if (partnerJob === job) partnerJob = undefined
+    }
+    return true
+  }
+
   async initializeTuneWeave() {
     const e = this.e
     const config = await loadGlobalConfig()
@@ -293,6 +337,7 @@ export class MusicMedia extends BasePlugin {
     return true
   }
   async qr(session,key,type,e = this.e) {
+    if (session.platform === "netease" && partnerJob) throw new Error("网易云合伙人任务正在进行，请稍候。")
     if (activeLogins.has(session.platform)) throw new Error("这个平台已有扫码操作，请等它结束。")
     activeLogins.set(session.platform, session)
     session.stage = "polling"

@@ -27,7 +27,7 @@ export class NeteasePartnerAccounts {
     return readAccounts(file)
   }
 
-  saveAccount(account, { signal } = {}) {
+  saveAccount(account, { signal, onlyIfLegacy = false } = {}) {
     const file = path.resolve(this.accountsFile)
     const task = (accountWrites.get(file) || Promise.resolve()).catch(() => {}).then(async () => {
       signal?.throwIfAborted()
@@ -36,6 +36,7 @@ export class NeteasePartnerAccounts {
       // Preferences belong to the authenticated UID, not to the QR alias. An
       // owner can reuse an alias to log in to a different NetEase account.
       const existing = accounts.find(item => uid && String(item.uid) === uid)
+      if (onlyIfLegacy && existing?.tuneweave_account) return existing
       const normalized = {
         uid,
         nickname: account.nickname || "网易云账号",

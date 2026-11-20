@@ -36,16 +36,21 @@ export class TuneWeaveService {
     this.arch = options.arch || process.arch
   }
 
-  async request(route, { method = "GET", body, credentials = [], onCredentialUpdates, accountSelection } = {}) {
+  async request(route, { method = "GET", body, credentials = [], onCredentialUpdates, accountSelection, signal } = {}) {
+    signal?.throwIfAborted()
     const target = `${this.config.api_url.replace(/\/+$/, "")}${route}`
+    const timeout = AbortSignal.timeout(this.config.request_timeout_ms)
     const options = {
       method,
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(this.config.request_timeout_ms),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     }
     const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, options))
-      .catch(() => { throw new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。") })
+      .catch(() => {
+        signal?.throwIfAborted()
+        throw new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。")
+      })
     const updates = String(response.headers?.get("X-TuneWeave-Updated-Credential") || "").split(",").map(value => value.trim()).filter(Boolean).map(value => {
       const split = value.indexOf("="); return { platform: value.slice(0, split), credential: value.slice(split + 1) }
     }).filter(item => /^[a-z]+$/.test(item.platform) && item.credential.startsWith("twc1_"))
@@ -58,6 +63,7 @@ export class TuneWeaveService {
       const reason = json?.error?.details?.upstream_code === 405 ? "网易云今日没有更多可评定歌曲（405）" : code
       const error = new Error(`TuneWeave 请求失败：${reason}`)
       error.code = code; error.platform = json?.error?.platform
+      if (json?.error?.details?.upstream_code === 405) error.upstreamCode = 405
       throw error
     }
     if (accountSelection) {
@@ -69,12 +75,12 @@ export class TuneWeaveService {
     return json.data
   }
 
-  async status(platform = "bilibili") {
+  async status(platform = "bilibili", signal) {
     const expected = platformStatus[platform]
     if (!Object.hasOwn(platformStatus, platform)) throw new Error("不支持此 TuneWeave 能力检查。")
     try {
-      const health = await this.request("/healthz")
-      const capabilities = await this.request("/v1/capabilities?" + new URLSearchParams({ platform }))
+      const health = await this.request("/healthz", { signal })
+      const capabilities = await this.request("/v1/capabilities?" + new URLSearchParams({ platform }), { signal })
       const registration = Array.isArray(capabilities) ? capabilities.find(item => item.platform === platform && item.registered) : null
       const ready = Array.isArray(registration?.capabilities) &&
         expected.capabilities.every(capability => registration.capabilities.includes(capability))
@@ -82,12 +88,13 @@ export class TuneWeaveService {
       return { ok: ready, reachable: true, version: health.version, requiredVersion: TUNEWEAVE_REQUIRED_VERSION, requiresUpdate, apiUrl: this.config.api_url, capabilities,
         message: requiresUpdate ? `低于插件最低要求 ${TUNEWEAVE_REQUIRED_VERSION}，等待开机延迟更新或发送 #初始化环境。` : ready ? expected.ready : "当前版本缺少所需能力，请升级 TuneWeave。" }
     } catch (error) {
+      signal?.throwIfAborted()
       return { ok: false, reachable: false, apiUrl: this.config.api_url, message: error.message }
     }
   }
 
-  async requireReady(platform) {
-    const status = await this.status(platform)
+  async requireReady(platform, signal) {
+    const status = await this.status(platform, signal)
     if (!status.ok) throw new Error(status.message)
     if (compareTuneWeaveVersions(status.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw new Error(`TuneWeave ${status.version} 低于要求 ${TUNEWEAVE_REQUIRED_VERSION}，请等待开机延迟更新或发送 #初始化环境`)
     return status

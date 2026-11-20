@@ -64,13 +64,15 @@ function scores(value) {
 
 function songNode(entry) {
   const completed = entry.status === "already_completed"
-  const state = entry.status === "success" ? "成功" : completed ? "此前已完成" : "失败"
+  const unknown = entry.status === "unknown"
+  const state = entry.status === "success" ? "成功" : completed ? "此前已完成" : unknown ? "结果未确认" : "失败"
+  const comment = unknown ? "结果未确认" : safeText(entry.comment,500)
   const score = Number.isFinite(entry.score) && entry.score >= 0 ? entry.score : "未返回"
   return [
     `歌曲：${safeText(entry.name,160) || "曲目"}`,
     `主分：${score}`,
     `子项：${scores(entry.extraScore) || "该作品未提供子项"}`,
-    `乐评：${safeText(entry.comment,500) || (completed ? "已完成记录未返回乐评" : "未发布")}`,
+    `乐评：${comment || (completed ? "已完成记录未返回乐评" : "未发布")}`,
     `第 ${count(entry.attempt)} 轮 · ${state}`,
   ].join("\n")
 }

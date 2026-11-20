@@ -32,7 +32,9 @@ Lotus-Yunzai 的 B 站、抖音、动态订阅和点歌模块。直接发送视�
 
 在已绑定的主人会话中，`#TuneWeave状态` 检查网易云登录和扩展接口，`#初始化TuneWeave` 检查或初始化 TuneWeave。合伙人账号可以在主人私聊直接发送 `#合伙人登录`，等待时间和轮询间隔沿用 `netease_partner.login_timeout_ms` 与 `login_poll_ms`。这些指令沿用 `permissions.scopes.netease.partner`，扫码只更新账号记录。
 
-主人可私聊发送 `#合伙人日志`，查看保存在 `data/logs` 的最近合伙人报告。优先读取 `nep-latest.json`，也兼容按时间命名的旧报告。日志入口沿用 `permissions.scopes.netease.partner`，展示账号汇总及逐首结果。原始接口错误保存在本地日志内。
+主人可发送 `#合伙人测试` 或 `#合伙人测试（执行）` 手动执行合伙人任务。任务核对已登录账号后按原偏好提交评分与乐评，保存当次报告和评分回执。上游结果未确认的作品先等待平台确认，同一天的后续运行不会再次提交。
+
+主人可私聊发送 `#合伙人日志`，查看保存在 `data/logs` 的最近合伙人报告。优先读取 `nep-latest.json`，也兼容按时间命名的旧报告。日志入口沿用 `permissions.scopes.netease.partner`，展示账号汇总及逐首结果。本地报告保留错误摘要。
 
 `config/global.yaml` 的 `music` 配置支持以下字段。
 
@@ -110,5 +112,7 @@ B 站和微博的文字转发推送先给转发帖链接，再显示原帖类别
 ## 来源
 
 解析、媒体及工具服务、指令和 Skia 卡片以 Lotus-ReFactor 的 [eaf76753](https://github.com/MOPELotus/Lotus-ReFactor/tree/eaf7675324dae64e51652bf9669ef93247d02b42) 为基线。保留 [原许可](LICENSE)。视频信息卡沿用原 `core/render/source-cards.js` 的 genshin `mysNews` 布局，从宿主已有的 `data/passport/resources` 或 `data/atlas/theme` 读取 Miao 主题和字体。Bun 环境的 SM3 哈希使用 [sm-crypto](https://github.com/JuneAndGreen/sm-crypto) 的 MIT 许可实现。
+
+合伙人评分、乐评和逐首回执参考 Lotus-ReFactor 的 [e28c6df](https://github.com/MOPELotus/Lotus-ReFactor/tree/e28c6df5fd6212ce5943b4a9f7fba6e2bca32653)，沿用同一许可。
 
 动态订阅和图卡结构来源于 [snowtafir/yuki-plugin main3](https://github.com/snowtafir/yuki-plugin/tree/b1d8fecf41d03f92746bb2404b0b0381a24103a5)，保留 [MIT 许可](LICENSES/yuki-plugin.txt)。

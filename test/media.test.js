@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BilibiliService, formatBilibiliPreviewText } from "../services/bilibili/service.js"
@@ -21,6 +21,42 @@ async function fixtureFile(name, bytes = "小文件") {
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+})
+
+test("B 站搜索读取旧账号别名，新登录只更新主文件，冲突不选择旧账号", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-bilibili-account-"))
+  directories.push(directory)
+  const accountFile = join(directory, "account.yaml")
+  const first = join(directory, "old.yaml")
+  const second = join(directory, "renamed.yaml")
+  const original = "# 原格式\r\ntuneweave_account: fixture-old\r\ncookie: fixture-never-forwarded\r\n"
+  const conflict = "tuneweave_account: fixture-conflict\n"
+  const searched = []
+  const tuneweave = { async request(route) {
+    const url = new URL(route, "http://127.0.0.1")
+    if (url.pathname === "/v1/auth/qr/fixture-login") return { state: "confirmed", profile: { authenticated: true } }
+    expect(url.pathname).toBe("/v1/search")
+    expect(url.searchParams.has("cookie")).toBe(false)
+    searched.push(url.searchParams.get("account"))
+    return []
+  } }
+  const service = () => new BilibiliService({ accountFile, legacyAccountFiles: [first, second], tuneweave })
+  await writeFile(first, original)
+  await service().search("旧账号")
+  expect(await Bun.file(accountFile).exists()).toBe(false)
+  await writeFile(second, conflict)
+  await expect(service().search("冲突")).rejects.toThrow("旧 B 站账号记录不一致")
+  expect(searched).toEqual(["fixture-old"])
+
+  await writeFile(accountFile, "{}")
+  await service().search("主文件匿名")
+  const renewed = service()
+  expect((await renewed.waitQrLogin({ qrcodeKey: "fixture-login" })).ok).toBe(true)
+  await service().search("重启后新账号")
+  expect(searched).toEqual(["fixture-old", null, "lotus-bilibili"])
+  expect((await stat(accountFile)).mode & 0o777).toBe(0o600)
+  expect(await readFile(first, "utf8")).toBe(original)
+  expect(await readFile(second, "utf8")).toBe(conflict)
 })
 
 test("独立 QQ 分享卡优先取得 B 站短链，并只跟随 B 站域名", async () => {

@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
+import { constants } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import QRCode from "qrcode"
@@ -15,6 +17,8 @@ const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "live.bilibili.c
 const LIVE_INFO_API = "https://api.live.bilibili.com/room/v1/Room/get_info"
 const bareB23InText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:\/\/)?b23\.tv\/([a-z0-9]+)(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
 const bareB23Target = /^(?:\/\/)?b23\.tv\/([a-z0-9]+)(?:[?#]\S*)?$/iu
+const legacyAccountFiles = ["Lotus-Plugin", "Lotus-ReFactor"].map(name =>
+  path.join(rootPath, "plugins", name, "data", "bilibili", "account.yaml"))
 
 const COMMON_HEADERS = Object.freeze({
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -30,6 +34,7 @@ export class BilibiliService {
     this.searchLimit = Number(options.searchLimit || 10)
     this.now = options.now || (() => new Date())
     this.accountFile = options.accountFile || resolveData("bilibili", "account.yaml")
+    this.legacyAccountFiles = options.legacyAccountFiles ?? (options.accountFile ? [] : legacyAccountFiles)
     this.tasksDir = options.tasksDir || resolveData("bilibili", "tasks")
     this.spawn = options.spawn || spawn
   }
@@ -276,9 +281,10 @@ export class BilibiliService {
       const result = await this.tuneweave.request(`/v1/auth/qr/${encodeURIComponent(qrcodeKey)}`)
       if (result.state === "confirmed") {
         if (!result.profile?.authenticated) throw new Error("B站登录身份未核实")
-        this.tuneAccount = this.pendingAlias || "lotus-bilibili"
-        const account = { tuneweave_account: this.tuneAccount, saved_at: formatLocalIso(this.now()), source: "tuneweave" }
-        await this.saveAccount(account); return { ok: true, account }
+        const account = { tuneweave_account: this.pendingAlias || "lotus-bilibili", saved_at: formatLocalIso(this.now()), source: "tuneweave" }
+        await this.saveAccount(account)
+        this.tuneAccount = account.tuneweave_account
+        return { ok: true, account }
       }
       if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("B站二维码已过期或需要附加验证，请重新登录")
       await sleep(pollMs)
@@ -287,24 +293,48 @@ export class BilibiliService {
   }
 
   async loadAccount() {
-    try {
-      const data = YAML.parse(await fs.readFile(this.accountFile, "utf8")) || {}
-      return data.cookie || data.tuneweave_account ? data : null
-    } catch (error) {
-      if (error?.code === "ENOENT") return null
-      throw error
+    const current = await readAccountFile(this.accountFile)
+    if (current) return configuredAccount(current)
+    if (!this.legacyAccountFiles.length) return null
+    const snapshots = await Promise.allSettled(this.legacyAccountFiles.map(readAccountFile))
+    const saved = await readAccountFile(this.accountFile)
+    if (saved) return configuredAccount(saved)
+    if (snapshots.some(snapshot => snapshot.status === "rejected")) {
+      throw new Error("无法读取旧 B 站账号记录，请从当前部署重新登录。")
     }
+    const previous = snapshots.flatMap(snapshot => {
+      const account = snapshot.status === "fulfilled" && configuredAccount(snapshot.value)
+      return account ? [account] : []
+    })
+    const first = previous[0]
+    if (first && previous.some(account => !sameAccount(first, account))) {
+      throw new Error("两处旧 B 站账号记录不一致，请从当前部署重新登录。")
+    }
+    return first ?? null
   }
 
   async saveAccount(account = {}) {
     if (!account.cookie && !account.tuneweave_account) throw new Error("B站账号登录信息为空")
-    await fs.mkdir(path.dirname(this.accountFile), { recursive: true })
-    await fs.writeFile(this.accountFile, YAML.stringify({
+    await fs.mkdir(path.dirname(this.accountFile), { recursive: true, mode: 0o700 })
+    const data = YAML.stringify({
       ...(account.cookie ? { cookie: normalizeBiliCookie(account.cookie) } : {}),
       ...(account.tuneweave_account ? { tuneweave_account: account.tuneweave_account } : {}),
       saved_at: account.saved_at || formatLocalIso(this.now()),
       source: account.source || "manual",
-    }), "utf8")
+    })
+    const temporary = `${this.accountFile}.${randomUUID()}.tmp`
+    const output = await fs.open(temporary, "wx", 0o600)
+    try {
+      try {
+        await output.writeFile(data, "utf8")
+        await output.sync()
+      } finally {
+        await output.close()
+      }
+      await fs.rename(temporary, this.accountFile)
+    } finally {
+      await fs.rm(temporary, { force: true })
+    }
     return this.accountFile
   }
 
@@ -316,6 +346,36 @@ export class BilibiliService {
     const json = text ? JSON.parse(text) : null
     if (!response.ok) throw new Error(`B站请求失败 HTTP ${response.status}`)
     return json
+  }
+}
+
+function configuredAccount(data) {
+  return data?.cookie || data?.tuneweave_account ? data : null
+}
+
+function sameAccount(left, right) {
+  if (left.tuneweave_account || right.tuneweave_account) return left.tuneweave_account === right.tuneweave_account
+  return left.cookie === right.cookie
+}
+
+async function readAccountFile(file) {
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(error => {
+    if (error?.code !== "ENOENT") throw error
+  })
+  if (!handle) return
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile() || stat.size > 64 * 1024) throw new Error("B站账号记录格式无效")
+    const data = YAML.parse(await handle.readFile("utf8")) ?? {}
+    if (!data || typeof data !== "object" || Array.isArray(data) ||
+        ["cookie", "tuneweave_account"].some(key => data[key] != null && typeof data[key] !== "string")) {
+      throw new Error("B站账号记录格式无效")
+    }
+    return data
+  } catch {
+    throw new Error("B站账号记录格式无效")
+  } finally {
+    await handle.close()
   }
 }
 

@@ -62,6 +62,7 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
     expect(posts[2]).toMatchObject({ type: "DYNAMIC_TYPE_AV", title: "视频标题", cover: "https://wx1.sinaimg.cn/cover.jpg" })
     const [repost]=await makeDynamicMessages(source,posts[0],settingsFor({pushMsgMode:0,mergeTextPic:0}))
     expect(repost.text).toContain(`1.2万点赞 • 0评论 • 3.4万转发\n转发链接：https://weibo.com/${uid}/Qq012Aa\n原帖 · 图文 · 来源账号`)
+    expect(repost.text.match(/投稿：2026年11月19日 09:20:00/gu)).toHaveLength(2)
     expect(repost.text).toEndWith("原帖 <文字>\n0点赞 • 7转发\n原帖链接：https://weibo.com/42/Qq012Ba")
     const [video]=await makeDynamicMessages(source,posts[2],settingsFor({pushMsgMode:0,mergeTextPic:0,
       pushContentLenLimit:2,pushContentLineLimit:1}))

@@ -113,14 +113,21 @@ function published(post) {
   return post.activity?.openedAt ? "开播：" + time.format(post.activity.openedAt*1000) : time.format(post.createdAt*1000)
 }
 
+function textPublished(post) {
+  const openedAt = post.activity?.openedAt
+  const parts = time.formatToParts((openedAt || post.createdAt) * 1000)
+  const {year,month,day,hour,minute,second} = Object.fromEntries(parts.map(({type,value})=>[type,value]))
+  return (openedAt ? "开播：" : "投稿：") + `${year}年${month}月${day}日 ${hour}:${minute}:${second}`
+}
+
 function textMessages(provider, post, settings) {
   const heading = `【${provider.label}${category(provider,post)}】${post.author}`
   const repost = post.type === "DYNAMIC_TYPE_FORWARD"
   const linkLabel = post.activity?.roomUrl ? "直播链接" : repost ? "转发链接" : "链接"
-  const elements = [heading,published(post),textBlock(post,limitTextContent(post,settings)),...textDetails(post),`${linkLabel}：${post.url}`]
+  const elements = [heading,textPublished(post),textBlock(post,limitTextContent(post,settings)),...textDetails(post),`${linkLabel}：${post.url}`]
   const original = post.forwarded
   if (original) {
-    elements.push(`原帖 · ${category(provider,original)} · ${original.author}`,published(original),
+    elements.push(`原帖 · ${category(provider,original)} · ${original.author}`,textPublished(original),
       textBlock(original,limitTextContent(original,settings)),...textDetails(original))
     if (original.url !== post.url) {
       const label = original.activity?.roomUrl ? "原帖直播链接" : "原帖链接"

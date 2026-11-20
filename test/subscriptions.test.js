@@ -54,6 +54,7 @@ test("B站视频和直播的文字推送保留原动态类别字段和明确的�
   const post=normalizeBiliDynamic(videoRaw,uid)
   const [video,attachment]=await makeDynamicMessages(provider,post,settings)
   expect(video.type).toBe("text")
+  expect(video.text).toContain("投稿：2023年11月15日 06:13:20")
   expect(video.text).toContain("视频简介\n第二行详细资料")
   const [hidden]=await makeDynamicMessages(provider,post,{...settings,contentLimit:0})
   expect(hidden.text).not.toContain("视频简介")
@@ -73,13 +74,14 @@ test("B站视频和直播的文字推送保留原动态类别字段和明确的�
   const [live]=await makeDynamicMessages(provider,normalizeBiliDynamic(liveRaw({
     link:"//live.bilibili.com/12",live_start_time:seen-60,
   }),uid),settings)
-  expect(live.text).toContain("开播：2023/11/15 06:12:20")
+  expect(live.text).toContain("开播：2023年11月15日 06:12:20")
   expect(live.text).toContain("分区：单机游戏 (原神)\n0人看过")
   expect(live.text).toEndWith("直播链接：https://live.bilibili.com/12")
   const [fallback]=await makeDynamicMessages(provider,normalizeBiliDynamic(liveRaw({
     link:"https://other.invalid/12",live_start_time:true,
   }),uid),settings)
   expect(fallback.text).not.toContain("开播：")
+  expect(fallback.text).toContain("投稿：2023年11月15日 06:13:20")
   expect(fallback.text).not.toContain("直播链接：")
   expect(fallback.text).toEndWith("https://m.bilibili.com/dynamic/12234455")
 })

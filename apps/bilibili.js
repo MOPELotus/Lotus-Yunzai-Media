@@ -1,8 +1,10 @@
 import { canManagePackages } from "../../../lib/command-permissions.ts"
+import { lockFile } from "../../../lib/file-lock.ts"
 const BasePlugin = globalThis.plugin
 
 import { LOTUS_INTERCEPT_PRIORITY } from "../core/intercept/priority.js"
 import { loadGlobalConfig } from "../core/config/global.js"
+import { dataPath } from "../core/path.js"
 import { PermissionService } from "../core/permissions/service.js"
 import { renderStatusCard, renderTemplate } from "../core/render/service.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
@@ -15,8 +17,10 @@ import {
 import { buildMediaMessageText } from "../services/media/message.js"
 import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../services/media/files.js"
 import { ToolInstallerService } from "../services/tools/installer.js"
+import { createSubscriptionConfig } from "../services/subscriptions/config.js"
 
 const searchCache = new Map()
+const legacySettings = createSubscriptionConfig(dataPath,lockFile)
 
 export class BilibiliMedia extends BasePlugin {
   constructor() {
@@ -50,7 +54,11 @@ export class BilibiliMedia extends BasePlugin {
     const service = await createService()
     const target = service.extractTarget(message)
     if (!target) return false
-    try { return await this.renderInfo(await service.getInfo(target), { target, service }) }
+    try {
+      const live = URL.parse(target)?.hostname === "live.bilibili.com"
+      if (!live && !(await legacySettings.settings("bilibili")).parseVideoLink) return false
+      return await this.renderInfo(await service.getInfo(target), { target, service })
+    }
     catch (error) { await this.renderError("B站解析", error); return true }
   }
 

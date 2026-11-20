@@ -3,7 +3,7 @@ import { lockFile } from "../../lib/file-lock.ts"
 import { dataPath } from "./core/path.js"
 import { createSubscriptionConfig } from "./services/subscriptions/config.js"
 
-const fields = [
+const sharedFields = [
   { key: "pushMsgMode", setting: "picture", label: "推送消息模式", options: ["文字模式", "图片模式"] },
   { key: "mergeTextPic", setting: "merge", label: "文字图片合并发送", options: ["分开发送", "合并发送"],
     help: "仅在文字模式下生效。" },
@@ -23,8 +23,11 @@ const fields = [
     help: "每行一个关键词。正文或标题包含关键词时跳过推送。" },
 ]
 const platforms = [
-  { id: "bilibili", label: "B站" },
-  { id: "weibo", label: "微博" },
+  { id: "bilibili", label: "B站", fields: [...sharedFields, {
+    key: "parseVideoLink", setting: "parseVideoLink", label: "视频链接解析", options: ["关闭", "开启"],
+    help: "控制聊天中的视频链接、视频编号和短链自动解析。搜看和下载指令仍可使用。",
+  }] },
+  { id: "weibo", label: "微博", fields: sharedFields },
 ]
 
 function fieldValue(field, settings) {
@@ -64,7 +67,7 @@ export function supportGuoba(directory = dataPath) {
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
     configInfo: {
-      schemas: platforms.flatMap(({ id, label: platform }) => [
+      schemas: platforms.flatMap(({ id, label: platform, fields }) => [
         { component: "SOFT_GROUP_BEGIN", label: `${platform}动态推送` },
         ...fields.map(({ key, label, options, min, max, help, component, tags }) => ({
           field: `${id}.${key}`,
@@ -76,7 +79,7 @@ export function supportGuoba(directory = dataPath) {
         })),
       ]),
       async getConfigData() {
-        const entries = await Promise.all(platforms.map(async ({ id }) => {
+        const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
           return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
@@ -84,7 +87,7 @@ export function supportGuoba(directory = dataPath) {
       },
       async setConfigData(values, { Result }) {
         const changes = new Map()
-        for (const { id, label } of platforms) {
+        for (const { id, label, fields } of platforms) {
           const selected = []
           for (const field of fields) {
             const name = `${id}.${field.key}`

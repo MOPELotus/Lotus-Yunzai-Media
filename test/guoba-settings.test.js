@@ -18,12 +18,13 @@ const defaults = {
   pushStatus: 1, checkDynamicCD: "*/23 * * * *",
   pushTransmit: 1, dynamicTimeRange: 7200, banWords: [],
 }
+const biliDefaults = { ...defaults, parseVideoLink: 1 }
 
 test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆盖文件", async () => {
   const data = await mkdtemp(join(tmpdir(), "lotus-yuki-guoba-"))
   try {
     const { configInfo: form } = supportGuoba(data)
-    expect(await form.getConfigData()).toEqual({ bilibili: defaults, weibo: defaults })
+    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: defaults })
     expect(existsSync(join(data, "yuki-plugin"))).toBe(false)
 
     const directory = join(data, "yuki-plugin", "config", "bilibili")
@@ -36,7 +37,7 @@ test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆�
     const nodes = [{ payloads: [[{ type: "image", file: "fixture.png" }]] }]
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
     expect(await form.getConfigData()).toEqual({ bilibili: {
-      ...defaults, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7,
+      ...biliDefaults, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7,
     }, weibo: defaults })
     expect(await form.setConfigData({ "bilibili.forwardSendDynamic": 0 }, { Result })).toEqual({ ok: true })
     expect(existsSync(override)).toBe(false)
@@ -56,7 +57,7 @@ test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆�
 
     const fresh = supportGuoba(data).configInfo
     expect(await fresh.getConfigData()).toEqual({ bilibili: {
-      ...defaults, pushMsgMode: 0, mergeTextPic: 0, maxPicsForSingleMsg: 0,
+      ...biliDefaults, pushMsgMode: 0, mergeTextPic: 0, maxPicsForSingleMsg: 0,
     }, weibo: defaults })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(true)
     expect(await fresh.setConfigData({ "bilibili.maxPicsForSingleMsg": 1 }, { Result })).toEqual({ ok: true })
@@ -85,7 +86,7 @@ test("锅巴保存调度设置，重启后按平台注册任务且手动任务�
     expect(await form.setConfigData({ "bilibili.pushStatus": 0, "bilibili.checkDynamicCD": "* * * * * *",
       "weibo.checkDynamicCD": "  * * * * * *  " }, { Result })).toEqual({ ok: true })
     expect(await form.getConfigData()).toEqual({
-      bilibili: { ...defaults, pushStatus: 0, checkDynamicCD: "* * * * * *" },
+      bilibili: { ...biliDefaults, pushStatus: 0, checkDynamicCD: "* * * * * *" },
       weibo: { ...defaults, checkDynamicCD: "* * * * * *" },
     })
     for (const id of Object.keys(providers)) {
@@ -120,7 +121,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(form.schemas.filter(({ field }) => field?.startsWith("weibo.")).map(({ field }) => field)).toEqual(
       Object.keys(defaults).map((key) => `weibo.${key}`),
     )
-    expect(await form.getConfigData()).toEqual({ bilibili: defaults, weibo: {
+    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: {
       ...defaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0, banWords: ["样例"],
     } })
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "weibo.maxTextLengthForSingleMsg": 50001 }, { Result }))
@@ -142,12 +143,36 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
     expect(await form.setConfigData({ "bilibili.mergeTextPic": 0, "weibo.maxTextLengthForSingleMsg": 4 }, { Result }))
       .toEqual({ ok: true })
-    expect(await form.getConfigData()).toEqual({ bilibili: { ...defaults, mergeTextPic: 0 }, weibo: {
+    expect(await form.getConfigData()).toEqual({ bilibili: { ...biliDefaults, mergeTextPic: 0 }, weibo: {
       ...defaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4, banWords: ["样例"],
     } })
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
   } finally {
     await rm(data, { force: true, recursive: true })
+  }
+})
+
+test("B站视频解析开关保留旧文件覆盖和即时读取", async () => {
+  const data = await mkdtemp(join(tmpdir(), "lotus-bili-auto-parse-"))
+  try {
+    const directory = join(data,"yuki-plugin/config/bilibili")
+    const primary = join(directory,"config.yaml"), override = join(directory,"config.guoba.support.yaml")
+    await mkdir(directory,{recursive:true})
+    const original = "# 保留旧主配置\nparseVideoLink: false\n"
+    await writeFile(primary,original)
+    const {configInfo:form} = supportGuoba(data)
+    const active = createSubscriptionConfig(data,lockFile)
+    expect((await active.settings("bilibili")).parseVideoLink).toBe(false)
+    expect((await form.getConfigData()).bilibili.parseVideoLink).toBe(0)
+    expect(form.schemas.filter(field=>field.field?.endsWith(".parseVideoLink")).map(field=>field.field)).toEqual(["bilibili.parseVideoLink"])
+    expect(await form.setConfigData({"bilibili.parseVideoLink":2},{Result})).toEqual({ok:false,status:422})
+    expect(existsSync(override)).toBe(false)
+    expect(await form.setConfigData({"bilibili.parseVideoLink":1},{Result})).toEqual({ok:true})
+    expect((await active.settings("bilibili")).parseVideoLink).toBe(true)
+    expect(await readFile(primary,"utf8")).toBe(original)
+    expect(YAML.parse(await readFile(override,"utf8"))).toEqual({parseVideoLink:1})
+  } finally {
+    await rm(data,{force:true,recursive:true})
   }
 })
 

@@ -2,12 +2,15 @@ const BasePlugin = globalThis.plugin
 import { LOTUS_INTERCEPT_PRIORITY } from "../core/intercept/priority.js"
 import { canManagePackages } from "../../../lib/command-permissions.ts"
 import { readLocalConfig } from "../../../lib/config.ts"
+import { makeForwardMsg } from "../../../lib/common/common.js"
 import { PermissionService } from "../core/permissions/service.js"
 import { TuneWeaveService } from "../services/tuneweave/service.js"
 import { safeMediaName } from "../services/media/files.js"
 import { renderStatusCard, renderTemplate } from "../core/render/service.js"
+import { formatLocalDateTime } from "../core/time.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicSessionKey, musicShare } from "../services/music/service.js"
+import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.js"
 
 const sessions = new Map(), aliases = { 网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq", 酷狗: "kugou", 酷我: "kuwo", 咪咕: "migu", 汽水: "soda" }
 const activeLogins = new Map()
@@ -90,6 +93,7 @@ export class MusicMedia extends BasePlugin {
         { reg: "^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$", fnc: "choice" },
         { reg: "^#音乐帮助$", fnc: "help" },
         { reg: "^#合伙人登录$", fnc: "partnerLogin" },
+        { reg: "^#合伙人日志$", fnc: "partnerLog" },
         { reg: "^#初始化TuneWeave$", fnc: "initializeTuneWeave" },
         { reg: "^#TuneWeave状态$", fnc: "tuneWeaveStatus" },
       ] })
@@ -184,6 +188,32 @@ export class MusicMedia extends BasePlugin {
     catch (error) {
       if (sessions.get(key) === session) sessions.delete(key)
       await replyText(e, "[media] 音乐：合伙人登录失败："+error.message)
+    }
+    return true
+  }
+
+  async partnerLog() {
+    const e = this.e
+    const config = await readLocalConfig(root, "global")
+    if (!e.isPrivate || e.isDelegated || !ownerPermission(e, config)) {
+      await replyText(e,"请由机器人主人在私聊查看合伙人日志。")
+      return true
+    }
+    let report
+    try { report = await readPartnerLog() }
+    catch {
+      await replyText(e,"[media] 无法读取合伙人日志。")
+      return true
+    }
+    if (report) {
+      await e.reply(makeForwardMsg(e,partnerLogNodes(report)))
+    } else {
+      const fallback = "合伙人日志 · 暂无日志"
+      const image = await renderStatusCard({
+        title:"合伙人日志", subtitle:"最近日志", badge:"空", message:`生成时间：${formatLocalDateTime()}`,
+        items:[{label:"暂无日志",value:"成功 0 · 失败 0"}],
+      }).catch(()=>undefined)
+      await replyImage(e,image,fallback)
     }
     return true
   }

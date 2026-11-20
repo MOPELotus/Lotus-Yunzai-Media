@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import YAML from "yaml"
 import { MusicService, musicSessionKey, musicShare } from "../services/music/service.js"
 import { readMusicAccounts, saveMusicAccount } from "../services/music/accounts.js"
+import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.js"
 
 const temp = []
 async function directory() {
@@ -18,6 +19,45 @@ const track = {
   ref: "netease:track:1042", platform: "netease", name: "合成曲目",
   id: "1042", artists: [{ name: "合成作者" }], album: { cover_url: "https://p1.music.126.net/cover.png" },
 }
+
+test("合伙人日志沿用最近文件和历史命名，读取失败不误报为空",async()=>{
+  const dir=await directory()
+  const newest=join(dir,"nep-latest.json")
+  const dated=report=>JSON.stringify({accounts:[],time:report})
+  expect(await readPartnerLog(join(dir,"missing"))).toBeNull()
+  await writeFile(join(dir,"nep-202601010100.json"),dated("旧时间"))
+  const newer=join(dir,"nep-202601020100.json")
+  await writeFile(newer,dated("最新历史"))
+  await writeFile(join(dir,"nep-z.json"),dated("无关文件"))
+  expect((await readPartnerLog(dir)).time).toBe("最新历史")
+  await writeFile(newest,dated("当前日志"))
+  expect((await readPartnerLog(dir)).time).toBe("当前日志")
+  expect(await readFile(newest,"utf8")).toBe(dated("当前日志"))
+  await writeFile(newest,"{不可读")
+  await expect(readPartnerLog(dir)).rejects.toThrow()
+  await rm(newest)
+  await symlink(newer,newest)
+  await expect(readPartnerLog(dir)).rejects.toThrow()
+})
+
+test("合伙人日志按原先顺序投影账号和逐首结果，避开未筛选的错误数据",()=>{
+  const account={nickname:"示例账号",uid:"42",success:1,fail:0,attempts:2,details:["读取失败 MUSIC_U=fixture-private"],
+    evaluations:[{name:"示例曲目",score:0,extraScore:{作词:8},comment:"纯文字 [CQ:at,qq=all]",status:"success",attempt:2},
+      {name:"失败曲目",error:"MUSIC_U=fixture-private",comment:"token=fixture-private",attempt:1},
+    ]}
+  const nodes=partnerLogNodes({time:"2026-11-20T07:00:00+08:00",trigger:"手动执行",accounts:[account]})
+  expect(nodes.slice(0,3)).toEqual([
+    {type:"text",text:"合伙人日志 · 2026-11-20T07:00:00+08:00 · 手动执行"},
+    {type:"text",text:"示例账号：成功 1 · 失败 0 · 执行 2 轮"},
+    {type:"text",text:"歌曲：示例曲目\n主分：0\n子项：作词:8\n乐评：纯文字 [CQ:at,qq=all]\n第 2 轮 · 成功"},
+  ])
+  expect(nodes[3].text).toContain("第 1 轮 · 失败")
+  expect(JSON.stringify(nodes)).not.toContain("fixture-private")
+  const many=n=>partnerLogNodes({accounts:[{...account,evaluations:Array(n).fill(account.evaluations[0])}]})
+  expect(many(98).at(-1).text).toContain("示例曲目")
+  expect(many(99)).toHaveLength(100)
+  expect(many(99).at(-1).text).toContain("仅显示前 99 条")
+})
 
 test("点歌会话按机器人、群或私聊、发起人隔离", () => {
   const subject = {self_id:99,user_id:42,group_id:77}

@@ -28,6 +28,8 @@ Lotus-Yunzai 的 B 站、抖音、动态订阅和点歌模块。直接发送视�
 
 在已绑定的主人会话中，`#TuneWeave状态` 检查网易云登录和扩展接口，`#初始化TuneWeave` 检查或初始化 TuneWeave。合伙人账号可以在主人私聊直接发送 `#合伙人登录`，等待时间和轮询间隔沿用 `netease_partner.login_timeout_ms` 与 `login_poll_ms`。这些指令沿用 `permissions.scopes.netease.partner`，扫码只更新账号记录。
 
+主人可私聊发送 `#合伙人日志`，查看保存在 `data/logs` 的最近合伙人报告。优先读取 `nep-latest.json`，也兼容按时间命名的旧报告。日志入口沿用 `permissions.scopes.netease.partner`，展示账号汇总及逐首结果。原始接口错误保存在本地日志内。
+
 `config/global.yaml` 的 `music` 配置支持以下字段。
 
 | 字段 | 默认值 |

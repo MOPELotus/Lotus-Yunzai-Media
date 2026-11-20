@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { createWeiboProvider } from "../services/subscriptions/weibo/index.js"
+import { subscriptionSession } from "../services/subscriptions/session.js"
 import { settingsFor } from "../services/subscriptions/config.js"
 import { makeDynamicMessages } from "../services/subscriptions/render.js"
 
@@ -9,6 +10,46 @@ const createdAt = Date.parse(created_at) / 1000
 const user = { id: 2803301701, screen_name: "公开账号", profile_image_url: "//tva1.sinaimg.cn/avatar.jpg" }
 const picture = url => ({ large: { url } })
 const card = mblog => ({ card_type: 9, mblog: { created_at, user, ...mblog } })
+
+test.each([
+  { replacement: "csrf-renewed", expected: "csrf-renewed" },
+  { replacement: "csrf-old", expected: null },
+])("微博会话失效后仅重试源站实际换发的 CSRF：$replacement", async ({ replacement, expected }) => {
+  const account = "Yz:yuki:weibo:cookie:.weibo.cn:SUB"
+  const token = "Yz:yuki:weibo:cookie:.m.weibo.cn:X-XSRF-TOKEN"
+  const values = new Map([[account, "fixture-account"], [token, "csrf-old"]])
+  const redis = {
+    async mGet(keys) { return keys.map(key => values.get(key) ?? null) },
+    async eval(_script, { keys, arguments: [proof, before, after, metadata] }) {
+      expect(keys).toEqual([account, token])
+      expect(proof).toBe(values.get(account))
+      expect(before).toBe(values.get(token))
+      values.set(token, after)
+      values.set(token + ":meta", JSON.parse(metadata).meta)
+      return 1
+    },
+  }
+  const attempted = []
+  const provider = createWeiboProvider({
+    session: subscriptionSession("weibo", "", () => redis),
+    fetch: async (_url, { headers }) => {
+      const request = new Headers(headers)
+      attempted.push({ token: request.get("x-xsrf-token"), cookie: request.get("cookie") })
+      if (attempted.length === 1) {
+        return Response.json({ ok: 0, msg: "需要登录" }, {
+          headers: { "Set-Cookie": `X-XSRF-TOKEN=${replacement}; Path=/; Max-Age=2700` },
+        })
+      }
+      return Response.json({ ok: 1, data: { cards: [card({ mid: "80", text: "测试动态" })] } })
+    },
+  })
+  expect((await provider.fetchPosts(uid)).map(post => post.id)).toEqual(["80"])
+  expect(attempted).toEqual([
+    { token: "csrf-old", cookie: "SUB=fixture-account; X-XSRF-TOKEN=csrf-old" },
+    { token: expected, cookie: expected === null ? null : `SUB=fixture-account; X-XSRF-TOKEN=${expected}` },
+  ])
+  expect(values.get(account)).toBe("fixture-account")
+})
 
 test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链接和带图转发", async () => {
   const requests = []

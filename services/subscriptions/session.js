@@ -172,7 +172,7 @@ export function subscriptionSession(id, directory, getRedis) {
       } catch {
         // A subscription still works anonymously when the previous store is unavailable.
       }
-      return entries.filter((entry) => !rejected.has(sessionIdentity(platform, entry)))
+      return entries.filter((entry) => !rejected.has(sessionCredentialKey(platform, entry)))
     },
     headers(session, headers) {
       const result = new Headers(headers)
@@ -183,7 +183,7 @@ export function subscriptionSession(id, directory, getRedis) {
     },
     reject(session) {
       if (rejected.size >= 8) rejected.clear()
-      rejected.add(sessionIdentity(platform, session))
+      rejected.add(sessionCredentialKey(platform, session))
     },
     async rotate(session, url, headers) {
       if (!allowed(platform, url) || session.source !== "session") return
@@ -205,9 +205,11 @@ export function subscriptionSession(id, directory, getRedis) {
   }
 }
 
-function sessionIdentity(platform, entry) {
-  const values = platform.identity.map((name) => entry.fields.get(name) ?? "").join("\0")
-  return entry.source + ":" + createHash("sha256").update(values).digest("hex")
+function sessionCredentialKey(platform, entry) {
+  const values = platform.identity.map((name) => entry.fields.get(name) ?? "")
+  // The API can renew the request's CSRF token while keeping the account cookie.
+  if (platform.xsrf) values.push(entry.fields.get(platform.xsrf) ?? "")
+  return entry.source + ":" + createHash("sha256").update(values.join("\0")).digest("hex")
 }
 
 export async function readWithSubscriptionSession(transport, sessions, url, options, decode) {

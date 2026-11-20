@@ -24,8 +24,8 @@ function platformSection(platform, account, categories, extra = []) {
 
 const sections = [
   { title: "指令前缀", rows: [
-    { label: "#优纪 · #yuki", value: "如 #优纪B站订阅列表", icon: "diagram" },
-    { label: "/优纪 · /yuki", value: "如 /yuki微博订阅列表", icon: "diagram" },
+    { label: "#", value: "如 #B站订阅列表", icon: "diagram" },
+    { label: "/", value: "如 /微博订阅列表", icon: "diagram" },
   ] },
   platformSection("B站", "UP主", "视频、图文、文章、转发、直播", [
     { label: "B站视频解析", value: "直接发送视频链接", icon: "romaritime_flower" },
@@ -54,7 +54,7 @@ async function legacyHelpAssets() {
   for (const directory of assetDirectories) {
     const font = join(directory, "fonts/OPSans.woff2")
     if (!(await Bun.file(font).exists())) continue
-    try { FontLibrary.use("YukiHelp", [font]); break }
+    try { FontLibrary.use("MediaSubscriptionHelp", [font]); break }
     catch { /* Use the system CJK font if the old file cannot load. */ }
   }
   return { background, icons:new Map(icons) }
@@ -82,7 +82,7 @@ export async function drawSubscriptionHelp({mode=process.env.LOTUS_SKIA_MODE||"a
       ctx.stroke()
     }
     function text(value,x,y,size,color,max) {
-      ctx.font = `${size}px "YukiHelp", "Noto Sans CJK SC", sans-serif`
+      ctx.font = `${size}px "MediaSubscriptionHelp", "Noto Sans CJK SC", sans-serif`
       ctx.fillStyle = color
       ctx.textBaseline = "top"
       ctx.fillText(value,x,y,max)

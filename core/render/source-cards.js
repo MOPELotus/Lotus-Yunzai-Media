@@ -7,7 +7,7 @@ import { plainGameText } from "./plain-text.js"
 
 // Bilibili and Douyin retain the genshin mysNews layout drawn by Lotus-ReFactor.
 const GOLD='#d3bc8e',WHITE='#fff'
-const TEXT='"SourceMiao", MiSans, sans-serif'
+const TEXT='"MediaSourceText", MiSans, sans-serif'
 let fontsLoaded=false
 const cache=new Map()
 
@@ -17,7 +17,7 @@ const background = path.join(resourcesPath, "miao-theme/bg/bg-hydro.webp")
 async function init() {
  if(fontsLoaded)return
  for (const [name, candidates] of [
-  ["SourceMiao", [path.join(resourcesPath,"miao-theme/fonts/HYWH-65W.ttf"),resolveData("atlas/theme/fonts/HYWH-65W.ttf")]],
+  ["MediaSourceText", [path.join(resourcesPath,"miao-theme/fonts/HYWH-65W.ttf"),resolveData("atlas/theme/fonts/HYWH-65W.ttf")]],
   ["MiSans", [path.join(resourcesPath,"fonts/MiSans-VF.ttf"),resolveData("atlas/theme/fonts/MiSans-VF.ttf")]],
  ]) {
   for (const candidate of candidates) {

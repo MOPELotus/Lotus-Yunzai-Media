@@ -168,9 +168,9 @@ export function createSubscriptionConfig(dataDirectory, lockFile) {
   const root = join(dataDirectory, "yuki-plugin","config")
   const file = (id, name) => join(root,id,name + ".yaml")
   async function effective(id,name) {
-    const guoba = file(id,name + ".guoba.support")
-    const preferred = await read(guoba)
-    if (preferred !== undefined) return { path: guoba, ...preferred }
+    const override = file(id,name + ".guoba.support")
+    const preferred = await read(override)
+    if (preferred !== undefined) return { path: override, ...preferred }
     const path = file(id,name)
     return { path, ...(await read(path) ?? { raw: "", data: {} }) }
   }

@@ -21,8 +21,8 @@ const defaults = {
 }
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllCD: 1800, parseVideoLink: 1 }
 
-test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆盖文件", async () => {
-  const data = await mkdtemp(join(tmpdir(), "lotus-yuki-guoba-"))
+test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆盖文件", async () => {
+  const data = await mkdtemp(join(tmpdir(), "lotus-media-config-"))
   try {
     const { configInfo: form } = supportGuoba(data)
     expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: defaults })

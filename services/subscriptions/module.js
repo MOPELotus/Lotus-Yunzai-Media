@@ -7,8 +7,8 @@ import { profileText } from "./profile.js"
 import { renderSubscriptionHelp } from "./help.js"
 
 const dataDirectory = fileURLToPath(new URL("../../../../data",import.meta.url))
-const prefix = /^(?:#|\/)(?:yuki|优纪)?/iu
-const help = /^(?:#|\/)(?:yuki|优纪)帮助$/iu
+const prefix = /^[#/]/u
+const help = /^[#/]媒体帮助$/u
 const platformName = "(哔哩哔哩|哔哩|bilibili|bili|b站|微博|weibo)"
 const edit = new RegExp("^(订阅|添加|add|取消|删除|del)"+platformName+"推送\\s*(.*)$","iu")
 const list = new RegExp("^"+platformName+"(全部)?(?:推送|动态|订阅)列表$","iu")

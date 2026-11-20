@@ -54,7 +54,7 @@ function postNode(payloads) {
   return payloads.flatMap(payload => Array.isArray(payload) ? payload : [payload])
 }
 
-// Yuki aggregates all unrepeated posts in the destination, using a strict threshold.
+// Use the combined size of unrepeated posts for the destination and a strict threshold.
 export function useDynamicForward(posts, settings) {
   if (!settings.mergeForward) return false
   let images = 0, textLength = 0

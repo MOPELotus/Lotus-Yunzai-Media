@@ -14,7 +14,7 @@ import { renderSubscriptionHelp } from "../services/subscriptions/help.js"
 
 const temp=[]
 async function directory() {
-  const root=await mkdtemp(join(tmpdir(),"lotus-yuki-unit-"))
+  const root=await mkdtemp(join(tmpdir(),"lotus-media-subscriptions-"))
   temp.push(root)
   return root
 }
@@ -31,7 +31,7 @@ function raw(type=draw,fields={}) {
     modules:{module_author:{mid:uid,pub_ts:seen,name:"试验发布者"},module_dynamic:fields} }
 }
 
-test("B站动态解析适配 Yuki 的 Opus 图文、直播、原转发与来源域",()=>{
+test("B站动态解析适配 Opus 图文、直播、原转发与来源域",()=>{
   const original=raw(draw,{major:{opus:{title:"标题",summary:{rich_text_nodes:[{text:"正文"},{"text":"#话题#"}]},pics:[
     {url:"//i0.hdslb.com/test.webp"},{url:"https://wrong.test/a.png"},
   ]}}})
@@ -267,8 +267,8 @@ test("原动态订阅指令保留权限、别名、分类与当前会话",async(
   const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
   try {
     const group={self_id:99,user_id:40,group_id:77,message_type:"group",isMaster:true}
-    expect(await plugin.fallback("/yuki订阅哔哩推送 图文 UID："+uid,{...group,isMaster:false})).toContain("主人")
-    expect(await plugin.fallback("/yuki订阅哔哩推送 图文 UID："+uid,group)).toContain("公开昵称")
+    expect(await plugin.fallback("/订阅哔哩推送 图文 UID："+uid,{...group,isMaster:false})).toContain("主人")
+    expect(await plugin.fallback("/订阅哔哩推送 图文 UID："+uid,group)).toContain("公开昵称")
     expect(await plugin.fallback("#B站订阅列表",{...group,isMaster:false})).toContain("[图文]")
     expect(await plugin.fallback("#B站订阅列表",{...group,group_id:78})).toContain("当前没有订阅")
     expect(await plugin.fallback("#执行B站任务",group)).toBe("订阅存储未连接。")
@@ -302,7 +302,7 @@ test("全部订阅列表只列聊天所在机器人，授权终端可核对全�
   const provider={id:"bilibili",label:"B站",typeNames:biliTypes}
   const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
   try {
-    const command="/yukiB站全部推送列表"
+    const command="/B站全部推送列表"
     const oneBot={self_id:99,user_id:42,group_id:77,message_type:"group",isMaster:true}
     const milky={adapter:"milky",self_id:98,user_id:42,message_type:"private",isMaster:false,isBotMaster:id=>id===42}
     expect(await plugin.fallback(command,oneBot)).toEqual({type:"forward",nodes:[
@@ -320,19 +320,22 @@ test("全部订阅列表只列聊天所在机器人，授权终端可核对全�
   } finally { await plugin.dispose() }
 })
 
-test("公开订阅帮助兼容旧前缀，渲染不可用时保留现有指令",async()=>{
+test("媒体帮助只展示当前指令，停用原插件品牌前缀",async()=>{
   const root=await directory()
   const stub=()=>renderSubscriptionHelp(async()=>{ throw new Error("fixture render unavailable") })
   const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{},getRedis:()=>undefined,renderHelp:stub})
   try {
     const user={self_id:99,user_id:42,message_type:"private",isMaster:false}
-    const help=await plugin.fallback("#优纪帮助",user)
+    const help=await plugin.fallback("#媒体帮助",user)
     expect(help.type).toBe("text")
     expect(help.text).toContain("#B站订阅列表")
     expect(help.text).toContain("#执行微博任务")
     expect(help.text).toContain("直接发送视频链接")
-    expect(help.text).not.toMatch(/扫码|Cookie|更新Yuki/iu)
-    for (const command of ["/优纪帮助","#yuki帮助","/YUKI帮助"]) expect(await plugin.fallback(command,user)).toEqual(help)
+    expect(help.text).not.toMatch(/扫码|Cookie|优纪|yuki/iu)
+    expect(await plugin.fallback("/媒体帮助",user)).toEqual(help)
+    for (const command of ["#优纪帮助","/优纪帮助","#yuki帮助","/YUKI帮助"]) {
+      expect(await plugin.fallback(command,user)).toBeUndefined()
+    }
     expect(await plugin.fallback("#帮助",user)).toBeUndefined()
     expect(await renderSubscriptionHelp(async()=>({png:Buffer.from([1])}))).toEqual({type:"image",file:Buffer.from([1])})
   } finally { await plugin.dispose() }
@@ -355,10 +358,12 @@ test("B站旧查人指令保留开放资料、搜索粉丝数和规范直播间�
   const plugin=await createSubscriptionModule({lockFile,groups:{}},{directory:root,providers:{bilibili:provider},getRedis:()=>undefined})
   try {
     const group={self_id:99,user_id:40,group_id:77,message_type:"group",isMaster:false}
-    expect(await plugin.fallback("/优纪B站UP主UID:"+uid,group)).toEqual([{type:"text",text:["公开昵称 · UID "+uid,
+    expect(await plugin.fallback("/优纪B站UP主UID:"+uid,group)).toBeUndefined()
+    expect(await plugin.fallback("#yukiB站UP主昵称：公开",group)).toBeUndefined()
+    expect(await plugin.fallback("/B站UP主UID:"+uid,group)).toEqual([{type:"text",text:["公开昵称 · UID "+uid,
       "性别：保密","等级：6","粉丝数：0","关注数：60","[CQ:at,qq=all]","直播间：公开直播","直播状态：未开播",
       "观看人数：0","直播链接：https://live.bilibili.com/12"].join("\n")}])
-    expect(await plugin.fallback("#yukiB站UP主昵称：公开",group)).toEqual([{type:"text",text:
+    expect(await plugin.fallback("#B站UP主昵称：公开",group)).toEqual([{type:"text",text:
       `公开昵称 · UID ${uid}\n粉丝数：123\n\n另一账号 · UID 123`}])
     expect(paths).toEqual(["/x/web-interface/card","/x/web-interface/search/type"])
   } finally { await plugin.dispose() }

@@ -46,17 +46,26 @@ test("B站动态解析适配 Yuki 的 Opus 图文、直播、原转发与来源�
 
 test("B站视频和直播的文字推送保留原动态类别字段和明确的链接",async()=>{
   const provider=createBiliProvider()
-  const settings=settingsFor({pushMsgMode:0,mergeTextPic:0})
-  const videoRaw=raw("DYNAMIC_TYPE_AV",{major:{archive:{title:"视频标题",desc:"视频简介",jump_url:"//www.bilibili.com/video/BV1234567890",
+  const settings=settingsFor({pushMsgMode:0,mergeTextPic:0,pushContentLenLimit:2,pushContentLineLimit:1})
+  const videoRaw=raw("DYNAMIC_TYPE_AV",{major:{archive:{title:"视频标题",desc:"视频简介\n第二行详细资料",jump_url:"//www.bilibili.com/video/BV1234567890",
     cover:"//i0.hdslb.com/video.jpg",stat:{play:"1.2万",danmaku:"0"},
   }}})
   videoRaw.modules.module_stat={like:{count:23},comment:{count:0},forward:{count:"无数据"}}
-  const [video,attachment]=await makeDynamicMessages(provider,normalizeBiliDynamic(videoRaw,uid),settings)
+  const post=normalizeBiliDynamic(videoRaw,uid)
+  const [video,attachment]=await makeDynamicMessages(provider,post,settings)
   expect(video.type).toBe("text")
+  expect(video.text).toContain("视频简介\n第二行详细资料")
+  const [hidden]=await makeDynamicMessages(provider,post,{...settings,contentLimit:0})
+  expect(hidden.text).not.toContain("视频简介")
   expect(video.text).toContain("0弹幕 • 1.2万播放 • 23点赞 • 0评论")
   expect(video.text).not.toContain("转发")
   expect(video.text).toEndWith("https://www.bilibili.com/video/BV1234567890")
   expect(attachment).toEqual({type:"image",file:"https://i0.hdslb.com/video.jpg"})
+
+  const repost={...raw("DYNAMIC_TYPE_FORWARD",{desc:{text:"转发说明"}}),id_str:"12234456",orig:videoRaw}
+  const [forwarded]=await makeDynamicMessages(provider,normalizeBiliDynamic(repost,uid),settings)
+  expect(forwarded.text).toContain("转发...\n转发链接：")
+  expect(forwarded.text).toContain("视频简介\n第二行详细资料")
 
   const liveRaw=({link,live_start_time})=>raw("DYNAMIC_TYPE_LIVE_RCMD",{major:{live_rcmd:{content:JSON.stringify({live_play_info:{
     title:"直播标题",link,parent_area_name:"单机游戏",area_name:"原神",live_start_time,watched_show:{num:0},

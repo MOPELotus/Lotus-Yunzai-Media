@@ -60,8 +60,9 @@ function clipContent(content, settings) {
   return Array.from(content.split(/\r?\n/u).slice(0,settings.lineLimit).join("\n")).slice(0,settings.contentLimit).join("")
 }
 
-function limitTextContent(content, settings) {
+function limitTextContent({content,type}, settings) {
   if (!content || settings.contentLimit === 0 || settings.lineLimit === 0) return ""
+  if (type === "DYNAMIC_TYPE_AV") return content
   const lines = []
   let remaining = settings.contentLimit
   for (const line of content.split(/\r?\n/u).slice(0,settings.lineLimit)) {
@@ -77,8 +78,8 @@ function limitTextContent(content, settings) {
   return lines.join("\n")
 }
 
-function textBlock(item, settings, limit=clipContent) {
-  return [item.title,limit(item.content,settings)].filter(Boolean).join("\n")
+function textBlock(item, content) {
+  return [item.title,content].filter(Boolean).join("\n")
 }
 
 function mediaFor(provider, item, settings) {
@@ -116,11 +117,11 @@ function textMessages(provider, post, settings) {
   const heading = `【${provider.label}${category(provider,post)}】${post.author}`
   const repost = post.type === "DYNAMIC_TYPE_FORWARD"
   const linkLabel = post.activity?.roomUrl ? "直播链接" : repost ? "转发链接" : "链接"
-  const elements = [heading,published(post),textBlock(post,settings,limitTextContent),...textDetails(post),`${linkLabel}：${post.url}`]
+  const elements = [heading,published(post),textBlock(post,limitTextContent(post,settings)),...textDetails(post),`${linkLabel}：${post.url}`]
   const original = post.forwarded
   if (original) {
     elements.push(`原帖 · ${category(provider,original)} · ${original.author}`,published(original),
-      textBlock(original,settings,limitTextContent),...textDetails(original))
+      textBlock(original,limitTextContent(original,settings)),...textDetails(original))
     if (original.url !== post.url) {
       const label = original.activity?.roomUrl ? "原帖直播链接" : "原帖链接"
       elements.push(`${label}：${original.url}`)
@@ -210,7 +211,7 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
     const heading = `原帖 · ${category(provider,original)} · ${original.author}`
     drawBlocks.push({lines:breakLines(metrics,heading,22,748,true),size:22,bold:true,gap:2})
     drawBlocks.push({lines:[published(original)],size:16,gap:10,color:"#666"})
-    const content=textBlock(original,settings)
+    const content=textBlock(original,clipContent(original.content,settings))
     if (content) drawBlocks.push({lines:breakLines(metrics,content,22,748),size:22,gap:12})
     pushImages(forwarded)
   }

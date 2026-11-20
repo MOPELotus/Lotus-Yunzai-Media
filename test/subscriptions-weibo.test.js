@@ -37,7 +37,7 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
       { card_type: 11, mblog: post.mblog }, post, post,
       card({ mid: "12344", text: "推荐内容", user: { id: 42 } }),
       card({ mid: "12345", text: "只有正文", bid: "../not-a-link" }),
-      card({ mid: "12346", text: "视频正文", page_info: { type: "video", title: "视频标题", page_pic: { url: "//wx1.sinaimg.cn/cover.jpg" } } }),
+      card({ mid: "12346", text: "视频正文<br>第二行", page_info: { type: "video", title: "视频标题", page_pic: { url: "//wx1.sinaimg.cn/cover.jpg" } } }),
     ] } })
   } })
   try {
@@ -63,6 +63,9 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
     const [repost]=await makeDynamicMessages(source,posts[0],settingsFor({pushMsgMode:0,mergeTextPic:0}))
     expect(repost.text).toContain(`1.2万点赞 • 0评论 • 3.4万转发\n转发链接：https://weibo.com/${uid}/Qq012Aa\n原帖 · 图文 · 来源账号`)
     expect(repost.text).toEndWith("原帖 <文字>\n0点赞 • 7转发\n原帖链接：https://weibo.com/42/Qq012Ba")
+    const [video]=await makeDynamicMessages(source,posts[2],settingsFor({pushMsgMode:0,mergeTextPic:0,
+      pushContentLenLimit:2,pushContentLineLimit:1}))
+    expect(video.text).toContain("视频标题\n视频正文\n第二行\n链接：")
     expect(requests.map(({ url }) => Object.fromEntries(url.searchParams))).toEqual([
       { type: "uid", value: uid, containerid: `100505${uid}` }, { containerid: `107603${uid}` },
     ])

@@ -31,6 +31,21 @@ function raw(type=draw,fields={}) {
     modules:{module_author:{mid:uid,pub_ts:seen,name:"试验发布者"},module_dynamic:fields} }
 }
 
+test("B 站旧图文标题进入推送，Opus 保留自己的标题",async()=>{
+  const provider=createBiliProvider()
+  const settings=settingsFor({pushMsgMode:0})
+  const desc={title:"旧图文标题",text:"正文"}
+  for (const type of [draw,"DYNAMIC_TYPE_WORD"]) {
+    const post=normalizeBiliDynamic(raw(type,{desc}),uid)
+    const [message]=await makeDynamicMessages(provider,post,settings)
+    expect(message.text).toContain("旧图文标题\n正文\n链接：")
+  }
+  const opus=normalizeBiliDynamic(raw(draw,{desc,major:{opus:{title:"新图文标题"}}}),uid)
+  expect(opus.title).toBe("新图文标题")
+  const malformed=normalizeBiliDynamic(raw(draw,{desc:{title:{},text:"正文"}}),uid)
+  expect(malformed.title).toBe("")
+})
+
 test("B站动态解析适配 Opus 图文、直播、原转发与来源域",()=>{
   const original=raw(draw,{major:{opus:{title:"标题",summary:{rich_text_nodes:[{text:"正文"},{"text":"#话题#"}]},pics:[
     {url:"//i0.hdslb.com/test.webp"},{url:"https://wrong.test/a.png"},

@@ -85,7 +85,8 @@ export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
   const dynamic = raw.modules?.module_dynamic ?? {}
   const major = dynamic.major ?? {}
   const opus = major.opus
-  let title = opus?.title ?? ""
+  const legacyTitle = type === "DYNAMIC_TYPE_WORD" || type === "DYNAMIC_TYPE_DRAW" ? dynamic.desc?.title : undefined
+  let title = opus?.title ?? legacyTitle
   let content = richText(opus?.summary?.rich_text_nodes ?? opus?.summary?.text ??
     dynamic.desc?.rich_text_nodes ?? dynamic.desc?.text)
   let url = dynamicRoot + id

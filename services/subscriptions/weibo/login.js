@@ -12,19 +12,24 @@ function userId(value) {
 }
 
 async function get(request, session, state, pathname, active, extra = {}) {
+  active.throwIfAborted()
   const url = new URL(pathname, base)
+  const deadline = AbortSignal.any([active, AbortSignal.timeout(10_000)])
   const response = await request(url, {
     method: "GET", redirect: "error", credentials: "omit",
-    signal: AbortSignal.any([active, AbortSignal.timeout(10_000)]),
+    signal: deadline,
     headers: session.headers(state, { Accept: "application/json", Referer: base + "/", "User-Agent": "Mozilla/5.0", ...extra }),
   })
-  if (!response.ok) {
+  if (deadline.aborted || !response.ok) {
     void response.body?.cancel().catch(() => {})
+    deadline.throwIfAborted()
     if (response.status === 401) return { expired: true }
     return {}
   }
   const data = await response.json()
+  deadline.throwIfAborted()
   await session.rotate(state, url, response.headers)
+  active.throwIfAborted()
   return { data }
 }
 

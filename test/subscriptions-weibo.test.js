@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { createWeiboProvider } from "../services/subscriptions/weibo/index.js"
+import { weiboSubscriptionLogin } from "../services/subscriptions/weibo/login.js"
 import { subscriptionSession } from "../services/subscriptions/session.js"
 import { settingsFor } from "../services/subscriptions/config.js"
 import { makeDynamicMessages } from "../services/subscriptions/render.js"
@@ -49,6 +50,32 @@ test.each([
     { token: expected, cookie: expected === null ? null : `SUB=fixture-account; X-XSRF-TOKEN=${expected}` },
   ])
   expect(values.get(account)).toBe("fixture-account")
+})
+
+test("微博查登录期间私聊断开，迟到的登录响应不能续写会话或查询资料", async () => {
+  const controller = new AbortController()
+  const proof = "Yz:yuki:weibo:cookie:.weibo.cn:SUB"
+  const redis = { async mGet(keys) { return keys.map(key => key === proof ? "fixture-account" : null) } }
+  const requests = []
+  const rotated = []
+  const check = weiboSubscriptionLogin({
+    getRedis: () => redis,
+    session: {
+      headers: (_state, headers) => headers,
+      async rotate(_state, url) { rotated.push(url.pathname) },
+    },
+    owner: () => true,
+    fetch: async url => {
+      requests.push(url.pathname)
+      if (url.pathname === "/api/config") controller.abort()
+      return Response.json({ data: { login: true, uid, user_token: "fixture-token" } }, {
+        headers: { "Set-Cookie": "X-XSRF-TOKEN=csrf-late; Path=/" },
+      })
+    },
+  })
+  expect(await check("#我的微博登录", { message_type: "private", privateCredentialSignal: controller.signal })).toBeUndefined()
+  expect(requests).toEqual(["/api/config"])
+  expect(rotated).toEqual([])
 })
 
 test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链接和带图转发", async () => {

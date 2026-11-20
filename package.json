@@ -10,7 +10,7 @@
     "@lotus-yunzai/skia": "workspace:*",
     "cheerio": "1.0.0",
     "qrcode": "1.5.4",
-    "skia-canvas": "3.0.8",
+    "skia-canvas": "4.0.1",
     "sm-crypto": "0.4.0",
     "yaml": "2.9.1"
   }

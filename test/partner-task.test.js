@@ -9,6 +9,7 @@ import { NeteasePartnerAccounts } from "../services/music/partner-account.js"
 import { NeteasePartnerTask } from "../services/music/partner-task.js"
 import { PartnerReviewService } from "../services/music/partner-review.js"
 import { partnerLogNodes, readPartnerLog } from "../services/music/partner-log.js"
+import { createPartnerSchedule, partnerCron } from "../services/music/partner-schedule.js"
 
 test("合伙人先核验旧账号，沿用任务顺序、账号偏好和未确认评分记录", async () => {
   const dir = await mkdtemp(join(tmpdir(),"lotus-partner-task-"))
@@ -100,6 +101,95 @@ test("空合伙人档案保存说明，未连接平台", async () => {
     expect(report.accounts[0]).toMatchObject({nickname:"未配置账号",success:0,fail:0})
     expect(await readPartnerLog(dir)).toEqual(report)
   } finally { await rm(dir,{recursive:true,force:true}) }
+})
+
+test("自动合伙人沿用原日记录，新状态优先，旧日期冲突时不执行", async () => {
+  const dir = await mkdtemp(join(tmpdir(),"lotus-partner-old-day-"))
+  const stateFile = join(dir,"state.yaml"), old = join(dir,"old.yaml"), other = join(dir,"another-old.yaml")
+  const source = "last_run_date: '2026-11-20'\nlast_run_time: '2026-11-20T08:10:10+08:00'\n"
+  try {
+    await writeFile(old,source)
+    const task = new NeteasePartnerTask({
+      stateFile, legacyStateFiles:[old,other], logDir:dir, now:()=>new Date(2026,10,20,12),
+      accounts:{ loadAccounts() { throw new Error("已有日记录时无需读取") } },
+    })
+    expect(await task.hasRunToday()).toBe(true)
+    expect(await task.execute({}, "自动任务", {once:true})).toEqual({skipped:true,reason:"already_run_today"})
+    expect(await Bun.file(stateFile).exists()).toBe(false)
+    await writeFile(other,"last_run_date: '2026-11-19'\n")
+    await expect(task.hasRunToday()).rejects.toThrow("两处旧合伙人任务记录不一致")
+    await writeFile(stateFile,"{}\n")
+    expect(await task.hasRunToday()).toBe(false)
+    expect(await readFile(old,"utf8")).toBe(source)
+  } finally { await rm(dir,{recursive:true,force:true}) }
+})
+
+test("定时和启动补跑只在宿主激活后执行，关闭、同日已运行和断线时跳过", async () => {
+  let ready, cronRun, dayRecorded = false
+  const delayed = Promise.withResolvers(), waitStarted = Promise.withResolvers(), done = Promise.withResolvers()
+  const now = () => new Date(2026,10,20,2)
+  const config = { netease_partner:{enable:true, auto_catch_up:true} }
+  const calls = [], handoff = new AbortController()
+  const runtime = {
+    disconnect:handoff.signal,
+    whenReady(action) { ready = action; return () => calls.push("unready") },
+    registerTask(cron, action) {
+      expect(cron).toBe("0 5 0 * * *")
+      cronRun = action
+      return () => calls.push("unregister")
+    },
+    async notifyMasters(reply) { calls.push(reply); done.resolve() },
+  }
+  const dispose = await createPartnerSchedule({mediaRuntime:runtime}, {
+    load:async()=>config, now,
+    hasRunToday:async()=>dayRecorded,
+    wait:async(ms, signal)=>{expect(ms).toBe(60000);expect(signal.aborted).toBe(false);waitStarted.resolve();await delayed.promise},
+    ensureReady:async()=>calls.push("status"),
+    async execute(_config,trigger,options) { expect(options.once).toBe(true); calls.push(trigger); dayRecorded=true; return {accounts:[]} },
+    async render() { return {text:"通知给主人"} },
+  })
+  expect(partnerCron("5 0 * * ?")).toBe("0 5 0 * * *")
+  expect(partnerCron("")).toBe("0 5 0 * * *")
+  expect(partnerCron("0 5 0 * * ? *")).toBe("0 5 0 * * *")
+  expect(() => partnerCron("0 5 0 * * ? 2026")).toThrow()
+  await cronRun()
+  expect(calls).toEqual([])
+  ready()
+  await waitStarted.promise
+  expect(calls).toEqual([])
+  delayed.resolve()
+  await done.promise
+  await cronRun()
+  expect(calls).toEqual(["status","启动补跑","通知给主人"])
+  dayRecorded = false
+  config.netease_partner.enable = false
+  await cronRun()
+  expect(calls).toEqual(["status","启动补跑","通知给主人"])
+  handoff.abort()
+  config.netease_partner.enable = true
+  await cronRun()
+  await dispose()
+  expect(calls).toEqual(["status","启动补跑","通知给主人","unready","unregister"])
+})
+
+test("正常定时不补跑，原设置关闭时不生成主人通知", async () => {
+  let ready, cronRun
+  const calls = []
+  const dispose = await createPartnerSchedule({mediaRuntime:{
+    whenReady(action) { ready=action; return ()=>{} },
+    registerTask(_cron, action) { cronRun=action; return ()=>{} },
+    notifyMasters() { throw new Error("关闭时不能通知") },
+  }}, {
+    load:async()=>({netease_partner:{enable:true,auto_catch_up:false,notify_master:false}}),
+    hasRunToday:async()=>false,
+    wait(){throw new Error("关闭补跑时无需等待")},
+    execute:async(_config,trigger)=>{calls.push(trigger);return {accounts:[]}},
+    render(){throw new Error("关闭通知时无需渲染")},
+  })
+  ready()
+  await cronRun()
+  expect(calls).toEqual(["自动任务"])
+  await dispose()
 })
 
 test("合伙人乐评只接受本次联网证据中的来源", async () => {

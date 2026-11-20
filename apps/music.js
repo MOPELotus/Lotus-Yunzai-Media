@@ -41,6 +41,34 @@ function loginTime(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : fallback
 }
 
+export async function runPartnerTask(config, trigger, { signal, once, before } = {}) {
+  if (partnerJob || activeLogins.has("netease")) return { skipped:true, reason:"busy" }
+  const job = { controller:new AbortController(), promise:undefined }
+  partnerJob = job
+  const active = signal ? AbortSignal.any([job.controller.signal, signal]) : job.controller.signal
+  try {
+    active.throwIfAborted()
+    await before?.()
+    const task = new NeteasePartnerTask({ tuneweaveConfig:config.tuneweave })
+    job.promise = task.execute(config.netease_partner, trigger, { signal:active, once })
+    return await job.promise
+  } finally {
+    if (partnerJob === job) partnerJob = undefined
+  }
+}
+
+export async function renderPartnerReport(title, report, userId) {
+  const items = report.accounts.map(account => ({
+    label: account.nickname,
+    value: `成功 ${account.success} · 失败 ${account.fail}`,
+  }))
+  const failed = report.accounts.some(account => account.fail)
+  const image = await renderStatusCard({ title, subtitle:report.trigger, badge:failed ? "有失败" : "完成",
+    message:`生成时间：${report.time}`, userId, items,
+  }).catch(() => undefined)
+  return { image, text:[title,...items.map(item=>`${item.label}：${item.value}`)].join("\n") }
+}
+
 async function sendVoice(e, media) {
   const name = `${safeMediaName(media.track.name)}.wav`
   if (e.deliverMedia) {
@@ -240,33 +268,19 @@ export class MusicMedia extends BasePlugin {
       await replyText(e, "仅机器人主人可执行合伙人任务。")
       return true
     }
-    if (partnerJob || activeLogins.has("netease")) {
-      await replyText(e, "合伙人任务或网易云登录正在进行，请稍候。")
-      return true
-    }
-    const job = { controller:new AbortController(), promise:undefined }
-    partnerJob = job
-    const signal = e.privateCredentialSignal ?
-      AbortSignal.any([job.controller.signal,e.privateCredentialSignal]) : job.controller.signal
+    const signal = e.privateCredentialSignal
     try {
-      await replyText(e, "网易云合伙人任务开始，将按账号配置提交评分和乐评。")
-      const task = new NeteasePartnerTask({ tuneweaveConfig:config.tuneweave })
-      job.promise = task.execute(config.netease_partner, "手动执行", { signal })
-      const report = await job.promise
-      const items = report.accounts.map(account => ({
-        label: account.nickname,
-        value: `成功 ${account.success} · 失败 ${account.fail}`,
-      }))
-      const failed = report.accounts.some(account => account.fail)
-      const title = "合伙人测试"
-      const image = await renderStatusCard({ title, subtitle:report.trigger, badge:failed ? "有失败" : "完成",
-        message:`生成时间：${report.time}`, userId:e.user_id, items,
-      }).catch(() => undefined)
-      if (!signal.aborted) await replyImage(e, image, [title,...items.map(item=>`${item.label}：${item.value}`)].join("\n"))
+      const report = await runPartnerTask(config, "手动执行", {
+        signal, before:() => replyText(e, "网易云合伙人任务开始，将按账号配置提交评分和乐评。"),
+      })
+      if (report.skipped) {
+        if (!signal?.aborted) await replyText(e, "合伙人任务或网易云登录正在进行，请稍候。")
+        return true
+      }
+      const { image, text } = await renderPartnerReport("合伙人测试", report, e.user_id)
+      if (!signal?.aborted) await replyImage(e, image, text)
     } catch {
-      if (!signal.aborted) await replyText(e, "合伙人任务未完成，请检查 TuneWeave 状态和最近日志。")
-    } finally {
-      if (partnerJob === job) partnerJob = undefined
+      if (!signal?.aborted) await replyText(e, "合伙人任务未完成，请检查 TuneWeave 状态和最近日志。")
     }
     return true
   }

@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto"
 import { setTimeout as pause } from "node:timers/promises"
 import YAML from "yaml"
 import { lockFile } from "../../../../lib/file-lock.ts"
-import { resolveData } from "../../core/path.js"
+import { legacyLotusDirectories } from "../../../../lib/lotus-global-config.ts"
+import { resolveData, resolveRoot } from "../../core/path.js"
 import { formatLocalIso } from "../../core/time.js"
 import { TuneWeaveService } from "../tuneweave/service.js"
 import { NeteasePartnerAccounts } from "./partner-account.js"
@@ -35,7 +36,7 @@ async function readState(file) {
     const state = YAML.parse(await fs.readFile(file, "utf8")) ?? {}
     if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("合伙人任务状态格式无效")
     return state
-  } catch (error) { if (error.code === "ENOENT") return {}; throw error }
+  } catch (error) { if (error.code === "ENOENT") return; throw error }
 }
 
 // Preserve the score distribution and optional work dimensions from Lotus-ReFactor e28c6df.
@@ -76,15 +77,30 @@ function delayFor(config) {
 }
 
 export class NeteasePartnerTask {
-  constructor({ tuneweave, tuneweaveConfig, accounts, stateFile, logDir, reviewer, scorer, now, sleep } = {}) {
+  constructor({ tuneweave, tuneweaveConfig, accounts, stateFile, legacyStateFiles, logDir, reviewer, scorer, now, sleep } = {}) {
     this.tuneweave = tuneweave ?? new TuneWeaveService({ config:tuneweaveConfig })
     this.accounts = accounts ?? new NeteasePartnerAccounts()
     this.stateFile = stateFile ?? resolveData("netease", "state.yaml")
+    this.legacyStateFiles = legacyStateFiles ?? (stateFile ? [] :
+      legacyLotusDirectories.map(id => resolveRoot("plugins", id, "data", "netease", "state.yaml")))
     this.logDir = logDir ?? resolveData("logs")
     this.reviewer = reviewer ?? new PartnerReviewService()
     this.scorer = scorer ?? weightedScore
     this.now = now ?? (() => new Date())
     this.sleep = sleep ?? ((delay, signal) => pause(delay, undefined, { signal }))
+  }
+
+  async state() {
+    const current = await readState(this.stateFile)
+    if (current !== undefined) return current
+    const previous = (await Promise.all(this.legacyStateFiles.map(readState))).filter(entry => entry?.last_run_date)
+    const dates = new Set(previous.map(entry => entry.last_run_date))
+    if (dates.size > 1) throw new Error("两处旧合伙人任务记录不一致")
+    return previous.length ? { last_run_date:previous[0].last_run_date, last_run_time:previous[0].last_run_time } : {}
+  }
+
+  async hasRunToday() {
+    return (await this.state()).last_run_date === formatLocalIso(this.now()).slice(0,10)
   }
 
   async execute(config = {}, trigger = "手动执行", { signal, once = false } = {}) {
@@ -95,7 +111,7 @@ export class NeteasePartnerTask {
       signal?.throwIfAborted()
       const time = formatLocalIso(this.now())
       const date = time.slice(0,10)
-      const state = await readState(this.stateFile)
+      const state = await this.state()
       if (once && state.last_run_date === date) return { skipped:true, reason:"already_run_today" }
 
       const saved = state.evaluation_date === date && Array.isArray(state.evaluation_receipts)

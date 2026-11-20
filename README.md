@@ -34,6 +34,8 @@ Lotus-Yunzai 的 B 站、抖音、动态订阅和点歌模块。直接发送视�
 
 主人可发送 `#合伙人测试` 或 `#合伙人测试（执行）` 手动执行合伙人任务。任务核对已登录账号后按原偏好提交评分与乐评，保存当次报告和评分回执。上游结果未确认的作品先等待平台确认，同一天的后续运行不会再次提交。
 
+在 `config/global.yaml` 的 `netease_partner` 段设置 `enable: true` 开启自动任务。默认每天 00:05，使用同一份评分回执和旧 `last_run_date` 防止重复。可用 `schedule` 指定时间，用 `auto_catch_up: true` 在启动错过当天时间时等一分钟后补跑。默认私聊通知已绑定的主人好友，可用 `notify_master: false` 关闭。
+
 主人可私聊发送 `#合伙人日志`，查看保存在 `data/logs` 的最近合伙人报告。优先读取 `nep-latest.json`，也兼容按时间命名的旧报告。日志入口沿用 `permissions.scopes.netease.partner`，展示账号汇总及逐首结果。本地报告保留错误摘要。
 
 `config/global.yaml` 的 `music` 配置支持以下字段。

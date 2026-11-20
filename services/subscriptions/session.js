@@ -40,16 +40,24 @@ function cookieParts(header) {
   })
 }
 
-async function localBili(directory, platform) {
+export function biliLocalPath(directory) {
+  return join(directory, "yuki-plugin", "biliCookie.yaml")
+}
+
+export function parseBiliLocal(value) {
+  if (typeof value !== "string" || value.length > 32_768 || /[\r\n]/u.test(value)) return
+  const names = platforms.bilibili.names
+  const fields = new Map(cookieParts(value).filter(([name, field]) => names.includes(name) && validValue(field)))
+  if (fields.has("SESSDATA")) return { fields, source: "local" }
+}
+
+export async function readBiliLocal(directory) {
   let file
   try {
-    file = await open(join(directory, "yuki-plugin", "biliCookie.yaml"), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    file = await open(biliLocalPath(directory), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     const stat = await file.stat()
     if (!stat.isFile() || stat.size > 32_768) return
-    const content = parse(await file.readFile("utf8"))
-    if (typeof content !== "string") return
-    const fields = new Map(cookieParts(content).filter(([name, value]) => platform.names.includes(name) && validValue(value)))
-    if (fields.has("SESSDATA")) return { fields, source: "local" }
+    return parseBiliLocal(parse(await file.readFile("utf8")))
   } catch {
     return
   } finally {
@@ -155,7 +163,7 @@ export function subscriptionSession(id, directory, getRedis) {
       if (!allowed(platform, url)) return []
       const entries = []
       if (id === "bilibili") {
-        const local = await localBili(directory, platform)
+        const local = await readBiliLocal(directory)
         if (local) entries.push(local)
       }
       try {

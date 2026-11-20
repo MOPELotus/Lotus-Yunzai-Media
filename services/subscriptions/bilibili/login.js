@@ -1,6 +1,9 @@
 import QRCode from "qrcode"
+import { lstat, mkdir, rename, rm, unlink, writeFile } from "node:fs/promises"
+import { dirname } from "node:path"
+import { stringify } from "yaml"
 import { setTimeout as delay } from "node:timers/promises"
-import { biliIssuedLogin, lockBiliLogin, readBiliLogin } from "../session.js"
+import { biliIssuedLogin, biliLocalPath, lockBiliLogin, parseBiliLocal, readBiliLocal, readBiliLogin } from "../session.js"
 import { renderBiliSubscriptionLogin } from "./login-card.js"
 
 const passport = "https://passport.bilibili.com"
@@ -12,6 +15,11 @@ const platform = "(?:哔哩哔哩|哔哩|bilibili|bili|b站)"
 const begin = new RegExp("^[#/]\\s*(?:扫码|添加|add)" + platform + "登录$", "iu")
 const status = new RegExp("^[#/]\\s*我的" + platform + "登录$", "iu")
 const end = new RegExp("^[#/]\\s*(?:取消|删除|del)" + platform + "登录$", "iu")
+
+const localCookie = "(?:ck|cookie)"
+const bindLocal = new RegExp("^[#/]\\s*(?:绑定|添加|add)" + platform + "本地" + localCookie + "(.*)$", "iu")
+const removeLocal = new RegExp("^[#/]\\s*(?:取消|删除|del)" + platform + "本地" + localCookie + "$", "iu")
+const usingCookie = new RegExp("^[#/]\\s*我的" + platform + localCookie + "$", "iu")
 
 function requestSignal(active) {
   return AbortSignal.any([active, AbortSignal.timeout(10_000)])
@@ -55,7 +63,64 @@ async function checkLogin(request, state, signal) {
   return { status: "active", text: rows.join("\n") }
 }
 
-export function biliSubscriptionLogin({ getRedis, owner, signal, fetch: request = globalThis.fetch, render = renderBiliSubscriptionLogin }) {
+export function biliSubscriptionLogin({ getRedis, owner, signal, directory, lockFile, fetch: request = globalThis.fetch,
+  render = renderBiliSubscriptionLogin }) {
+  const filename = biliLocalPath(directory)
+
+  async function withLocalFile(active, operation) {
+    await mkdir(dirname(filename), { recursive: true, mode: 0o700 })
+    const lock = await lockFile(filename + ".lock.sqlite", "B 站本地动态会话")
+    try {
+      active.throwIfAborted()
+      return await operation()
+    } finally {
+      lock.close()
+    }
+  }
+
+  async function bind(value, active) {
+    const entry = parseBiliLocal(value.trim().replace(/^[:：]\s*/u, ""))
+    if (!entry) return "请输入 B 站本地 Cookie，至少要包含有效的 SESSDATA。"
+    return withLocalFile(active, async () => {
+      const login = await checkLogin(request, entry, active)
+      if (login.status !== "active") return "B 站未确认此 Cookie 的登录，原文件已保留。"
+      const temporary = filename + "." + crypto.randomUUID() + ".tmp"
+      try {
+        await writeFile(temporary, stringify(cookie(entry.fields)), { mode: 0o600, flag: "wx" })
+        active.throwIfAborted()
+        await rename(temporary, filename)
+      } finally {
+        await rm(temporary, { force: true })
+      }
+      return "B 站本地动态 Cookie 已绑定。\n" + login.text
+    })
+  }
+
+  async function clearLocal(active) {
+    return withLocalFile(active, async () => {
+      try {
+        if (!(await lstat(filename)).isFile()) return "本地 Cookie 路径须为普通文件。"
+        active.throwIfAborted()
+        await unlink(filename)
+        return "B 站本地动态 Cookie 已删除。"
+      } catch (error) {
+        if (error.code === "ENOENT") return "当前没有 B 站本地动态 Cookie。"
+        throw error
+      }
+    })
+  }
+
+  async function sourceStatus(redis, active) {
+    const local = await checkLogin(request, await readBiliLocal(directory), active)
+    if (local.status === "active") return "当前使用 B 站本地动态 Cookie。\n" + local.text
+    if (local.status === "unknown") return "无法确认 B 站本地 Cookie 的状态。"
+    const stored = await checkLogin(request, await readBiliLogin(redis), active)
+    if (stored.status === "active") return "当前使用 B 站扫码会话。\n" + stored.text
+    if (stored.status === "unknown") return "无法确认 B 站扫码会话状态。"
+    if (local.status === "expired" || stored.status === "expired") return "B 站动态会话已失效，当前使用公开读取。"
+    return "当前使用 B 站公开读取。"
+  }
+
   async function scan(context, lock, active) {
     const checked = await checkLogin(request, await readBiliLogin(getRedis()), active)
     if (checked.status === "active") return checked.text + "\n如需更换，请先发送 #删除B站登录。"
@@ -124,16 +189,22 @@ export function biliSubscriptionLogin({ getRedis, owner, signal, fetch: request 
     const starting = begin.test(input)
     const showing = status.test(input)
     const stopping = end.test(input)
-    if (!starting && !showing && !stopping) return
+    const binding = bindLocal.exec(input)
+    const clearing = removeLocal.test(input)
+    const source = usingCookie.test(input)
+    if (!starting && !showing && !stopping && !binding && !clearing && !source) return
     if (context.isDelegated || !owner(context)) return "仅机器人主人可管理 B 站动态登录。"
     const privateSignal = context.privateCredentialSignal
     if (context.message_type !== "private" || !privateSignal) return "请在与机器人的好友私聊中管理 B 站动态登录。"
     const active = signal ? AbortSignal.any([signal, privateSignal]) : privateSignal
     const redis = getRedis()
-    if (!redis) return "动态登录存储未连接。"
     let lock
     try {
       active.throwIfAborted()
+      if (binding) return await bind(binding[1], active)
+      if (clearing) return await clearLocal(active)
+      if (source) return await sourceStatus(redis, active)
+      if (!redis) return "动态登录存储未连接。"
       if (showing) {
         const result = await checkLogin(request, await readBiliLogin(redis), active)
         if (result.status === "active") return result.text

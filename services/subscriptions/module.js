@@ -65,7 +65,8 @@ export async function createSubscriptionModule(services, { providers, directory=
     bilibili: createBiliProvider({ session: subscriptionSession("bilibili", directory, getRedis) }),
     weibo: createWeiboProvider({ session: weiboSession }),
   }
-  const biliLogin = biliSubscriptionLogin({ getRedis, owner: isSubscriptionOwner, signal: services.signal })
+  const biliLogin = biliSubscriptionLogin({ getRedis, owner: isSubscriptionOwner, signal: services.signal,
+    directory, lockFile: services.lockFile })
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
   const config = createSubscriptionConfig(directory,services.lockFile)
   const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,

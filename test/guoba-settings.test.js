@@ -17,6 +17,7 @@ const defaults = {
   pushMsgMode: 1, mergeTextPic: 1, forwardSendDynamic: 1, maxPicsForSingleMsg: 2, maxTextLengthForSingleMsg: 300,
   pushStatus: 1, checkDynamicCD: "*/23 * * * *",
   pushTransmit: 1, dynamicTimeRange: 7200, banWords: [],
+  isSplit: 1, boxGrid: 1,
 }
 const biliDefaults = { ...defaults, parseVideoLink: 1 }
 
@@ -64,6 +65,31 @@ test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆�
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
   } finally {
     await rm(data, { force: true, recursive: true })
+  }
+})
+
+test("B站和微博图片布局沿用原开关与截图高度", async () => {
+  const data = await mkdtemp(join(tmpdir(),"lotus-subscription-layout-"))
+  try {
+    const path = join(data,"yuki-plugin/config/weibo")
+    await mkdir(path,{recursive:true})
+    const base = join(path,"config.yaml"), override = join(path,"config.guoba.support.yaml")
+    const original = "# 旧微博图片设置\nisSplit: false\nboxGrid: true\nsplitHeight: 2048\nnoSplitHeight: 1360\n"
+    await writeFile(base,original)
+    const {configInfo:form} = supportGuoba(data)
+    expect((await form.getConfigData()).weibo).toMatchObject({isSplit:0,boxGrid:1})
+    expect(await form.setConfigData({"bilibili.isSplit":0,"weibo.boxGrid":2},{Result})).toEqual({ok:false,status:422})
+    expect(existsSync(override)).toBe(false)
+    expect(await form.setConfigData({"weibo.isSplit":1,"weibo.boxGrid":0},{Result})).toEqual({ok:true})
+    const config=createSubscriptionConfig(data,lockFile)
+    expect(await config.settings("bilibili")).toMatchObject({split:true,grid:true})
+    expect(await config.settings("weibo")).toMatchObject({split:true,grid:false,splitHeight:2048,noSplitHeight:1360})
+    expect(await readFile(base,"utf8")).toBe(original)
+    const raw = await readFile(override,"utf8")
+    expect(raw).toContain("# 旧微博图片设置")
+    expect(YAML.parse(raw)).toEqual({isSplit:1,boxGrid:0,splitHeight:2048,noSplitHeight:1360})
+  } finally {
+    await rm(data,{force:true,recursive:true})
   }
 })
 

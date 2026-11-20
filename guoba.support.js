@@ -21,6 +21,10 @@ const sharedFields = [
     help: "只推送此时间范围内发布的动态。" },
   { key: "banWords", setting: "blacklist", label: "屏蔽关键词", tags: true,
     help: "每行一个关键词。正文或标题包含关键词时跳过推送。" },
+  { key: "isSplit", setting: "split", label: "分片截图模式", options: ["单张图卡", "分片截图"],
+    help: "仅在图片模式下生效。开启后，较长的动态可分成多张图卡。" },
+  { key: "boxGrid", setting: "grid", label: "九宫格样式", options: ["逐图排列", "宫格排列"],
+    help: "仅在图片模式下生效。多张图片可放在同一行。" },
 ]
 const platforms = [
   { id: "bilibili", label: "B站", fields: [...sharedFields, {

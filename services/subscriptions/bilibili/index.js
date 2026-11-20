@@ -1,5 +1,6 @@
 import { articleContent } from "./article.js"
 import { publicCount } from "../profile.js"
+import { ExpiredSubscriptionSession, readWithSubscriptionSession } from "../session.js"
 
 // Dynamic fields and type mapping adapted from Yuki BiliQuery (MIT).
 const dynamicRoot = "https://m.bilibili.com/dynamic/"
@@ -121,25 +122,28 @@ export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
   }
 }
 
-export function createBiliProvider({ fetch: request = globalThis.fetch } = {}) {
+export function createBiliProvider({ fetch: request = globalThis.fetch, session } = {}) {
   async function get(route, query, signal) {
     const url = new URL(route, apiRoot)
     url.search = new URLSearchParams(query).toString()
     const timeout = AbortSignal.timeout(15000)
-    const response = await request(url, {
+    return readWithSubscriptionSession(request, session, url, {
       headers, credentials: "omit", redirect: "error", signal: signal ? AbortSignal.any([signal,timeout]) : timeout,
+    }, async (response) => {
+      if (!response.ok) {
+        await response.body?.cancel()
+        const message = "B 站公开接口 HTTP " + response.status
+        if (response.status === 401) throw new ExpiredSubscriptionSession(message)
+        if (response.status === 403 || response.status === 412) throw new PublicAccessDenied(message)
+        throw new Error(message)
+      }
+      const json = await response.json()
+      if (json.code === -404) return
+      if (json.code === -101) throw new ExpiredSubscriptionSession("B 站登录已失效")
+      if (json.code === -352 || json.code === -403) throw new PublicAccessDenied("B 站公开接口返回 " + json.code)
+      if (json.code !== 0 || !json.data) throw new Error("B 站公开接口返回 " + String(json.code))
+      return json.data
     })
-    if (!response.ok) {
-      await response.body?.cancel()
-      const message = "B 站公开接口 HTTP " + response.status
-      if (response.status === 403 || response.status === 412) throw new PublicAccessDenied(message)
-      throw new Error(message)
-    }
-    const json = await response.json()
-    if (json.code === -404) return
-    if (json.code === -352 || json.code === -403) throw new PublicAccessDenied("B 站公开接口返回 " + json.code)
-    if (json.code !== 0 || !json.data) throw new Error("B 站公开接口返回 " + String(json.code))
-    return json.data
   }
 
   async function expand(post, signal) {

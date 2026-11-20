@@ -1,4 +1,5 @@
 // Source format: snowtafir/yuki-plugin main3, b1d8fecf41d03f92746bb2404b0b0381a24103a5 (MIT).
+import { ExpiredSubscriptionSession, readWithSubscriptionSession } from "../session.js"
 import { load } from "cheerio"
 import { publicCount } from "../profile.js"
 
@@ -162,39 +163,49 @@ async function readText(response) {
   }
 }
 
-export function createWeiboProvider({ fetch = globalThis.fetch } = {}) {
+export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) {
   async function get(params, signal) {
     signal?.throwIfAborted()
     const url = new URL(entrypoint)
     url.search = new URLSearchParams(params).toString()
     const timeout = AbortSignal.timeout(10_000)
     const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
-    let response
-    try {
-      response = await fetch(url, {
-        method: "GET", headers: { Accept: "application/json", "User-Agent": "Lotus-Yunzai" },
-        credentials: "omit", redirect: "manual", signal: deadline,
-      })
-    } catch {
+    const request = async (input, options) => {
+      try {
+        return await fetch(input, options)
+      } catch {
+        deadline.throwIfAborted()
+        throw new Error("无法读取微博公开数据。")
+      }
+    }
+    return readWithSubscriptionSession(request, session, url, {
+      method: "GET", headers: { Accept: "application/json", "User-Agent": "Lotus-Yunzai" },
+      credentials: "omit", redirect: "manual", signal: deadline,
+    }, async (response) => {
+      if (!response.ok) {
+        const loginHost = URL.parse(response.headers.get("Location") ?? "")?.hostname
+        void response.body?.cancel().catch(() => {})
+        if (response.status === 401 || (response.status >= 300 && response.status < 400 && loginHost === "passport.weibo.com")) {
+          throw new ExpiredSubscriptionSession("微博登录无效或已过期。")
+        }
+        throw new Error("微博公开接口拒绝访问或暂不可用。")
+      }
+      // Login pages and risk-control responses must remain distinguishable from an empty public feed.
+      let envelope
+      try {
+        envelope = JSON.parse(await readText(response))
+      } catch {
+        deadline.throwIfAborted()
+        throw new Error("微博公开接口未返回可读的数据。")
+      }
       deadline.throwIfAborted()
-      throw new Error("无法读取微博公开数据。")
-    }
-    if (!response.ok) {
-      void response.body?.cancel().catch(() => {})
-      throw new Error("微博公开接口拒绝访问或暂不可用。")
-    }
-    // Login pages and risk-control responses must remain distinguishable from an empty public feed.
-    let envelope
-    try {
-      envelope = JSON.parse(await readText(response))
-    } catch {
-      deadline.throwIfAborted()
-      throw new Error("微博公开接口未返回可读的数据。")
-    }
-    deadline.throwIfAborted()
-    if (envelope?.ok === 1 && record(envelope.data)) return envelope.data
-    if (envelope?.ok === 0 && emptyMessages.has(envelope.msg)) return
-    throw new Error("微博公开数据不可用。")
+      if (envelope?.ok === 1 && record(envelope.data)) return envelope.data
+      if (envelope?.ok === 0 && emptyMessages.has(envelope.msg)) return
+      if (envelope?.ok === 0 && ["需要登录", "请先登录", "未登录"].includes(envelope.msg)) {
+        throw new ExpiredSubscriptionSession("微博登录无效或已过期。")
+      }
+      throw new Error("微博公开数据不可用。")
+    })
   }
 
   async function expand(raw, post, deadline, signal) {

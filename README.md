@@ -66,6 +66,8 @@ B 站公开资料接口明确拒绝访问时，添加指令会按填写的 UID �
 
 沿用 `data/yuki-plugin/config/{bilibili,weibo}/` 下的 `config.yaml`、`push.yaml` 以及同名的 `*.guoba.support.yaml`，有锅巴文件时以该文件为准。可保留已有群、私聊、机器人账号、分类、关键词和定时设置。聊天指令写入当前使用的推送文件，保留其他会话与机器人配置、YAML 注释及文件权限。默认每 23 分钟检查，允许用旧 `checkDynamicCD` 修改，定时任务用北京时间。
 
+动态读取沿用已有的 B 站本地 `data/yuki-plugin/biliCookie.yaml` 和旧 Valkey 会话。微博继续读取旧 Valkey 会话及同域校验字段。动态接口返回续签时保留新 Cookie 与有效期；凭据失效后尝试仍可用的会话或公开读取。
+
 动态支持原图卡和文字模式。按旧配置 `forwardSendDynamic`、`maxPicsForSingleMsg` 和 `maxTextLengthForSingleMsg`，同一会话超过两张图片或 300 字时默认合并转发。网关明确拒绝合并转发时改为分条发送。推送沿用原 Valkey 已发记录，结果未确认时保留记录以避免重复。机器人需在已连接的目标群内，或与私聊对象有好友关系。上游拒绝公开请求时，手动任务会明确报告异常，稍后成功获取后仍可进入推送。
 
 B 站和微博的文字推送会附上响应已有的点赞、评论和转发数。B 站视频还会显示播放和弹幕数，直播会显示分区、开播时间、观看人数及直播间链接。

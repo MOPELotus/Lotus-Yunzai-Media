@@ -4,6 +4,7 @@ import { createWeiboProvider } from "./weibo/index.js"
 import { createSubscriptionConfig, numericId } from "./config.js"
 import { createSubscriptionDelivery } from "./delivery.js"
 import { profileText } from "./profile.js"
+import { subscriptionSession } from "./session.js"
 import { renderSubscriptionHelp } from "./help.js"
 
 const dataDirectory = fileURLToPath(new URL("../../../../data",import.meta.url))
@@ -55,8 +56,12 @@ function display(provider,items,heading) {
   }).join("\n")
 }
 
-export async function createSubscriptionModule(services, { providers = {bilibili:createBiliProvider(),weibo:createWeiboProvider()}, directory=dataDirectory,
+export async function createSubscriptionModule(services, { providers, directory=dataDirectory,
   getRedis=()=>globalThis.redis, render, now, renderHelp=renderSubscriptionHelp } = {}) {
+  providers ??= {
+    bilibili: createBiliProvider({ session: subscriptionSession("bilibili", directory, getRedis) }),
+    weibo: createWeiboProvider({ session: subscriptionSession("weibo", directory, getRedis) }),
+  }
   const config = createSubscriptionConfig(directory,services.lockFile)
   const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })

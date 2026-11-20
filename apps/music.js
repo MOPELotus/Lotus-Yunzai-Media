@@ -1,20 +1,19 @@
 const BasePlugin = globalThis.plugin
 import { LOTUS_INTERCEPT_PRIORITY } from "../core/intercept/priority.js"
 import { canManagePackages } from "../../../lib/command-permissions.ts"
-import { readLocalConfig } from "../../../lib/config.ts"
 import { makeForwardMsg } from "../../../lib/common/common.js"
 import { PermissionService } from "../core/permissions/service.js"
 import { TuneWeaveService } from "../services/tuneweave/service.js"
 import { safeMediaName } from "../services/media/files.js"
 import { renderStatusCard, renderTemplate } from "../core/render/service.js"
 import { formatLocalDateTime } from "../core/time.js"
+import { loadGlobalConfig } from "../core/config/global.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicSessionKey, musicShare } from "../services/music/service.js"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.js"
 
 const sessions = new Map(), aliases = { 网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq", 酷狗: "kugou", 酷我: "kuwo", 咪咕: "migu", 汽水: "soda" }
 const activeLogins = new Map()
-const root = new URL("../../../", import.meta.url)
 const maxInlineBytes = 16 * 1024 * 1024
 const canManageMusic = e => e.isPrivate && canManagePackages(e)
 
@@ -80,7 +79,7 @@ async function sendTrackInfo(e, track, media) {
   await replyImage(e, image, fallback)
 }
 async function service() {
-  const config = await readLocalConfig(root, "global")
+  const config = await loadGlobalConfig()
   if (config.music?.enable === false) throw new Error("点歌功能已关闭")
   return { service: new MusicService({ tuneweaveConfig: config.tuneweave, config: config.music, toolsPath: config.tools?.bin_dir }), config: config.music || {} }
 }
@@ -169,7 +168,7 @@ export class MusicMedia extends BasePlugin {
   }
   async partnerLogin() {
     const e = this.e
-    const config = await readLocalConfig(root, "global")
+    const config = await loadGlobalConfig()
     if (!e.isPrivate || !ownerPermission(e, config)) {
       await replyText(e, "请由机器人主人在私聊登录音乐合伙人账号。")
       return true
@@ -194,7 +193,7 @@ export class MusicMedia extends BasePlugin {
 
   async partnerLog() {
     const e = this.e
-    const config = await readLocalConfig(root, "global")
+    const config = await loadGlobalConfig()
     if (!e.isPrivate || e.isDelegated || !ownerPermission(e, config)) {
       await replyText(e,"请由机器人主人在私聊查看合伙人日志。")
       return true
@@ -220,7 +219,7 @@ export class MusicMedia extends BasePlugin {
 
   async initializeTuneWeave() {
     const e = this.e
-    const config = await readLocalConfig(root, "global")
+    const config = await loadGlobalConfig()
     if (!ownerPermission(e, config)) {
       await replyText(e, "只有机器人主人可以初始化 TuneWeave。")
       return true
@@ -235,7 +234,7 @@ export class MusicMedia extends BasePlugin {
 
   async tuneWeaveStatus() {
     const e = this.e
-    const config = await readLocalConfig(root, "global")
+    const config = await loadGlobalConfig()
     if (!ownerPermission(e, config)) {
       await replyText(e, "只有机器人主人可以查看 TuneWeave 状态。")
       return true

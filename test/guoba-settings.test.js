@@ -3,11 +3,13 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import YAML from "yaml"
 import { lockFile } from "../../../lib/file-lock.ts"
 import { supportGuoba } from "../guoba.support.js"
 import { createSubscriptionConfig } from "../services/subscriptions/config.js"
 import { createSubscriptionDelivery, useDynamicForward } from "../services/subscriptions/delivery.js"
+import { loadGlobalConfig } from "../core/config/global.js"
 
 const Result = {
   ok: () => ({ ok: true }),
@@ -20,6 +22,38 @@ const defaults = {
   isSplit: 1, boxGrid: 1,
 }
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllCD: 1800, parseVideoLink: 1 }
+
+test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主配置优先", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lotus-media-global-config-"))
+  const current = join(root, "config")
+  const previous = join(root, "plugins/Lotus-ReFactor/config")
+  const originalName = join(root, "plugins/Lotus-Plugin/config")
+  const source = "# 旧部署地址\r\ntuneweave: {api_url: http://127.0.0.1:9781/preferred}\r\nmusic: {default_platform: qq}\r\nnetease_partner: {login_poll_ms: 100}\r\n"
+  const conflict = "tuneweave: {api_url: http://127.0.0.1:9782/other}\nbilibili: {search_limit: 8}\n"
+  const load = () => loadGlobalConfig(pathToFileURL(root + "/"))
+  try {
+    await Promise.all([current, previous, originalName].map(directory => mkdir(directory, { recursive: true })))
+    await writeFile(join(previous, "global.yaml"), source)
+    expect(await load()).toMatchObject({
+      tuneweave: { api_url: "http://127.0.0.1:9781/preferred" },
+      music: { default_platform: "qq" },
+      netease_partner: { login_poll_ms: 100 },
+    })
+    await writeFile(join(originalName, "global.yaml"), conflict)
+    await expect(load()).rejects.toThrow("旧 TuneWeave 服务地址不一致")
+    await writeFile(join(current, "global.yaml"), "tuneweave: {api_url: http://127.0.0.1:9783/current}\nmusic: {enable: false}\n")
+    expect(await load()).toMatchObject({
+      tuneweave: { api_url: "http://127.0.0.1:9783/current" },
+      music: { enable: false },
+      bilibili: { search_limit: 8 },
+    })
+    expect((await load()).music.default_platform).toBeUndefined()
+    expect(await readFile(join(previous, "global.yaml"), "utf8")).toBe(source)
+    expect(await readFile(join(originalName, "global.yaml"), "utf8")).toBe(conflict)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆盖文件", async () => {
   const data = await mkdtemp(join(tmpdir(), "lotus-media-config-"))

@@ -16,7 +16,7 @@ const platforms = {
   weibo: {
     prefix: "Yz:yuki:weibo:cookie",
     origin: "https://m.weibo.cn",
-    paths: new Set(["/api/container/getIndex"]),
+    paths: new Set(["/api/container/getIndex", "/api/config", "/profile/info"]),
     domains: ["m.weibo.cn", "weibo.cn"],
     names: ["SUB", "SUP", "SUBP", "SSOLoginState", "ALF", "SCF", "SRF", "SRT", "X-XSRF-TOKEN", "_T_WM", "M_WEIBOCN_PARAMS", "WEIBOCN_FROM", "tid"],
     identity: ["SUB", "SUP", "SUBP"],
@@ -299,4 +299,28 @@ export async function lockBiliLogin(redis) {
       { keys: [biliLoginLock], arguments: [token] }).catch(() => {})
     throw error
   }
+}
+
+const clearStoredSession = `
+for i = 1, #KEYS do
+  if (redis.call('GET', KEYS[i]) or '') ~= ARGV[i] then return 0 end
+end
+for i = 1, #KEYS do
+  redis.call('DEL', KEYS[i], KEYS[i] .. ':meta')
+end
+return 1`
+
+export function readWeiboLogin(redis, url) {
+  return storedSession(redis, platforms.weibo, url)
+}
+
+export async function clearWeiboLogin(redis) {
+  const platform = platforms.weibo
+  const keys = platform.names.flatMap((name) => platform.domains.flatMap((domain) => [
+    keyFor(platform, "." + domain, name), keyFor(platform, domain, name),
+  ]))
+  const current = await redis.mGet(keys)
+  if (!current.some(value => value != null)) return "absent"
+  const cleared = await redis.eval(clearStoredSession, { keys, arguments: current.map(value => value ?? "") })
+  return cleared === 1 ? "cleared" : "changed"
 }

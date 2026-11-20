@@ -37,7 +37,9 @@ function allowedPost(post, route, settings, wall) {
       post.createdAt > wall || post.createdAt < wall - settings.horizon ||
       post.type === "DYNAMIC_TYPE_FORWARD" && !settings.forwards ||
       route.types.length && !route.types.includes(post.type)) return false
-  const content = [post.title,post.content,post.forwarded?.title,post.forwarded?.content].filter(Boolean).join("\n")
+  const fields = [post.title,post.content,post.forwarded?.title,post.forwarded?.content]
+  if (!settings.picture) fields.push(post.url,post.forwarded?.url)
+  const content = fields.filter(Boolean).join("\n")
   return (!settings.whitelist.length || settings.whitelist.some(word => content.includes(word))) &&
     !settings.blacklist.some(word => content.includes(word))
 }

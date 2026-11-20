@@ -384,6 +384,33 @@ test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键�
   } finally { await d.dispose() }
 })
 
+test("文字关键词检查转发与原帖链接，匹配屏蔽词时不写去重记录",async()=>{
+  const kept={id:"12301",uid,type:"DYNAMIC_TYPE_FORWARD",createdAt:seen,title:"正文",
+    url:"https://m.bilibili.com/dynamic/12301",forwarded:{url:"https://www.bilibili.com/read/cv456"}}
+  const hidden={...kept,id:"12302",url:"https://m.bilibili.com/dynamic/12302",
+    forwarded:{url:"https://www.bilibili.com/read/cv456?track=excluded"}}
+  const provider={id:"bilibili",label:"B站",fetchPosts:async()=>[kept,hidden]}
+  const kv=new Map(), confirmed=[]
+  let picture=1
+  const delivery=createSubscriptionDelivery({providers:{bilibili:provider},
+    config:{settings:async()=>settingsFor({pushMsgMode:picture,whiteWordslist:["/read/cv456"],
+      banWords:["?track=excluded"],pushTaskLog:0}),routes:async()=>[route]},
+    groups:{onlineBots:()=>[99],listGroups:async()=>[{id:77}],sendGroup:async(bot,group,message)=>{
+      confirmed.push(message)
+      return 123
+    }},
+    getRedis:()=>mockReceipts(kv),now:()=>seen*1000,render:async(_,post)=>[post.id],
+  })
+  try {
+    expect(await delivery.run("bilibili")).toMatchObject({confirmed:0})
+    expect(kv.size).toBe(0)
+    picture=0
+    expect(await delivery.run("bilibili")).toMatchObject({confirmed:1})
+    expect(confirmed).toEqual([kept.id])
+    expect(kv.has(receiptKey("bilibili",route,hidden))).toBe(false)
+  } finally { await delivery.dispose() }
+})
+
 
 function mockReceipts(kv) {
   return {

@@ -19,7 +19,7 @@ const defaults = {
   pushTransmit: 1, dynamicTimeRange: 7200, banWords: [],
   isSplit: 1, boxGrid: 1,
 }
-const biliDefaults = { ...defaults, parseVideoLink: 1 }
+const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllCD: 1800, parseVideoLink: 1 }
 
 test("锅巴沿用 Yuki 默认值和旧配置，保存后下次推送使用覆盖文件", async () => {
   const data = await mkdtemp(join(tmpdir(), "lotus-yuki-guoba-"))
@@ -197,6 +197,34 @@ test("B站视频解析开关保留旧文件覆盖和即时读取", async () => {
     expect((await active.settings("bilibili")).parseVideoLink).toBe(true)
     expect(await readFile(primary,"utf8")).toBe(original)
     expect(YAML.parse(await readFile(override,"utf8"))).toEqual({parseVideoLink:1})
+  } finally {
+    await rm(data,{force:true,recursive:true})
+  }
+})
+
+test("B站直播提醒面板按原范围保存并保留旧群名单和失败提示", async () => {
+  const data = await mkdtemp(join(tmpdir(),"lotus-bili-live-notice-"))
+  try {
+    const path = join(data,"yuki-plugin/config/bilibili")
+    const base = join(path,"config.yaml"), override = join(path,"config.guoba.support.yaml")
+    await mkdir(path,{recursive:true})
+    const original = "# 旧群名单\nliveAtAllGroupList: [77, '88']\nliveAtAllErrMsg: false\n"
+    await writeFile(base,original)
+    const {configInfo:form} = supportGuoba(data)
+    expect((await form.getConfigData()).bilibili).toMatchObject({liveAtAll:0,liveAtAllCD:1800})
+    expect(form.schemas.filter(field => /\.liveAtAll(?:CD)?$/u.test(field.field)).map(field=>field.field)).toEqual([
+      "bilibili.liveAtAll","bilibili.liveAtAllCD",
+    ])
+    expect(await form.setConfigData({"bilibili.liveAtAll":1,"bilibili.liveAtAllCD":59},{Result})).toEqual({ok:false,status:422})
+    expect(existsSync(override)).toBe(false)
+    expect(await form.setConfigData({"bilibili.liveAtAll":1,"bilibili.liveAtAllCD":90},{Result})).toEqual({ok:true})
+    const config = createSubscriptionConfig(data,lockFile)
+    expect(await config.settings("bilibili")).toMatchObject({liveAtAll:true,liveGroups:new Set(["77","88"]),
+      liveCooldown:90,liveFailureNotice:false})
+    expect(await readFile(base,"utf8")).toBe(original)
+    expect(await readFile(override,"utf8")).toContain("# 旧群名单")
+    expect(await form.setConfigData({"bilibili.liveAtAll":0},{Result})).toEqual({ok:true})
+    expect((await form.getConfigData()).bilibili).toMatchObject({liveAtAll:0,liveAtAllCD:90})
   } finally {
     await rm(data,{force:true,recursive:true})
   }

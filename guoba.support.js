@@ -27,10 +27,15 @@ const sharedFields = [
     help: "仅在图片模式下生效。多张图片可放在同一行。" },
 ]
 const platforms = [
-  { id: "bilibili", label: "B站", fields: [...sharedFields, {
-    key: "parseVideoLink", setting: "parseVideoLink", label: "视频链接解析", options: ["关闭", "开启"],
-    help: "控制聊天中的视频链接、视频编号和短链自动解析。搜看和下载指令仍可使用。",
-  }] },
+  { id: "bilibili", label: "B站", fields: [
+    ...sharedFields,
+    { key: "liveAtAll", setting: "liveAtAll", label: "直播动态@全体成员", options: ["关闭", "开启"],
+      help: "仅在 liveAtAllGroupList 指定的群生效，机器人需有全员提醒权限。" },
+    { key: "liveAtAllCD", setting: "liveCooldown", label: "@全体成员冷却时间（秒）", min: 60, max: 86_400,
+      help: "每个群单独计算冷却时间，默认为 1800 秒。" },
+    { key: "parseVideoLink", setting: "parseVideoLink", label: "视频链接解析", options: ["关闭", "开启"],
+      help: "控制聊天中的视频链接、视频编号和短链自动解析。搜看和下载指令仍可使用。" },
+  ] },
   { id: "weibo", label: "微博", fields: sharedFields },
 ]
 

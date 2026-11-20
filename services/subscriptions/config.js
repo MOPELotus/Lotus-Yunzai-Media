@@ -131,6 +131,7 @@ export function settingsFor(value) {
     liveAtAll:flag(value.liveAtAll,false),
     liveGroups:new Set((Array.isArray(value.liveAtAllGroupList) ? value.liveAtAllGroupList : []).map(numericId).filter(Boolean)),
     liveCooldown:number(value.liveAtAllCD,1800,1,86400),
+    liveFailureNotice:flag(value.liveAtAllErrMsg,true),
     log:flag(value.pushTaskLog,true),
   }
 }

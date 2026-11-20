@@ -338,12 +338,19 @@ test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键�
 function mockReceipts(kv) {
   return {
     get:async key=>kv.get(key) ?? null,
+    set:async (key,value,{NX})=>{
+      if (NX && kv.has(key)) return null
+      kv.set(key,value)
+      return "OK"
+    },
     eval:async (script,{keys,arguments:[token,argument]})=>{
       if (script.includes("EXISTS")) {
         if (keys.some(key=>kv.has(key))) return 0
         for (const key of keys) kv.set(key,token)
       } else if (argument==="rejected") {
         for (const key of keys) if (kv.get(key)===token) kv.delete(key)
+      } else if (keys.length===1) {
+        if (kv.get(keys[0])===token) kv.set(keys[0],"1")
       } else {
         kv.set(keys[0],"1")
         kv.set(keys[1],argument)
@@ -352,6 +359,47 @@ function mockReceipts(kv) {
     },
   }
 }
+
+test("B站直播全员提醒沿用旧群冷却和失败开关，提醒失败不影响动态",async()=>{
+  const kv=new Map(), calls=[]
+  const group88={...route,chat:"88"}, friend={...route,chat:"42",kind:"private"}
+  const mark="Yz:yuki:bili:upPush:group:77:liveAtAllMark"
+  const keyFor=id=>receiptKey("bilibili",route,{id})
+  let decision="rejected", warn, id="1"
+  const provider={id:"bilibili",label:"B站",fetchPosts:async()=>[
+    {id,uid,createdAt:seen,type:"DYNAMIC_TYPE_LIVE_RCMD",content:"直播"},
+  ]}
+  const delivery=createSubscriptionDelivery({providers:{bilibili:provider},
+    config:{settings:async()=>settingsFor({liveAtAll:1,liveAtAllGroupList:[77,42],liveAtAllErrMsg:warn,pushTaskLog:0}),
+      routes:async()=>[route,group88,friend]},
+    notifications:()=>[{botId:99,isGroupMember:async()=>true,isFriend:async()=>true,
+      sendGroup:async (group,payload)=>{
+        calls.push([group,payload])
+        return Array.isArray(payload) ? decision : "confirmed"
+      },sendPrivate:async (user,payload)=>{calls.push([user,payload]);return "confirmed"},
+    }],
+    getRedis:()=>mockReceipts(kv),now:()=>seen*1000,render:async (_,post)=>["动态 "+post.id],
+  })
+  try {
+    expect((await delivery.run("bilibili")).confirmed).toBe(3)
+    expect(calls[0]).toEqual([77,[{type:"at",qq:"all"}," B站 直播提醒"]])
+    expect(calls[1]).toEqual([77,"直播动态发送@全体成员失败，请检查权限或平台是否支持"])
+    expect(calls.slice(2)).toEqual([[77,"动态 1"],[88,"动态 1"],[42,"动态 1"]])
+    expect(kv.has(mark)).toBe(false)
+    expect(kv.get(keyFor("1"))).toBe("1")
+    warn=0;id="2";calls.length=0
+    await delivery.run("bilibili")
+    expect(calls).toHaveLength(4)
+    expect(kv.has(mark)).toBe(false)
+    decision="unknown";id="3";calls.length=0
+    await delivery.run("bilibili")
+    expect(calls).toHaveLength(4)
+    expect(kv.get(mark)).toBe("1")
+    decision="confirmed";id="4";calls.length=0
+    await delivery.run("bilibili")
+    expect(calls).toEqual([[77,"动态 4"],[88,"动态 4"],[42,"动态 4"]])
+  } finally { await delivery.dispose() }
+})
 
 test("沿用旧严格阈值，按会话累计文字和图数",()=>{
   const settings=settingsFor({})

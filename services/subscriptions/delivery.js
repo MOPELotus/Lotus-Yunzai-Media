@@ -25,6 +25,12 @@ const settleLua = [
   "end",
   "return 1",
 ].join("\n")
+const settleLiveNoticeLua = [
+  "if redis.call('GET',KEYS[1])~=ARGV[1] then return 0 end",
+  "if ARGV[2]=='rejected' then return redis.call('DEL',KEYS[1]) end",
+  "redis.call('SET',KEYS[1],'1','EX',ARGV[3])",
+  "return 1",
+].join("\n")
 
 function allowedPost(post, route, settings, wall) {
   if (!post?.id || post.uid !== route.uid || !Number.isSafeInteger(post.createdAt) ||
@@ -116,17 +122,31 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     return sent ? "confirmed" : "rejected"
   }
 
+  async function notifyLiveAtAll(redis, route, sender, settings) {
+    const mark = "Yz:yuki:bili:upPush:group:" + route.chat + ":liveAtAllMark"
+    const token = "pending:" + crypto.randomUUID()
+    const cooldown = settings.liveCooldown
+    // Hold the claim through the gateway request even if the configured cooldown is short.
+    if (await redis.set(mark,token,{NX:true,EX:Math.max(cooldown,120)}) !== "OK") return
+
+    let state = "rejected"
+    if (!active.aborted) {
+      try { state = await sender.send([{type:"at",qq:"all"}," B站 直播提醒"]) }
+      catch { state = "unknown" }
+    }
+    await redis.eval(settleLiveNoticeLua,{keys:[mark],arguments:[token,state,String(cooldown)]})
+    if (state === "rejected" && !active.aborted && settings.liveFailureNotice) {
+      await sender.send("直播动态发送@全体成员失败，请检查权限或平台是否支持")
+    }
+  }
+
   async function dispatchTarget(provider, redis, sender, entries, settings, report) {
     if (!entries.length) return
     const route=entries[0].route
-    if (!active.aborted && route.kind === "group" && settings.liveAtAll && settings.liveGroups.has(route.chat) &&
+    if (!active.aborted && provider.id === "bilibili" && route.kind === "group" && settings.liveAtAll && settings.liveGroups.has(route.chat) &&
         entries.some(entry=>entry.post.type === "DYNAMIC_TYPE_LIVE_RCMD")) {
-      const mark = "Yz:yuki:bili:upPush:group:" + route.chat + ":liveAtAllMark"
-      try {
-        if (await redis.set(mark,"1",{NX:true,EX:settings.liveCooldown}) === "OK") {
-          await sender.send([{type:"at",qq:"all"}," "+provider.label+" 直播提醒"])
-        }
-      } catch { /* The dynamic itself is still deliverable. */ }
+      try { await notifyLiveAtAll(redis,route,sender,settings) }
+      catch { /* The dynamic itself is still deliverable. */ }
     }
 
     if (sender.forward && useDynamicForward(entries,settings)) {

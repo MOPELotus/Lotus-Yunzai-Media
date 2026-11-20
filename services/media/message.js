@@ -1,3 +1,8 @@
+/** Leave explicit media commands to their registered handlers. */
+export function isMediaCommandText(message = "") {
+  return /^#[\p{L}\p{N}_-]*?(?:(?:搜视频|看视频|点歌|搜歌)|(?:下载|下视频|音乐登录)(?=\s|$))/u.test(message)
+}
+
 export function buildMediaMessageText(e = {}) {
   const chunks = []
   for (const item of Array.isArray(e.message) ? e.message : []) {

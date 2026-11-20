@@ -8,7 +8,7 @@ import { generateABogus } from "../services/douyin/signature.js"
 import { normalizeDouyinWork } from "../services/douyin/model.js"
 import { fetchCdn } from "../services/media/cdn.js"
 import { mediaDeliveryUnknown, sendMediaFile } from "../services/media/files.js"
-import { articlePages, buildMediaMessageText } from "../services/media/message.js"
+import { articlePages, buildMediaMessageText, isMediaCommandText } from "../services/media/message.js"
 
 const directories = []
 async function fixtureFile(name, bytes = "小文件") {
@@ -21,6 +21,18 @@ async function fixtureFile(name, bytes = "小文件") {
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+})
+
+test("自动解析跳过显式媒体命令的参数，仍接受直接分享的链接和编号", () => {
+  const bvid = "BV1dAxE6VErW"
+  const link = "https://www.bilibili.com/video/" + bvid
+  for (const input of ["#搜视频" + bvid, "#看视频 " + link, "#B站下视频 " + bvid,
+    "#荷花下载 " + link, "#荷花下视频 " + bvid, "#荷花搜视频" + bvid, "#荷花QQ点歌 " + link]) {
+    expect(isMediaCommandText(input)).toBe(true)
+  }
+  for (const input of [bvid, link, "分享一个视频 " + link, "#周末推荐 " + link]) {
+    expect(isMediaCommandText(input)).toBe(false)
+  }
 })
 
 test("B 站搜索读取旧账号别名，新登录只更新主文件，冲突不选择旧账号", async () => {

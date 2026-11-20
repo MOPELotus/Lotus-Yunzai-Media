@@ -8,7 +8,7 @@ import { renderTemplate, renderStatusCard } from "../core/render/service.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
 import { DouyinService, normalizeDouyinDownloadConfig } from "../services/douyin/service.js"
 import { sendMediaFile, mediaFailureMessage } from "../services/media/files.js"
-import { buildMediaMessageText, articlePages } from "../services/media/message.js"
+import { buildMediaMessageText, articlePages, isMediaCommandText } from "../services/media/message.js"
 
 export class DouyinMedia extends BasePlugin {
   constructor() {
@@ -26,7 +26,7 @@ export class DouyinMedia extends BasePlugin {
   }
 
   async parse() {
-    if (this.e.message_type === "terminal") return false
+    if (this.e.message_type === "terminal" || isMediaCommandText(this.e.msg)) return false
     const message = buildMediaMessageText(this.e)
     if (!/(?:douyin|iesdouyin)\.com/i.test(message)) return false
     const config = await loadGlobalConfig()

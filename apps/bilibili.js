@@ -15,7 +15,7 @@ import {
   normalizeDownloadConfig,
   resolveCommandPath,
 } from "../services/bilibili/service.js"
-import { buildMediaMessageText } from "../services/media/message.js"
+import { buildMediaMessageText, isMediaCommandText } from "../services/media/message.js"
 import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../services/media/files.js"
 import { ToolInstallerService } from "../services/tools/installer.js"
 import { createSubscriptionConfig } from "../services/subscriptions/config.js"
@@ -31,10 +31,10 @@ export class BilibiliMedia extends BasePlugin {
       event: "message",
       priority: LOTUS_INTERCEPT_PRIORITY,
       rule: [
-        { reg: "^#(荷花)?搜视频.+", fnc: "searchVideo" },
+        { reg: "^#搜视频.+", fnc: "searchVideo" },
         { reg: "^#看[0-9]+$", fnc: "pickVideo" },
-        { reg: "^#(荷花)?看视频.+", fnc: "directWatch" },
-        { reg: "^#(B站|b站|荷花)(下载|下视频)\\s+[\\s\\S]+$", fnc: "downloadVideo" },
+        { reg: "^#看视频.+", fnc: "directWatch" },
+        { reg: "^#[Bb]站(?:下载|下视频)\\s+[\\s\\S]+$", fnc: "downloadVideo" },
         { reg: "^#B站登录$", fnc: "login" },
         { reg: "^#初始化环境$", fnc: "initializeMediaTools" },
         { reg: "[\\s\\S]*", fnc: "parse" },
@@ -49,7 +49,7 @@ export class BilibiliMedia extends BasePlugin {
   }
 
   async parse() {
-    if (this.e.message_type === "terminal") return false
+    if (this.e.message_type === "terminal" || isMediaCommandText(this.e.msg)) return false
     const message = buildMediaMessageText(this.e)
     if (!/(?:bilibili\.com|b23\.tv|bili2233\.cn|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b)/i.test(message)) return false
     const service = await createService()
@@ -64,7 +64,7 @@ export class BilibiliMedia extends BasePlugin {
   }
 
   async searchVideo() {
-    const keyword = String(this.e.msg || "").replace(/^#(?:荷花)?搜视频/, "").trim()
+    const keyword = String(this.e.msg || "").replace(/^#搜视频/, "").trim()
     if (!keyword) {
       await replyText(this, "[media] 请输入搜索关键词。")
       return true
@@ -110,7 +110,7 @@ export class BilibiliMedia extends BasePlugin {
   }
 
   async directWatch() {
-    const keyword = String(this.e.msg || "").replace(/^#(?:荷花)?看视频/, "").trim()
+    const keyword = String(this.e.msg || "").replace(/^#看视频/, "").trim()
     if (!keyword) {
       await replyText(this, "[media] 请输入关键词。")
       return true
@@ -200,7 +200,7 @@ export class BilibiliMedia extends BasePlugin {
   }
 
   async downloadVideo() {
-    const target = String(this.e.msg || "").replace(/^#(?:B站|b站|荷花)(?:下载|下视频)\s*/i, "").trim()
+    const target = String(this.e.msg || "").replace(/^#B站(?:下载|下视频)\s*/i, "").trim()
     if (!target) {
       await replyText(this, "[media] 请输入要下载的 B站链接、BV号或 av号。")
       return true

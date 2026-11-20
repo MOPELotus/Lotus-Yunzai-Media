@@ -92,8 +92,8 @@ export class MusicMedia extends BasePlugin {
   constructor() {
     super({ name: "[media] 点歌", dsc: "按平台点歌与公共账号登录", event: "message", priority: LOTUS_INTERCEPT_PRIORITY,
       rule: [
-        { reg: "^#(?:荷花)?(?:(?:网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水))?(?:点歌|搜歌)[\\s\\S]*$", fnc: "search" },
-        { reg: "^#(?:荷花)?音乐登录$", fnc: "login" },
+        { reg: "^#(?:(?:网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水))?(?:点歌|搜歌)[\\s\\S]*$", fnc: "search" },
+        { reg: "^#音乐登录$", fnc: "login" },
         { reg: "^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$", fnc: "choice" },
         { reg: "^#音乐帮助$", fnc: "help" },
         { reg: "^#合伙人登录$", fnc: "partnerLogin" },
@@ -129,7 +129,7 @@ export class MusicMedia extends BasePlugin {
     const e = this.e
     try {
       const { service: api, config } = await service()
-      const match = String(e.msg).match(/^#(?:荷花)?(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(?:点歌|搜歌)\s*([\s\S]*)$/)
+      const match = String(e.msg).match(/^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(?:点歌|搜歌)\s*([\s\S]*)$/)
       const keyword = match?.[2]?.trim()
       if (!keyword) return this.help(e)
       const key = musicSessionKey(e), previous = sessions.get(key)

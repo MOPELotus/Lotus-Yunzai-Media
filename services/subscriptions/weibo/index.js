@@ -3,6 +3,8 @@ import { load } from "cheerio"
 import { publicCount } from "../profile.js"
 
 const entrypoint = "https://m.weibo.cn/api/container/getIndex"
+const detailRoot = "https://m.weibo.cn/detail/"
+const maximumPictures = 30
 const emptyMessages = new Set(["这里还没有内容", "这里还没有内容哦", "用户不存在", "该用户不存在"])
 const typeNames = Object.freeze({
   DYNAMIC_TYPE_AV: "视频", DYNAMIC_TYPE_WORD: "图文", DYNAMIC_TYPE_DRAW: "图文",
@@ -47,7 +49,7 @@ function imageUrl(value) {
 
 function pictures(post) {
   const source = Array.isArray(post.pics) ? post.pics : []
-  return [...new Set(source.slice(0, 30).map((pic) =>
+  return [...new Set(source.slice(0, maximumPictures).map((pic) =>
     imageUrl(pic?.large?.url) ?? imageUrl(pic?.url) ?? imageUrl(pic?.bmiddle?.url)).filter(Boolean))]
 }
 
@@ -69,11 +71,19 @@ function publishedAt(value) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
+function postId(post) {
+  // The legacy polling receipt uses mid, then id. idstr is the lossless spelling of numeric id.
+  return decimalId(post?.mid) ?? decimalId(post?.idstr) ?? decimalId(post?.id)
+}
+
+function authorId(post) {
+  return decimalId(post?.user?.idstr) ?? decimalId(post?.user?.id)
+}
+
 function postOf(post, depth = 0) {
   if (!record(post)) return
-  // The legacy polling receipt uses mid, then id. idstr is the lossless spelling of numeric id.
-  const id = decimalId(post.mid) ?? decimalId(post.idstr) ?? decimalId(post.id)
-  const uid = decimalId(post.user?.idstr) ?? decimalId(post.user?.id)
+  const id = postId(post)
+  const uid = authorId(post)
   const createdAt = publishedAt(post.created_at)
   if (!id || !uid || !createdAt) return
   const media = record(post.page_info) ? post.page_info : undefined
@@ -90,13 +100,49 @@ function postOf(post, depth = 0) {
   return {
     id, uid, author: clean(post.user?.screen_name, 80) || uid, createdAt, type,
     title: clean(media?.title, 160) || undefined, content,
-    url: bid ? `https://weibo.com/${uid}/${bid}` : `https://m.weibo.cn/detail/${id}`,
+    url: bid ? `https://weibo.com/${uid}/${bid}` : detailRoot + id,
     activity: { likes: publicCount(post.attitudes_count), comments: publicCount(post.comments_count), shares: publicCount(post.reposts_count) },
     images, forwarded, cover, avatar: imageUrl(post.user?.profile_image_url ?? post.user?.avatar_large),
   }
 }
 
-async function readJson(response) {
+function detailNeeds(raw, post) {
+  if (!post) return
+  const inline = raw.longText?.longTextContent
+  const text = (raw.isLongText === true || raw.isLongText === 1) && !(typeof inline === "string" && inline.trim())
+  const count = Number(raw.pic_num)
+  const images = Number.isSafeInteger(count) && count > 9 && post.images.length < Math.min(count, maximumPictures)
+  if (text || images) return { text, images }
+}
+
+function samePost(raw, post) {
+  return postId(raw) === post.id && authorId(raw) === post.uid
+}
+
+function detailStatus(html, post) {
+  const $ = load(html)
+  for (const script of $("script").toArray()) {
+    const match = $(script).text().match(/"status"\s*:\s*(\{[\s\S]*?\})\s*,\s*"call"\s*:/u)
+    if (!match) continue
+    try {
+      const raw = JSON.parse(match[1])
+      if (samePost(raw, post)) return raw
+    } catch { /* The detail format is optional. */ }
+  }
+}
+
+function completePost(post, raw, needs) {
+  if (!needs || !samePost(raw, post)) return post
+  const content = needs.text ? contentOf(raw) : ""
+  const images = needs.images ? pictures(raw) : []
+  return {
+    ...post,
+    content: content.length > post.content.length ? content : post.content,
+    images: images.length > post.images.length ? images : post.images,
+  }
+}
+
+async function readText(response) {
   const reader = response.body?.getReader()
   if (!reader) throw new Error("微博接口没有返回内容。")
   try {
@@ -105,7 +151,7 @@ async function readJson(response) {
     let bytes = 0
     for (;;) {
       const { value, done } = await reader.read()
-      if (done) return JSON.parse(raw + decoder.decode())
+      if (done) return raw + decoder.decode()
       bytes += value.byteLength
       if (bytes > 4 * 1024 * 1024) throw new Error("微博公开接口响应过大。")
       raw += decoder.decode(value, { stream: true })
@@ -140,7 +186,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch } = {}) {
     // Login pages and risk-control responses must remain distinguishable from an empty public feed.
     let envelope
     try {
-      envelope = await readJson(response)
+      envelope = JSON.parse(await readText(response))
     } catch {
       deadline.throwIfAborted()
       throw new Error("微博公开接口未返回可读的数据。")
@@ -151,20 +197,48 @@ export function createWeiboProvider({ fetch = globalThis.fetch } = {}) {
     throw new Error("微博公开数据不可用。")
   }
 
+  async function expand(raw, post, deadline, signal) {
+    const needs = detailNeeds(raw, post)
+    const originalNeeds = detailNeeds(raw.retweeted_status, post.forwarded)
+    if ((!needs && !originalNeeds) || deadline.aborted) return post
+    try {
+      const response = await fetch(new URL(detailRoot + post.id), {
+        method: "GET", headers: { Accept: "text/html", "User-Agent": "Lotus-Yunzai" },
+        credentials: "omit", redirect: "manual", signal: deadline,
+      })
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => {})
+        return post
+      }
+      const detail = detailStatus(await readText(response), post)
+      if (!detail) return post
+      const completed = completePost(post, detail, needs)
+      if (!originalNeeds) return completed
+      return { ...completed, forwarded: completePost(post.forwarded, detail.retweeted_status, originalNeeds) }
+    } catch {
+      signal?.throwIfAborted()
+      return post
+    }
+  }
+
   return {
     id: "weibo", label: "微博", typeNames,
-    async fetchPosts(uid, { signal } = {}) {
+    async fetchPosts(uid, { signal, oldest = 0 } = {}) {
       uid = decimalId(uid)
       if (!uid) throw new Error("微博 UID 无效。")
       const data = await get({ containerid: `107603${uid}` }, signal)
       if (!data) return []
       if (!Array.isArray(data.cards)) throw new Error("微博动态列表格式无效。")
       const posts = new Map()
+      const detailTimeout = AbortSignal.timeout(5000)
+      const deadline = signal ? AbortSignal.any([signal, detailTimeout]) : detailTimeout
       for (const card of data.cards.slice(0, 100)) {
         if (card?.card_type !== 9) continue
         const post = postOf(card.mblog)
-        if (post?.uid === uid && !posts.has(post.id)) posts.set(post.id, post)
+        if (post?.uid !== uid || posts.has(post.id)) continue
+        posts.set(post.id, post.createdAt >= oldest ? await expand(card.mblog, post, deadline, signal) : post)
       }
+      signal?.throwIfAborted()
       return [...posts.values()]
     },
     async profile(uid, { signal } = {}) {

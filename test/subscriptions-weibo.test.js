@@ -93,6 +93,50 @@ test("微博仅将明确无内容识别为空结果，登录和限流保留接�
     .rejects.toThrow("UID 无效")
 })
 
+test("微博公开详情只补同一动态的长文和多图，失败保留短内容", async () => {
+  const requests = []
+  const pics = Array.from({ length: 12 }, (_, i) => picture(`https://wx1.sinaimg.cn/${i + 1}.jpg`))
+  const feed = [
+    card({ mid: "12340", pic_num: 12, pics: pics.slice(0,9), bid: "Outer", text: "短文", isLongText: true }),
+    card({ mid: "12341", text: "被拒绝", isLongText: true }),
+    card({ mid: "12342", text: "错号保留", isLongText: true }),
+    card({ mid: "12343", text: "内联短文", isLongText: true,
+      longText: { longTextContent: "内联全文" }, pic_num: 12, pics }),
+    card({ mid: "12344", text: "时间窗外", isLongText: true, created_at: "Thu Nov 19 08:00:00 +0800 2026" }),
+    card({ mid: "12345", text: "转发", retweeted_status: {
+      mid: "12375", user, created_at, pic_num: 12, pics: pics.slice(0,9), text: "原帖短文", isLongText: true,
+    } }),
+    card({ mid: "12346", text: "网络失败", isLongText: true }),
+  ]
+  const detail = raw => new Response(`<script>var data = [{"status": ${JSON.stringify(raw)}, "call": 1}];</script>`)
+  const source = createWeiboProvider({ fetch: async (input, init) => {
+    requests.push(input.pathname)
+    expect(input.origin).toBe("https://m.weibo.cn")
+    expect(init.credentials).toBe("omit")
+    expect(init.redirect).toBe("manual")
+    if (input.pathname.endsWith("getIndex")) return Response.json({ ok: 1, data: { cards: feed } })
+    switch (input.pathname.split("/").at(-1)) {
+      case "12340":
+        return detail({ mid:"12340", user, pics, text:"<p>短文<br>续文</p>" })
+      case "12341":
+        return new Response(null,{ status:432 })
+      case "12342":
+        return detail({ mid:"12342", user:{id:42}, text:"不可信额外内容" })
+      case "12345":
+        return detail({ mid:"12345", user, retweeted_status:{mid:"12375",user, pics, text:"原帖短文<br>原帖续文"} })
+      case "12346":
+        throw new TypeError("网络失败")
+      default:
+        throw new Error("不应请求此详情")
+    }
+  } })
+  const posts = await source.fetchPosts(uid,{ oldest:createdAt-60 })
+  expect(posts.map(post=>post.content)).toEqual(["短文\n续文","被拒绝","错号保留","内联全文","时间窗外","转发","网络失败"])
+  expect(posts[0]).toMatchObject({ id:"12340", createdAt, url:`https://weibo.com/${uid}/Outer`, images:pics.map(pic=>pic.large.url) })
+  expect(posts[5].forwarded).toMatchObject({ id:"12375", content:"原帖短文\n原帖续文", images:pics.map(pic=>pic.large.url) })
+  expect(requests).toEqual(["/api/container/getIndex","/detail/12340","/detail/12341","/detail/12342","/detail/12345","/detail/12346"])
+})
+
 test("微博搜索兼容旧用户卡片，调用取消时不读取上游", async () => {
   let query
   const source = createWeiboProvider({ fetch: async input => {

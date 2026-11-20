@@ -36,7 +36,7 @@ export class TuneWeaveService {
     this.arch = options.arch || process.arch
   }
 
-  async request(route, { method = "GET", body, credentials = [], onCredentialUpdates } = {}) {
+  async request(route, { method = "GET", body, credentials = [], onCredentialUpdates, accountSelection } = {}) {
     const target = `${this.config.api_url.replace(/\/+$/, "")}${route}`
     const options = {
       method,
@@ -59,6 +59,12 @@ export class TuneWeaveService {
       const error = new Error(`TuneWeave 请求失败：${reason}`)
       error.code = code; error.platform = json?.error?.platform
       throw error
+    }
+    if (accountSelection) {
+      const { platform, alias, hasCredential } = accountSelection
+      const accountSelected = hasCredential ? updates.some(item => item.platform === platform) :
+        Boolean(alias && json.meta?.platform === platform && json.meta.account === alias)
+      return { data: json.data, accountSelected }
     }
     return json.data
   }

@@ -6,6 +6,7 @@ import YAML from "yaml"
 import { MusicService, musicSessionKey, musicShare } from "../services/music/service.js"
 import { readMusicAccounts, saveMusicAccount } from "../services/music/accounts.js"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.js"
+import { TuneWeaveService } from "../services/tuneweave/service.js"
 
 const temp = []
 async function directory() {
@@ -77,10 +78,10 @@ test("搜歌只取所选平台的曲目，播放回退保留卡片的原平台",
   const service = new MusicService({ accountsFile:file, tuneweave:{ request:async route => {
     const request = new URL(route,"http://127.0.0.1:7832")
     searches.push(request)
-    if (request.pathname === "/v1/search") return [{type:"artist",data:{}},{type:"track",data:track}]
+    if (request.pathname === "/v1/search") return {data:[{type:"artist",data:{}},{type:"track",data:track}],accountSelected:true}
     return {url:"https://audio.example.test/test.mp3",resolved_platform:"qq",trial:false}
   } } })
-  expect(await service.search("netease", "  合成曲目  ", 2)).toEqual([track])
+  expect(await service.search("netease", "  合成曲目  ", 2)).toEqual({tracks:[track],accountStatus:"selected"})
   const stream = await service.resolve(track)
   expect(Object.fromEntries(searches[0].searchParams)).toEqual({
     platform:"netease",type:"track",q:"合成曲目",limit:"10",offset:"10",account:"lotus-nep-fixture",
@@ -89,6 +90,33 @@ test("搜歌只取所选平台的曲目，播放回退保留卡片的原平台",
   expect(musicShare(track,stream)?.data).toMatchObject({type:"163",url:"https://music.163.com/#/song?id=1042",title:"合成曲目"})
   expect(musicShare(track,{...stream,headers:{Cookie:"fixture-private"}})).toBeNull()
   expect(musicShare(track,{...stream,url:"/v1/track/private"})).toBeNull()
+})
+
+test("点歌只凭本次响应识别已选用账号，访客和未确认账号分别提示", async () => {
+  const accountsFile = join(await directory(), "music.yaml")
+  const requests = []
+  const mock = Bun.serve({ hostname:"127.0.0.1", port:0, fetch(request) {
+    const url = new URL(request.url)
+    requests.push(url.pathname)
+    const platform = url.searchParams.get("platform")
+    const query = url.searchParams.get("q")
+    const alias = url.searchParams.get("account")
+    const headers = query === "凭据轮换" ? {"X-TuneWeave-Updated-Credential":"qq=twc1_rotated"} : {}
+    return Response.json({ ok:true, data:[{type:"track",data:track}],
+      meta:{platform, account:query === "别名不一致" ? "other-account" : alias} }, {headers})
+  } })
+  try {
+    const service = new MusicService({ accountsFile, tuneweaveConfig:{api_url:`http://127.0.0.1:${mock.port}`} })
+    expect((await service.search("qq", "访客")).accountStatus).toBe("unconfigured")
+    await saveMusicAccount("netease", {alias:"fixture-netease",uid:"17"}, {file:accountsFile})
+    expect((await service.search("netease", "别名匹配")).accountStatus).toBe("selected")
+    expect((await service.search("netease", "别名不一致")).accountStatus).toBe("unverified")
+    await saveMusicAccount("qq", {alias:"fixture-qq",uid:"18",credential:"twc1_saved"}, {file:accountsFile})
+    expect((await service.search("qq", "无凭据确认")).accountStatus).toBe("unverified")
+    expect((await service.search("qq", "凭据轮换")).accountStatus).toBe("selected")
+    expect((await readMusicAccounts(accountsFile)).qq.credential).toBe("twc1_rotated")
+    expect(requests).toEqual(Array(5).fill("/v1/search"))
+  } finally { mock.stop(true) }
 })
 
 test("试听音源明确拒绝，完整歌曲前不创建媒体任务", async () => {
@@ -141,7 +169,6 @@ test("取消与串号确认保留原音乐身份和凭据", async () => {
 })
 
 test("TuneWeave 的 B 站和网易云就绪检查使用各自已注册的能力",async()=>{
-  const { TuneWeaveService } = await import("../services/tuneweave/service.js")
   const endpoints = []
   let version = "1.0.0-beta.3"
   const api = new TuneWeaveService({

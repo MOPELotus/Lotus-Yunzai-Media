@@ -25,9 +25,9 @@ export class MusicService {
     this.accountsFile = options.accountsFile
     this.partner = new NeteasePartnerAccounts(options.partnerAccountsFile)
   }
-  async request(route, accounts) {
+  async request(route, accounts, accountSelection) {
     accounts ??= await readMusicAccounts(this.accountsFile)
-    return this.tuneweave.request(route, { credentials: Object.values(accounts).map(a => a?.credential).filter(Boolean),
+    return this.tuneweave.request(route, { credentials: Object.values(accounts).map(a => a?.credential).filter(Boolean), accountSelection,
       onCredentialUpdates: updates => Promise.all(updates.filter(u => accounts[u.platform]?.credential).map(u =>
         saveMusicAccount(u.platform, { credential: u.credential }, { file: this.accountsFile, expected: accounts[u.platform] }))) })
   }
@@ -44,11 +44,21 @@ export class MusicService {
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error("请选择有效平台并输入歌曲关键词")
     const limit = this.config.search_limit
     const accounts = await readMusicAccounts(this.accountsFile)
-    const account = accounts[platform]
+    const { alias, credential } = accounts[platform] || {}
     // Use the saved identity for search as well as playback, without mixing
     // results from other platforms or losing rotated caller credentials.
-    const items = await this.request(`/v1/search?${new URLSearchParams({ platform, type: "track", q: keyword.trim(), limit: String(limit), offset: String((page - 1) * limit), ...(account?.alias && !account.credential ? { account: account.alias } : {}) })}`, accounts)
-    return items.filter(i => i.type === "track").map(i => i.data)
+    const params = new URLSearchParams({
+      platform, type: "track", q: keyword.trim(), limit: String(limit), offset: String((page - 1) * limit),
+      ...(alias && !credential ? { account: alias } : {}),
+    })
+    const { data: items, accountSelected } = await this.request(`/v1/search?${params}`, accounts, {
+      platform, alias, hasCredential: Boolean(credential),
+    })
+    // Search can succeed with a stale login, so account selection alone cannot
+    // confirm that the music provider still considers the account signed in.
+    let accountStatus = "unconfigured"
+    if (alias || credential) accountStatus = accountSelected ? "selected" : "unverified"
+    return { tracks: items.filter(i => i.type === "track").map(i => i.data), accountStatus }
   }
   async resolve(track) {
     const accounts = await readMusicAccounts(this.accountsFile), account = accounts[track.platform]

@@ -16,6 +16,11 @@ const sessions = new Map(), aliases = { 网易云: "netease", 网易: "netease",
 const activeLogins = new Map()
 const maxInlineBytes = 16 * 1024 * 1024
 const canManageMusic = e => e.isPrivate && canManagePackages(e)
+const searchAccountNotes = {
+  selected: "本次搜索已选用公共音乐账号。",
+  unverified: "公共音乐账号的登录状态待确认。",
+  unconfigured: "当前平台未配置公共音乐账号。主人可用 #音乐登录 查看支持扫码的平台。",
+}
 
 function ownerPermission(event, config) {
   if (!canManagePackages(event)) return false
@@ -143,16 +148,21 @@ export class MusicMedia extends BasePlugin {
   async results(session, e = this.e) {
     const key = musicSessionKey(e)
     session.loading = true
+    let search
     try {
-      const tracks = await session.api.search(session.platform, session.keyword, session.page)
+      search = await session.api.search(session.platform, session.keyword, session.page)
       if (sessions.get(key) !== session) return
-      session.tracks = tracks
+      session.tracks = search.tracks
       session.expires = Date.now() + (session.config.session_timeout_ms || 120000)
     } finally { session.loading = false }
+    const { tracks, accountStatus } = search
+    const message = tracks.length ?
+      "两分钟内回复数字选歌。#下一页 翻页，#取消 结束。播放时自动尝试完整备用音源。" + searchAccountNotes[accountStatus] :
+      "没有搜索结果，可更换关键词或平台。"
     const image = await renderStatusCard({ title: MUSIC_PLATFORMS[session.platform] + "点歌", subtitle: session.keyword, badge: `第 ${session.page} 页`, userId: e.user_id,
-      message: session.tracks.length ? "两分钟内回复数字选歌；#下一页 翻页，#取消 结束。播放时自动尝试完整备用音源。建议主人扫码登录。" : "没有搜索结果，可更换关键词或平台。",
-      items: session.tracks.map((track, i) => ({ label: String(i + 1), value: `${track.name} · ${track.artists?.map(a => a.name).join(" / ") || "未知歌手"}` })) }, { saveId: `media-music-search-${e.user_id}` }).catch(() => undefined)
-    if (sessions.get(key) === session) await replyImage(e, image, session.tracks.map((track, i) => `${i + 1}. ${track.name}`).join("\n") || "没有搜索结果")
+      message,
+      items: tracks.map((track, i) => ({ label: String(i + 1), value: `${track.name} · ${track.artists?.map(a => a.name).join(" / ") || "未知歌手"}` })) }, { saveId: `media-music-search-${e.user_id}` }).catch(() => undefined)
+    if (sessions.get(key) === session) await replyImage(e, image, [message, ...tracks.map((track, i) => `${i + 1}. ${track.name}`)].join("\n"))
   }
   async login() {
     const e = this.e

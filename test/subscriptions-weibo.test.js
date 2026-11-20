@@ -14,10 +14,12 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
   const requests = []
   const post = card({
     mid: "9999999999999999", id: 12, bid: "Qq012Aa",
+    attitudes_count:12000, comments_count:0, reposts_count:"3.4万",
     text: '转载<br>正文 &amp; <a href="https://evil.invalid">原文</a><script>脚本</script><img alt="[笑]" src="https://evil.invalid">',
     pics: [picture("https://wx1.sinaimg.cn/repost.jpg")],
     retweeted_status: {
       idstr: "9999999999999998", created_at, bid: "Qq012Ba",
+      attitudes_count:0, comments_count:"无数据", reposts_count:7,
       user: { id: 42, screen_name: "来源账号" }, text: "<p>原帖 &lt;文字&gt;</p>",
       pics: [picture("http://wx1.sinaimg.cn/original.jpg"),
         picture("https://wx1.sinaimg.cn/original.jpg"), picture("https://evil.invalid/x")],
@@ -59,8 +61,8 @@ test("微博正常匿名 GET 按旧容器拉取主页及动态，保留原文链
     expect(posts[1]).toMatchObject({ type: "DYNAMIC_TYPE_ARTICLE", content: "只有正文", url: "https://m.weibo.cn/detail/12345" })
     expect(posts[2]).toMatchObject({ type: "DYNAMIC_TYPE_AV", title: "视频标题", cover: "https://wx1.sinaimg.cn/cover.jpg" })
     const [repost]=await makeDynamicMessages(source,posts[0],settingsFor({pushMsgMode:0,mergeTextPic:0}))
-    expect(repost.text).toContain(`转发链接：https://weibo.com/${uid}/Qq012Aa\n原帖 · 图文 · 来源账号`)
-    expect(repost.text).toEndWith("原帖 <文字>\n原帖链接：https://weibo.com/42/Qq012Ba")
+    expect(repost.text).toContain(`1.2万点赞 • 0评论 • 3.4万转发\n转发链接：https://weibo.com/${uid}/Qq012Aa\n原帖 · 图文 · 来源账号`)
+    expect(repost.text).toEndWith("原帖 <文字>\n0点赞 • 7转发\n原帖链接：https://weibo.com/42/Qq012Ba")
     expect(requests.map(({ url }) => Object.fromEntries(url.searchParams))).toEqual([
       { type: "uid", value: uid, containerid: `100505${uid}` }, { containerid: `107603${uid}` },
     ])

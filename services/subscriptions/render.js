@@ -69,18 +69,22 @@ function mediaFor(provider, item, settings) {
     .slice(0,settings.pictureLimit)
 }
 
+function compactCount(value) {
+  const count = Number(value)
+  return Number.isSafeInteger(count) && count >= 10_000 ? `${(count/10_000).toFixed(1)}万` : value
+}
+
 function textDetails(post) {
   const details = post.activity
   if (!details) return []
-  if (post.type === "DYNAMIC_TYPE_AV") {
-    const stats = [["弹幕", details.bullets], ["播放", details.views], ["点赞", details.likes],
-      ["评论", details.comments], ["转发", details.shares]]
-    return [stats.filter(([,value]) => value !== undefined).map(([label,value]) => value + label).join(" • ")]
-  }
   if (post.type === "DYNAMIC_TYPE_LIVE_RCMD") {
-    return [details.area && `分区：${details.area}`, details.viewers !== undefined && `${details.viewers}人看过`]
+    return [details.area && `分区：${details.area}`, details.viewers !== undefined && `${compactCount(details.viewers)}人看过`]
   }
-  return []
+  const stats = [
+    ["弹幕", details.bullets], ["播放", details.views], ["点赞", compactCount(details.likes)],
+    ["评论", compactCount(details.comments)], ["转发", compactCount(details.shares)],
+  ]
+  return [stats.filter(([,value]) => value !== undefined).map(([label,value]) => value + label).join(" • ")]
 }
 
 function category(provider, post) {

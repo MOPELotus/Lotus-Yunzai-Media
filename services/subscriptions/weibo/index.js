@@ -91,6 +91,7 @@ function postOf(post, depth = 0) {
     id, uid, author: clean(post.user?.screen_name, 80) || uid, createdAt, type,
     title: clean(media?.title, 160) || undefined, content,
     url: bid ? `https://weibo.com/${uid}/${bid}` : `https://m.weibo.cn/detail/${id}`,
+    activity: { likes: publicCount(post.attitudes_count), comments: publicCount(post.comments_count), shares: publicCount(post.reposts_count) },
     images, forwarded, cover, avatar: imageUrl(post.user?.profile_image_url ?? post.user?.avatar_large),
   }
 }

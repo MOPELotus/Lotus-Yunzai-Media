@@ -38,10 +38,8 @@ function liveInfo(content) {
   catch { return }
 }
 
-function archiveActivity(archive, dynamicStats) {
+function interactions(dynamicStats) {
   return {
-    views: publicCount(archive?.stat?.play),
-    bullets: publicCount(archive?.stat?.danmaku),
     likes: publicCount(dynamicStats?.like?.count),
     comments: publicCount(dynamicStats?.comment?.count),
     shares: publicCount(dynamicStats?.forward?.count),
@@ -92,13 +90,14 @@ export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
   const list = opus?.pics ?? major.draw?.items
   let images = Array.isArray(list) ? list.map(item => picture(item?.url ?? item?.src)).filter(Boolean) : []
   let cover
-  let activity
+  let activity = interactions(raw.modules?.module_stat)
   if (type === "DYNAMIC_TYPE_AV") {
     title = major.archive?.title ?? title
     content = richText(major.archive?.desc) || content
     url = page(major.archive?.jump_url) || url
     cover = picture(major.archive?.cover)
-    activity = archiveActivity(major.archive, raw.modules?.module_stat)
+    activity.views = publicCount(major.archive?.stat?.play)
+    activity.bullets = publicCount(major.archive?.stat?.danmaku)
   } else if (type === "DYNAMIC_TYPE_ARTICLE") {
     title = major.article?.title ?? title
     content ||= richText(major.article?.desc)

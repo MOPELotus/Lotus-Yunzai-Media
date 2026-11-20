@@ -80,12 +80,25 @@ test("B站转发先给转发帖链接，再给原帖类别、正文和原帖链�
   const settings=settingsFor({pushMsgMode:0})
   const original=raw("DYNAMIC_TYPE_WORD",{desc:{text:"原帖正文"}})
   const repost={...raw("DYNAMIC_TYPE_FORWARD",{desc:{text:"转发正文"}}),id_str:"12234456",orig:original}
+  original.modules.module_stat={like:{count:"2.5万"},forward:{count:3}}
+  repost.modules.module_stat={like:{count:12000},comment:{count:0},forward:{count:-1}}
   const [message]=await makeDynamicMessages(provider,normalizeBiliDynamic(repost,uid),settings)
-  expect(message.text).toContain("转发正文\n转发链接：https://m.bilibili.com/dynamic/12234456\n原帖 · 图文 · 试验发布者")
-  expect(message.text).toEndWith("原帖正文\n原帖链接：https://m.bilibili.com/dynamic/12234455")
+  expect(message.text).toContain("转发正文\n1.2万点赞 • 0评论\n转发链接：https://m.bilibili.com/dynamic/12234456\n原帖 · 图文 · 试验发布者")
+  expect(message.text).toEndWith("原帖正文\n2.5万点赞 • 3转发\n原帖链接：https://m.bilibili.com/dynamic/12234455")
   const [unavailable]=await makeDynamicMessages(provider,normalizeBiliDynamic({...repost,orig:null},uid),settings)
   expect(unavailable.text).toEndWith("转发链接：https://m.bilibili.com/dynamic/12234456")
   expect(unavailable.text).not.toContain("原帖链接")
+})
+
+test("B站图文和专栏文字推送只显示合法互动计数",async()=>{
+  const provider=createBiliProvider()
+  for (const type of [draw,article]) {
+    const item=raw(type,{major:{opus:{summary:{text:"公开正文"}}}})
+    item.modules.module_stat={like:{count:"未记录"},comment:{count:0},forward:{count:123456}}
+    const [message]=await makeDynamicMessages(provider,normalizeBiliDynamic(item,uid),settingsFor({pushMsgMode:0}))
+    expect(message.text).toContain("公开正文\n0评论 • 12.3万转发\n链接：")
+    expect(message.text).not.toContain("点赞")
+  }
 })
 
 test("B站匿名查询明确区分 HTTP 拒绝并读取原公开文章内嵌数据",async()=>{

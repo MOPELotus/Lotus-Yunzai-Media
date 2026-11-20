@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { BilibiliService } from "../services/bilibili/service.js"
+import { BilibiliService, formatBilibiliPreviewText } from "../services/bilibili/service.js"
 import { extractDouyinTarget, resolveDouyinTarget } from "../services/douyin/links.js"
 import { generateABogus } from "../services/douyin/signature.js"
 import { normalizeDouyinWork } from "../services/douyin/model.js"
@@ -52,6 +52,28 @@ test("短链指到站外和抖音 CDN 跨域跳转时停止请求", async () => 
   await expect(resolveDouyinTarget("https://v.douyin.com/test/", {fetch:redirect})).rejects.toThrow("链接域名")
   await expect(fetchCdn(redirect,"https://p3.douyinpic.com/test.png",{}, "image")).rejects.toThrow("平台 CDN")
   expect(requests).toEqual(["https://b23.tv/out", "https://v.douyin.com/test/", "https://p3.douyinpic.com/test.png"])
+})
+
+test("B 站文字预览沿用旧字段和时间顺序，保留零值并省略缺失数据", async () => {
+  const bvid = "BV1dAxE6VErW"
+  const service = new BilibiliService()
+  service.tuneRequest = async route => route.endsWith("/parts") ? [] : { video: {
+    ref: "bilibili:bvid:" + bvid,
+    title: "<strong>公开稿件</strong>",
+    creators: [{ ref: "bilibili:user:42", name: "UP 测试" }],
+    duration_ms: 3665000, published_at: "2023-11-14T22:14:20Z",
+    description: "公开简介\n第二行", play_count: 11000,
+    extensions: { bvid, ctime: 1700000000, copyright: "original", category_name: "音乐",
+      category_name_v2: "演奏", danmaku_count: 0, like_count: 8, favorite_count: 0, share_count: 2 },
+  } }
+  const info = await service.getVideoInfo({ bvid })
+  expect(formatBilibiliPreviewText(info)).toBe([
+    "公开稿件", "bvid：" + bvid, "分区：演奏 (音乐)", "投稿：2023年11月15日 06:13:20",
+    "发布：2023年11月15日 06:14:20", "时长：1:01:05", "创作：原创", "UP主：UP 测试", "UID：42",
+    "视频简介：", "公开简介", "第二行", "1.1万播放 • 0弹幕", "8点赞 • 0收藏", "2分享",
+    "链接：https://www.bilibili.com/video/" + bvid,
+  ].join("\n"))
+  expect(formatBilibiliPreviewText({ title: "旧实例", duration: 0, publishedAt: "坏值", stat: { share: -1 } })).toBe("旧实例")
 })
 
 test("抖音文章维持正文、图片和后文顺序，统计缺失时维持未记录", () => {

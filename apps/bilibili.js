@@ -10,6 +10,7 @@ import { renderStatusCard, renderTemplate } from "../core/render/service.js"
 import { replyImage, replyText } from "../core/transport/reply.js"
 import {
   BilibiliService,
+  formatBilibiliPreviewText,
   formatNumber,
   normalizeDownloadConfig,
   resolveCommandPath,
@@ -223,8 +224,12 @@ export class BilibiliMedia extends BasePlugin {
       userId: this.e.user_id,
     }, {
       saveId: `media-bilibili-${this.e.user_id || "user"}`,
+    }).catch(error => {
+      if (info.type !== "video") throw error
+      globalThis.logger?.warn?.(`[media] B 站视频图卡生成失败：${error.message}`)
     })
-    await replyImage(this, image, "[media] B站解析完成。")
+    if (!image && info.type === "video") await replyText(this, formatBilibiliPreviewText(info))
+    else await replyImage(this, image, "[media] B站解析完成。")
     if (info.type === "live" && info.playerUrl) {
       await replyText(this, `[media] 独立播放器：${info.playerUrl}`)
     } else if (info.type === "video" && info.url && options.download !== false) {

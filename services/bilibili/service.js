@@ -108,11 +108,17 @@ export class BilibiliService {
       if (part.length < 100) break
       if (offset === 9900) throw new Error("视频分P数量超过限制")
     }
+    const description = stripHtml(data.description)
+    const ownerRef = data.creators?.[0]?.ref ?? data.creators?.[0]?.resource_ref
     return { type: "video", ref: data.ref, title: stripHtml(data.title), bvid: ext.bvid || target.bvid, aid: ext.aid || target.aid,
       url: `https://www.bilibili.com/video/${ext.bvid || target.bvid || "av" + target.aid}`,
-      cover: normalizeBiliImage(data.cover_url || ""), owner: data.creators?.map(c => c.name).join(" / ") || "", duration: Number(data.duration_ms || 0) / 1000,
+      cover: normalizeBiliImage(data.cover_url || ""), owner: data.creators?.map(c => c.name).join(" / ") || "",
+      ownerId: typeof ownerRef === "string" ? /^bilibili:user:([1-9]\d*)$/u.exec(ownerRef)?.[1] : undefined,
+      duration: Number(data.duration_ms || 0) / 1000,
+      createdAt: ext.ctime, publishedAt: data.published_at, category: ext.category_name, categoryV2: ext.category_name_v2, copyright: ext.copyright,
       stat: { view: data.play_count, like: ext.like_count, coin: ext.coin_count, favorite: ext.favorite_count, danmaku: ext.danmaku_count, reply: ext.comment_count, share: ext.share_count },
-      cid: ext.first_cid, pages: pages.map((p, i) => ({ index: i + 1, cid: p.id.replace(/^cid:/, ""), partId: p.id, page: p.page, part: stripHtml(p.title), duration: Number(p.duration_ms || 0) / 1000 })), desc: stripHtml(data.description || "").slice(0, 180) }
+      cid: ext.first_cid, pages: pages.map((p, i) => ({ index: i + 1, cid: p.id.replace(/^cid:/, ""), partId: p.id, page: p.page, part: stripHtml(p.title), duration: Number(p.duration_ms || 0) / 1000 })),
+      desc: description.slice(0, 180), description }
   }
 
   async getLiveInfo(roomId) {
@@ -350,6 +356,40 @@ export function buildBilibiliItems(info) {
     { label: "分P", value: String(Array.isArray(info.pages) ? info.pages.length : info.pages || 1) },
     { label: "链接", value: info.url },
   ]
+}
+
+const previewTime = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+})
+
+function formatPreviewTime(value) {
+  const date = new Date(typeof value === "number" && value > 0 ? value * 1000 : typeof value === "string" ? value : NaN)
+  if (Number.isFinite(date.getTime())) return previewTime.format(date).replace(/^(\d+)\/(\d+)\/(\d+)/u, "$1年$2月$3日")
+}
+
+export function formatBilibiliPreviewText(info) {
+  const category = info.categoryV2 && info.category && info.categoryV2 !== info.category
+    ? `${info.categoryV2} (${info.category})` : info.categoryV2 || info.category
+  const seconds = Math.floor(info.duration)
+  const duration = Number.isFinite(seconds) && seconds > 0
+    ? `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}` : ""
+  const copyright = info.copyright === "original" ? "原创" : info.copyright === "repost" ? "转载" : undefined
+  const characters = Array.from(info.description || info.desc || "")
+  const description = characters.length > 2000 ? characters.slice(0, 2000).join("") + "..." : characters.join("")
+  const statistics = groups => groups.map(([key,label]) => {
+    const value = info.stat?.[key]
+    return Number.isSafeInteger(value) && value >= 0 ? formatNumber(value) + label : ""
+  }).filter(Boolean).join(" • ")
+  const fields = [
+    ["bvid", info.bvid], ["分区", category], ["投稿", formatPreviewTime(info.createdAt)], ["发布", formatPreviewTime(info.publishedAt)],
+    ["时长", duration], ["创作", copyright], ["UP主", info.owner], ["UID", info.ownerId], ["视频简介", description && "\n" + description],
+  ]
+  return [info.title, ...fields.filter(([,value])=>value).map(([label,value])=>label+"："+value),
+    statistics([["view","播放"],["danmaku","弹幕"],["reply","评论"]]),
+    statistics([["like","点赞"],["coin","投币"],["favorite","收藏"]]),
+    statistics([["share","分享"]]), info.url && `链接：${info.url}`,
+  ].filter(Boolean).join("\n")
 }
 
 export function formatNumber(value) {

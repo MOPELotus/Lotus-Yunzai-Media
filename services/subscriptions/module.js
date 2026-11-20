@@ -84,17 +84,22 @@ export async function createSubscriptionModule(services, { providers = {bilibili
         if (!args) return "请在指令末尾填写有效的纯数字 UID。"
         const operation=/^(删除|取消|del)$/iu.test(match[1])?"remove":"add"
         let name=args.uid
+        let verificationFailure
         if (operation === "add" && !(await config.routes(provider.id)).some(item=>
           item.uid === args.uid && item.bot === current.bot && item.chat === current.chat && item.kind === current.kind)) {
           try {
-            const info=await provider.profile(args.uid,{signal:services.signal})
+            const info=await provider.profile(args.uid,{signal:services.signal,allowUnverified:true})
             if (!info) return "未找到 UID "+args.uid+" 的公开资料。"
             name=info.name
+            verificationFailure=info.verificationFailure
           } catch (error) {
             return provider.label+"用户校验失败："+error.message
           }
         }
         const updated=await config.update(provider.id,current,args.uid,operation,args.selected,Object.keys(provider.typeNames),name)
+        if (updated && verificationFailure) {
+          return "已更新"+describe(provider)+"\n"+args.uid+" 尚未校验（"+verificationFailure+"），已按 UID 保存，请确认 UID 正确。"
+        }
         return updated ? "已更新"+describe(provider)+"\n"+updated.name+"："+args.uid : "当前会话没有订阅该 UID。"
       }
       if (view) {

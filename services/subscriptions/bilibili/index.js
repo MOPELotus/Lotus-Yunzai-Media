@@ -6,6 +6,8 @@ const dynamicRoot = "https://m.bilibili.com/dynamic/"
 const apiRoot = "https://api.bilibili.com"
 const headers = { "User-Agent": "Mozilla/5.0", Referer: "https://www.bilibili.com/" }
 
+class PublicAccessDenied extends Error {}
+
 export const biliTypes = Object.freeze({
   DYNAMIC_TYPE_AV: "视频", DYNAMIC_TYPE_WORD: "图文", DYNAMIC_TYPE_DRAW: "图文",
   DYNAMIC_TYPE_ARTICLE: "文章", DYNAMIC_TYPE_FORWARD: "转发", DYNAMIC_TYPE_LIVE_RCMD: "直播",
@@ -126,9 +128,15 @@ export function createBiliProvider({ fetch: request = globalThis.fetch } = {}) {
     const response = await request(url, {
       headers, credentials: "omit", redirect: "error", signal: signal ? AbortSignal.any([signal,timeout]) : timeout,
     })
-    if (!response.ok) { await response.body?.cancel(); throw new Error("B 站公开接口 HTTP " + response.status) }
+    if (!response.ok) {
+      await response.body?.cancel()
+      const message = "B 站公开接口 HTTP " + response.status
+      if (response.status === 403 || response.status === 412) throw new PublicAccessDenied(message)
+      throw new Error(message)
+    }
     const json = await response.json()
     if (json.code === -404) return
+    if (json.code === -352 || json.code === -403) throw new PublicAccessDenied("B 站公开接口返回 " + json.code)
     if (json.code !== 0 || !json.data) throw new Error("B 站公开接口返回 " + String(json.code))
     return json.data
   }
@@ -172,9 +180,17 @@ export function createBiliProvider({ fetch: request = globalThis.fetch } = {}) {
       for (const [index,post] of posts.entries()) if (post.createdAt>=oldest) posts[index]=await expand(post,signal)
       return posts
     },
-    async profile(uid, {signal} = {}) {
+    async profile(uid, {signal,allowUnverified=false} = {}) {
       if (!accountId(uid)) return
-      const data = await get("/x/web-interface/card", {mid:uid}, signal)
+      let data
+      try {
+        data = await get("/x/web-interface/card", {mid:uid}, signal)
+      } catch (error) {
+        if (allowUnverified && !signal?.aborted && error instanceof PublicAccessDenied) {
+          return {uid, name:uid, verificationFailure:error.message}
+        }
+        throw error
+      }
       const card = data?.card
       if (accountId(card?.mid) !== uid || typeof card.name !== "string" || !card.name.trim()) return
       return {

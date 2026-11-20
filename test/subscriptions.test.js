@@ -167,6 +167,25 @@ test("锅巴配置优先、群与私聊分离，旧类型增删安全保留另�
   expect(YAML.parse(await readFile(join(dir,"push.yaml"),"utf8"))).toEqual({group:{77:[]}})
 })
 
+test("只有明确拒绝访问的 B 站资料可按原 UID 暂存订阅",async()=>{
+  const signal=new AbortController().signal
+  const denied=[
+    {status:403,message:"B 站公开接口 HTTP 403"},{status:412,message:"B 站公开接口 HTTP 412"},
+    {code:-403,message:"B 站公开接口返回 -403"},{code:-352,message:"B 站公开接口返回 -352"},
+  ]
+  for (const {status,code,message} of denied) {
+    const provider=createBiliProvider({fetch:async()=>status
+      ? new Response(null,{status}) : Response.json({code})})
+    await expect(provider.profile(uid,{signal})).rejects.toThrow(message)
+    expect(await provider.profile(uid,{signal,allowUnverified:true}))
+      .toEqual({uid,name:uid,verificationFailure:message})
+  }
+  const missing=createBiliProvider({fetch:async()=>Response.json({code:-404})})
+  expect(await missing.profile(uid,{signal,allowUnverified:true})).toBeUndefined()
+  const broken=createBiliProvider({fetch:async()=>new Response(null,{status:503})})
+  await expect(broken.profile(uid,{signal,allowUnverified:true})).rejects.toThrow("HTTP 503")
+})
+
 test("聊天指令修改旧订阅文档时保留注释、文件权限和相邻路由",async()=>{
   const root=await directory()
   const dir=join(root,"yuki-plugin","config","bilibili")

@@ -60,8 +60,25 @@ function clipContent(content, settings) {
   return Array.from(content.split(/\r?\n/u).slice(0,settings.lineLimit).join("\n")).slice(0,settings.contentLimit).join("")
 }
 
-function textBlock(item, settings) {
-  return [item.title,clipContent(item.content,settings)].filter(Boolean).join("\n")
+function limitTextContent(content, settings) {
+  if (!content || settings.contentLimit === 0 || settings.lineLimit === 0) return ""
+  const lines = []
+  let remaining = settings.contentLimit
+  for (const line of content.split(/\r?\n/u).slice(0,settings.lineLimit)) {
+    if (!remaining) break
+    const characters = Array.from(line)
+    if (characters.length > remaining) {
+      lines.push(characters.slice(0,remaining).join("") + "...")
+      break
+    }
+    lines.push(line)
+    remaining -= characters.length
+  }
+  return lines.join("\n")
+}
+
+function textBlock(item, settings, limit=clipContent) {
+  return [item.title,limit(item.content,settings)].filter(Boolean).join("\n")
 }
 
 function mediaFor(provider, item, settings) {
@@ -99,11 +116,11 @@ function textMessages(provider, post, settings) {
   const heading = `【${provider.label}${category(provider,post)}】${post.author}`
   const repost = post.type === "DYNAMIC_TYPE_FORWARD"
   const linkLabel = post.activity?.roomUrl ? "直播链接" : repost ? "转发链接" : "链接"
-  const elements = [heading,published(post),textBlock(post,settings),...textDetails(post),`${linkLabel}：${post.url}`]
+  const elements = [heading,published(post),textBlock(post,settings,limitTextContent),...textDetails(post),`${linkLabel}：${post.url}`]
   const original = post.forwarded
   if (original) {
     elements.push(`原帖 · ${category(provider,original)} · ${original.author}`,published(original),
-      textBlock(original,settings),...textDetails(original))
+      textBlock(original,settings,limitTextContent),...textDetails(original))
     if (original.url !== post.url) {
       const label = original.activity?.roomUrl ? "原帖直播链接" : "原帖链接"
       elements.push(`${label}：${original.url}`)

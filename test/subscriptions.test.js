@@ -101,6 +101,24 @@ test("B站图文和专栏文字推送只显示合法互动计数",async()=>{
   }
 })
 
+test("文字正文按旧行数和字数裁剪，跨行和原帖各自保留完整字符",async()=>{
+  const provider=createBiliProvider()
+  const original=raw("DYNAMIC_TYPE_WORD",{desc:{text:"原句\r\n字🚀超长\r\n末行"}})
+  const repost={...raw("DYNAMIC_TYPE_FORWARD",{desc:{text:"转🚀\n发帖超长\n末行"}}),id_str:"12234456",orig:original}
+  const unified=normalizeBiliDynamic(repost,uid)
+  const text=async options=>(await makeDynamicMessages(provider,unified,settingsFor({pushMsgMode:0,...options})))[0].text
+  const both=await text({pushContentLenLimit:4,pushContentLineLimit:2})
+  expect(both).toContain("转🚀\n发帖...\n转发链接：")
+  expect(both).toContain("原句\n字🚀...\n原帖链接：")
+  expect(both).not.toContain("末行")
+  const lines=await text({pushContentLenLimit:100,pushContentLineLimit:1})
+  expect(lines).toContain("转🚀\n转发链接：")
+  expect(lines).not.toContain("...")
+  const suppressed=await text({pushContentLenLimit:0,pushContentLineLimit:1})
+  expect(suppressed).not.toContain("转🚀")
+  expect(suppressed).toEndWith("原帖链接：https://m.bilibili.com/dynamic/12234455")
+})
+
 test("B站匿名查询明确区分 HTTP 拒绝并读取原公开文章内嵌数据",async()=>{
   const requests=[]
   const feed=createBiliProvider({fetch:async (u,options)=>{

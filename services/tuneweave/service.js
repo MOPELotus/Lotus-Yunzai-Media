@@ -36,7 +36,7 @@ export class TuneWeaveService {
     this.arch = options.arch || process.arch
   }
 
-  async request(route, { method = "GET", body, credentials = [], onCredentialUpdates, accountSelection, signal } = {}) {
+  async request(route, { method = "GET", body, credentials = [], onCredentialUpdates, accountSelection, signal, redirect } = {}) {
     signal?.throwIfAborted()
     const target = `${this.config.api_url.replace(/\/+$/, "")}${route}`
     const timeout = AbortSignal.timeout(this.config.request_timeout_ms)
@@ -44,6 +44,7 @@ export class TuneWeaveService {
       method,
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(redirect && { redirect }),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     }
     const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, options))
@@ -75,12 +76,12 @@ export class TuneWeaveService {
     return json.data
   }
 
-  async status(platform = "bilibili", signal) {
+  async status(platform = "bilibili", signal, redirect) {
     const expected = platformStatus[platform]
     if (!Object.hasOwn(platformStatus, platform)) throw new Error("不支持此 TuneWeave 能力检查。")
     try {
-      const health = await this.request("/healthz", { signal })
-      const capabilities = await this.request("/v1/capabilities?" + new URLSearchParams({ platform }), { signal })
+      const health = await this.request("/healthz", { signal, redirect })
+      const capabilities = await this.request("/v1/capabilities?" + new URLSearchParams({ platform }), { signal, redirect })
       const registration = Array.isArray(capabilities) ? capabilities.find(item => item.platform === platform && item.registered) : null
       const ready = Array.isArray(registration?.capabilities) &&
         expected.capabilities.every(capability => registration.capabilities.includes(capability))
@@ -227,7 +228,8 @@ export class TuneWeaveService {
     } catch (error) { await fs.rm(file, { force: true }); throw error }
   }
 
-  async startInstalled(expectedVersion, platform = "bilibili") {
+  async startInstalled(expectedVersion, platform = "bilibili", signal) {
+    signal?.throwIfAborted()
     const url = this.localUrl()
     let recorded = false
     try { await fs.access(path.join(this.root, "process.json")); recorded = true } catch (error) { if (error.code !== "ENOENT") throw error }
@@ -236,6 +238,7 @@ export class TuneWeaveService {
     const log = await fs.open(path.join(this.root, "server.log"), "a", 0o600)
     let child
     try {
+      signal?.throwIfAborted()
       child = this.spawn(this.executable, [], {
         cwd: this.root, detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd],
         env: { ...process.env, TUNEWEAVE_BIND: `${url.hostname === "localhost" ? "127.0.0.1" : url.hostname}:${url.port || "80"}`, TUNEWEAVE_DATA_DIR: path.join(this.root, "accounts"), TUNEWEAVE_LOG_DIR: path.join(this.root, "logs") },
@@ -246,12 +249,12 @@ export class TuneWeaveService {
     await fs.writeFile(path.join(this.root, "process.json"), JSON.stringify({ pid: child.pid, api_url: this.config.api_url, identity: await processIdentity(child.pid, this.platform).catch(() => null) }), { mode: 0o600 })
     try {
       for (let i = 0; i < 30; i++) {
-        await sleep(1000)
+        await sleep(1000, undefined, { signal })
         if (child.exitCode !== null || child.signalCode !== null) break
-        const ready = await this.status(platform)
+        const ready = await this.status(platform, signal, "error")
         if (ready.ok) {
           if (expectedVersion && compareTuneWeaveVersions(ready.version, expectedVersion) !== 0) throw new Error("TuneWeave 启动后的版本与校验发布包不符")
-          await sleep(100)
+          await sleep(100, undefined, { signal })
           if (child.exitCode !== null || child.signalCode !== null || !await processAlive(child.pid)) throw new Error("TuneWeave 子进程已退出")
           return { ...ready, pid: child.pid }
         }
@@ -349,14 +352,25 @@ export class TuneWeaveService {
     }
   }
 
-  async resume() {
+  async resume(signal) {
     // Resume existing installations without downloading or updating at boot.
-    // Updates are scheduled separately after the configured startup delay.
-    try { await fs.access(path.join(this.root, "process.json")); await fs.access(this.executable) } catch { return { skipped: true } }
+    signal?.throwIfAborted()
+    try { this.localUrl() } catch { return { skipped:true } }
+    try {
+      const [state, binary] = await Promise.all([
+        fs.lstat(path.join(this.root, "process.json")), fs.lstat(this.executable),
+      ])
+      if (!state.isFile() || !binary.isFile()) return { skipped:true }
+    } catch (error) {
+      if (error.code === "ENOENT") return { skipped:true }
+      throw error
+    }
     return this.lifecycle(async () => {
-      const status = await this.status()
+      signal?.throwIfAborted()
+      await this.managedProcess()
+      const status = await this.status("bilibili", signal, "error")
       if (status.reachable) return status
-      return this.startInstalled()
+      return this.startInstalled(undefined, "bilibili", signal)
     })
   }
 

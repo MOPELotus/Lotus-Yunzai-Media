@@ -8,23 +8,32 @@ export function receiptKey(platform, route, post) {
   return "Yz:yuki:" + legacyPrefix[platform] + ":upPush:" + route.kind + ":" + route.chat + ":" + post.id
 }
 
-const claimLua = [
-  "if redis.call('EXISTS',KEYS[1])==1 or redis.call('EXISTS',KEYS[2])==1 then return 0 end",
-  "redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2])",
-  "redis.call('SET',KEYS[2],ARGV[1],'EX',ARGV[2])",
-  "return 1",
-].join("\n")
-const settleLua = [
-  "if redis.call('GET',KEYS[2])~=ARGV[1] then return 0 end",
-  "if ARGV[2]=='rejected' then",
-  "  if redis.call('GET',KEYS[1])==ARGV[1] then redis.call('DEL',KEYS[1]) end",
-  "  redis.call('DEL',KEYS[2])",
-  "else",
-  "  if redis.call('GET',KEYS[1])==ARGV[1] then redis.call('SET',KEYS[1],'1','KEEPTTL') end",
-  "  redis.call('SET',KEYS[2],ARGV[2],'KEEPTTL')",
-  "end",
-  "return 1",
-].join("\n")
+const claimLua = `
+local claimed = {}
+for i = 1, #ARGV - 1 do
+  local legacy, journal = KEYS[i * 2 - 1], KEYS[i * 2]
+  if redis.call('EXISTS', legacy, journal) == 0 then
+    local token = ARGV[i + 1]
+    redis.call('SET', legacy, token, 'EX', ARGV[1])
+    redis.call('SET', journal, token, 'EX', ARGV[1])
+    table.insert(claimed, i)
+  end
+end
+return claimed`
+const settleLua = `
+local state = ARGV[1]
+for i = 1, #ARGV - 1 do
+  local legacy, journal = KEYS[i * 2 - 1], KEYS[i * 2]
+  local token = ARGV[i + 1]
+  if state == 'rejected' then
+    if redis.call('GET', legacy) == token then redis.call('DEL', legacy) end
+    if redis.call('GET', journal) == token then redis.call('DEL', journal) end
+  elseif redis.call('GET', journal) == token then
+    if redis.call('GET', legacy) == token then redis.call('SET', legacy, '1', 'KEEPTTL') end
+    redis.call('SET', journal, state, 'KEEPTTL')
+  end
+end
+return 1`
 const settleLiveNoticeLua = [
   "if redis.call('GET',KEYS[1])~=ARGV[1] then return 0 end",
   "if ARGV[2]=='rejected' then return redis.call('DEL',KEYS[1]) end",
@@ -107,8 +116,27 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  async function finish(redis, item, state) {
-    await redis.eval(settleLua,{keys:item.keys,arguments:[item.token,state]})
+  function finish(redis, entries, state) {
+    return redis.eval(settleLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
+      arguments: [state, ...entries.map(item => item.token)] })
+  }
+
+  async function claim(redis, candidates, report) {
+    const entries = candidates.map(item => ({ ...item, token: "pending:" + crypto.randomUUID() }))
+    try {
+      const selected = await redis.eval(claimLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
+        arguments: [String(holdSeconds), ...entries.map(item => item.token)] })
+      if (!Array.isArray(selected) || selected.some(index => !Number.isInteger(index) || index < 1 || index > entries.length)) {
+        throw new Error("动态投递占位结果无效。")
+      }
+      const claimed = new Set(selected)
+      report.skipped += entries.length - claimed.size
+      return entries.filter((_, index) => claimed.has(index + 1))
+    } catch (error) {
+      // Nothing has reached the gateway. Release only our token if the write actually landed.
+      await finish(redis, entries, "rejected").catch(() => {})
+      throw error
+    }
   }
 
   async function sendSeparately(send,item) {
@@ -144,33 +172,57 @@ export function createSubscriptionDelivery({providers,config,groups,notification
 
   async function dispatchTarget(provider, redis, sender, entries, settings, report) {
     if (!entries.length) return
-    const route=entries[0].route
-    if (!active.aborted && provider.id === "bilibili" && route.kind === "group" && settings.liveAtAll && settings.liveGroups.has(route.chat) &&
-        entries.some(entry=>entry.post.type === "DYNAMIC_TYPE_LIVE_RCMD")) {
-      try { await notifyLiveAtAll(redis,route,sender,settings) }
+    const route = entries[0].route
+    let liveNoticeAttempted = false
+    async function liveNotice(claimed) {
+      if (liveNoticeAttempted || active.aborted || provider.id !== "bilibili" || route.kind !== "group" || !settings.liveAtAll ||
+          !settings.liveGroups.has(route.chat) || !claimed.some(item => item.post.type === "DYNAMIC_TYPE_LIVE_RCMD")) return
+      liveNoticeAttempted = true
+      try { await notifyLiveAtAll(redis, route, sender, settings) }
       catch { /* The dynamic itself is still deliverable. */ }
     }
 
-    if (sender.forward && useDynamicForward(entries,settings)) {
-      for (let index=0;index<entries.length;index+=maxForwardPosts) {
-        const batch=entries.slice(index,index+maxForwardPosts)
-        let status = "rejected"
-        if (!active.aborted) {
-          try { status = await sender.forward(["有新的"+provider.label+"动态了~",...batch.map(item=>postNode(item.payloads))]) }
-          catch { status = "unknown" }
-        }
-        for (const item of batch) {
-          const state = status === "rejected" ? await sendSeparately(sender.send,item) : status === "confirmed" ? "confirmed" : "unknown"
-          await finish(redis,item,state)
-          report[state]++
-        }
+    async function sendItems(items) {
+      for (const item of items) {
+        if (active.aborted) break
+        const claimed = await claim(redis, [item], report)
+        if (!claimed.length) continue
+        await liveNotice(claimed)
+        const state = await sendSeparately(sender.send, claimed[0])
+        await finish(redis, claimed, state)
+        report[state]++
       }
+    }
+
+    if (!sender.forward || !useDynamicForward(entries, settings)) {
+      await sendItems(entries)
       return
     }
-    for (const item of entries) {
-      const state = await sendSeparately(sender.send,item)
-      await finish(redis,item,state)
-      report[state]++
+
+    for (let index = 0; index < entries.length && !active.aborted; index += maxForwardPosts) {
+      const batch = await claim(redis, entries.slice(index, index + maxForwardPosts), report)
+      if (!batch.length) continue
+      if (entries.length <= maxForwardPosts && batch.length !== entries.length && !useDynamicForward(batch, settings)) {
+        await finish(redis, batch, "rejected")
+        await sendItems(batch)
+        continue
+      }
+      await liveNotice(batch)
+      if (active.aborted) {
+        await finish(redis, batch, "rejected")
+        break
+      }
+      let status
+      try { status = await sender.forward(["有新的"+provider.label+"动态了~", ...batch.map(item => postNode(item.payloads))]) }
+      catch { status = "unknown" }
+      if (status === "rejected") {
+        await finish(redis, batch, "rejected")
+        await sendItems(batch)
+      } else {
+        const state = status === "confirmed" ? "confirmed" : "unknown"
+        await finish(redis, batch, state)
+        report[state] += batch.length
+      }
     }
   }
 
@@ -219,10 +271,11 @@ export function createSubscriptionDelivery({providers,config,groups,notification
             if (active.aborted) break
             if (!allowedPost(post,route,settings,wall) || candidates.has(post.id)) continue
             const legacy = receiptKey(provider.id,route,post)
-            if (await redis.get(legacy) !== null) { report.skipped++; continue }
+            const journal = "lotus-yunzai:media:subscription:" + provider.id + ":" + route.kind + ":" + route.chat + ":" + post.id
+            if (await redis.get(legacy) !== null || await redis.get(journal) !== null) { report.skipped++; continue }
             try {
               const payloads=await render(provider,post,settings,{signal:active})
-              candidates.set(post.id,{route,post,payloads,legacy})
+              candidates.set(post.id, { route, post, payloads, legacy, journal })
             } catch (error) {
               if (!active.aborted) {
                 report.failed++
@@ -233,22 +286,9 @@ export function createSubscriptionDelivery({providers,config,groups,notification
         }
         if (!candidates.size || active.aborted) continue
         const currentRoutes = (await config.routes(provider.id)).filter(route=>destinationKey(route)===target)
-        const entries=[]
-        try {
-          for (const item of [...candidates.values()].sort((a,b)=>a.post.createdAt-b.post.createdAt)) {
-            if (active.aborted) break
-            const {post,route,legacy}=item
-            if (!currentRoutes.some(route=>route.uid===post.uid && (!route.types.length || route.types.includes(post.type)))) continue
-            const journal = "lotus-yunzai:media:subscription:" + provider.id + ":" + route.kind + ":" + route.chat + ":" + post.id
-            const token = "pending:" + crypto.randomUUID()
-            const keys = [legacy,journal]
-            if (await redis.eval(claimLua,{keys,arguments:[token,String(holdSeconds)]}) !== 1) { report.skipped++; continue }
-            entries.push({...item,token,keys})
-          }
-        } catch (error) {
-          await Promise.allSettled(entries.map(item=>finish(redis,item,"rejected")))
-          throw error
-        }
+        const entries = [...candidates.values()]
+          .filter(({ post }) => currentRoutes.some(route => route.uid === post.uid && (!route.types.length || route.types.includes(post.type))))
+          .sort((a, b) => a.post.createdAt - b.post.createdAt)
         await dispatchTarget(provider,redis,sender,entries,settings,report)
       } catch (error) {
         if (!active.aborted) {

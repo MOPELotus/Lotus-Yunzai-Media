@@ -451,17 +451,36 @@ function mockReceipts(kv) {
       kv.set(key,value)
       return "OK"
     },
-    eval:async (script,{keys,arguments:[token,argument]})=>{
+    eval:async (script,{keys,arguments:args})=>{
+      if (keys.length === 1) {
+        const [token, state] = args
+        if (kv.get(keys[0]) === token) {
+          if (state === "rejected") kv.delete(keys[0])
+          else kv.set(keys[0], "1")
+        }
+        return 1
+      }
       if (script.includes("EXISTS")) {
-        if (keys.some(key=>kv.has(key))) return 0
-        for (const key of keys) kv.set(key,token)
-      } else if (argument==="rejected") {
-        for (const key of keys) if (kv.get(key)===token) kv.delete(key)
-      } else if (keys.length===1) {
-        if (kv.get(keys[0])===token) kv.set(keys[0],"1")
-      } else {
-        kv.set(keys[0],"1")
-        kv.set(keys[1],argument)
+        const claimed = []
+        for (const [index, token] of args.slice(1).entries()) {
+          const legacy = keys[index * 2], journal = keys[index * 2 + 1]
+          if (kv.has(legacy) || kv.has(journal)) continue
+          kv.set(legacy,token)
+          kv.set(journal,token)
+          claimed.push(index + 1)
+        }
+        return claimed
+      }
+      const [state, ...tokens] = args
+      for (const [index, token] of tokens.entries()) {
+        const legacy = keys[index * 2], journal = keys[index * 2 + 1]
+        if (state === "rejected") {
+          if (kv.get(legacy) === token) kv.delete(legacy)
+          if (kv.get(journal) === token) kv.delete(journal)
+        } else if (kv.get(journal) === token) {
+          if (kv.get(legacy) === token) kv.set(legacy, "1")
+          kv.set(journal, state)
+        }
       }
       return 1
     },
@@ -553,3 +572,117 @@ for (const [decision,expected,groups] of [["confirmed","confirmed",0],["rejected
     } finally { await delivery.dispose() }
   })
 }
+
+for (const withForward of [false, true]) {
+  test(`动态${withForward ? "明确拒转后" : "逐条"}发送的回执异常保留当前项，后续动态仍可补发`,async()=>{
+    const kv = new Map(), direct = [], forward = []
+    const store = mockReceipts(kv)
+    const evalReceipt = store.eval
+    const one = "92011", two = "92012"
+    const legacy = id => receiptKey("weibo", route, {id})
+    const journal = id => "lotus-yunzai:media:subscription:weibo:group:77:" + id
+    let firstFail = true
+    store.eval = async (script, operation) => {
+      if (firstFail && operation.arguments[0] === "confirmed" && operation.keys.includes(journal(one))) {
+        firstFail = false
+        expect(kv.has(journal(two))).toBe(false)
+        expect(kv.has(legacy(two))).toBe(false)
+        throw new Error("合成回执结算失败")
+      }
+      return evalReceipt(script, operation)
+    }
+    const provider = { id:"weibo", label:"微博", fetchPosts:async()=>[one,two].map((id,i)=>({
+      id, uid, type:draw, createdAt:seen-3+i, content:"原动态",
+    })) }
+    const sender = { botId:99, isGroupMember:async()=>true, sendGroup:async(_gid,payload)=>{
+      direct.push(payload[0])
+      return "confirmed"
+    }}
+    if (withForward) sender.sendForward = async (_target, nodes) => {
+      forward.push(nodes.slice(1).map(node=>node[0]))
+      return "rejected"
+    }
+    const makeDelivery = () => createSubscriptionDelivery({
+      providers:{weibo:provider}, config:{settings:async()=>settingsFor({pushTaskLog:0,getDataRandomDelay:0}),
+        routes:async()=>[route]}, notifications:()=>[sender], getRedis:()=>store, now:()=>seen*1000,
+      render:async(_,post)=>[[post.id,"正文".repeat(100)]],
+    })
+    const first = makeDelivery()
+    try {
+      expect((await first.run("weibo")).failed).toBe(1)
+      expect(direct).toEqual([one])
+      expect(kv.get(journal(one))).toMatch(/^pending:/u)
+      expect(kv.has(journal(two))).toBe(false)
+    } finally { await first.dispose() }
+    const second = makeDelivery()
+    try {
+      expect(await second.run("weibo")).toMatchObject({confirmed:1, skipped:1, failed:0})
+      expect(direct).toEqual([one,two])
+      expect(forward).toEqual(withForward ? [[one,two]] : [])
+      expect(await second.run("weibo")).toMatchObject({confirmed:0, skipped:2})
+    } finally { await second.dispose() }
+  })
+}
+
+test("合并转发结算异常只占这一批，下一批动态仍能补发",async()=>{
+  const kv = new Map(), forward = []
+  const store = mockReceipts(kv)
+  const evalReceipt = store.eval
+  const posts = Array.from({length:100},(_,i)=>({id:String(83000+i),uid,type:draw,createdAt:seen-200+i,content:"合成图文"}))
+  const tail = "lotus-yunzai:media:subscription:weibo:group:77:" + posts.at(-1).id
+  let fail = true
+  store.eval = async (script, op) => {
+    if (fail && op.arguments[0] === "confirmed") {
+      fail = false
+      expect(op.keys).toHaveLength(198)
+      expect(kv.has(tail)).toBe(false)
+      throw new Error("合成批次结算失败")
+    }
+    return evalReceipt(script, op)
+  }
+  const delivery = createSubscriptionDelivery({providers:{weibo:{id:"weibo",label:"微博",fetchPosts:async()=>posts}},
+    config:{settings:async()=>settingsFor({pushTaskLog:0,getDataRandomDelay:0}),routes:async()=>[route]},
+    notifications:()=>[{botId:99,isGroupMember:async()=>true,
+      sendForward:async(_target,nodes)=>{forward.push(nodes.length-1);return "confirmed"},
+      sendGroup:async()=>{throw new Error("应使用合并转发")}}],
+    getRedis:()=>store, now:()=>seen*1000,render:async(_,post)=>[[post.id,"正文".repeat(180)]],
+  })
+  try {
+    expect(await delivery.run("weibo")).toMatchObject({failed:1, confirmed:0})
+    expect(forward).toEqual([99])
+    expect(kv.has(tail)).toBe(false)
+    expect(await delivery.run("weibo")).toMatchObject({confirmed:1, skipped:99, failed:0})
+    expect(forward).toEqual([99,1])
+  } finally { await delivery.dispose() }
+})
+
+test("动态领取回包异常按同一 token 清理部分写入，保留其他进程落盘",async()=>{
+  const kv = new Map(), direct = []
+  const store = mockReceipts(kv)
+  const evalReceipt = store.eval
+  const posts = [1,2].map(i=>({id:"claim-"+i,uid,type:draw,createdAt:seen-4+i,content:"合成图文"}))
+  let fail = true
+  store.eval = async (script, op) => {
+    if (fail && script.includes("EXISTS")) {
+      fail = false
+      kv.set(op.keys[0],op.arguments[1])
+      kv.set(op.keys[1],"另一进程的已确认标记")
+      throw new Error("合成领取回包异常")
+    }
+    return evalReceipt(script, op)
+  }
+  const delivery = createSubscriptionDelivery({providers:{weibo:{id:"weibo",label:"微博",fetchPosts:async()=>posts}},
+    config:{settings:async()=>settingsFor({pushTaskLog:0,getDataRandomDelay:0}),routes:async()=>[route]},
+    notifications:()=>[{botId:99,isGroupMember:async()=>true,sendGroup:async(_gid,payload)=>{direct.push(payload);return "confirmed"}}],
+    getRedis:()=>store, now:()=>seen*1000,render:async(_,post)=>[post.id],
+  })
+  try {
+    expect((await delivery.run("weibo")).failed).toBe(1)
+    expect(direct).toEqual([])
+    expect(kv.has(receiptKey("weibo",route,posts[0]))).toBe(false)
+    expect(kv.get("lotus-yunzai:media:subscription:weibo:group:77:claim-1")).toBe("另一进程的已确认标记")
+    expect(kv.has(receiptKey("weibo",route,posts[1]))).toBe(false)
+    expect(await delivery.run("weibo")).toMatchObject({confirmed:1, skipped:1, failed:0})
+    expect(direct).toEqual(["claim-2"])
+  } finally { await delivery.dispose() }
+})

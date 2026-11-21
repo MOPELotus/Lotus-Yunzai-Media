@@ -5,11 +5,13 @@ import { renderStatusCard } from "../../core/render/service.ts"
 import { TuneWeaveService } from "../tuneweave/service.ts"
 import { ToolInstallerService } from "./installer.ts"
 
-const command = "#初始化环境"
+function matches(message: string) {
+  return message === "#初始化环境" || message === "#初始化工具环境"
+}
 
 export function createMediaEnvironment({ signal }: { readonly signal?: AbortSignal }) {
   const fallback: MessageFallback = async (message, context) => {
-    if (message !== command || signal?.aborted) return
+    if (!matches(message) || signal?.aborted) return
     if (context.isDelegated || context.canManagePackages !== true) {
       return "[media] 只有机器人主人可以初始化媒体环境。"
     }
@@ -38,5 +40,5 @@ export function createMediaEnvironment({ signal }: { readonly signal?: AbortSign
     if (image && await context.reply({ type: "image", file: image })) return []
     return summary
   }
-  return { command, fallback }
+  return { matches, fallback }
 }

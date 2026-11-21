@@ -1,19 +1,29 @@
-import { mcWikiTitle, readMcWikiArticle } from "./article.js"
-import { renderMcWikiArticle } from "./render.js"
+import type { CommandReply } from "../../../../lib/commands.ts"
+import type { MessageReply } from "../../../../lib/messages.ts"
+import { mcWikiTitle, readMcWikiArticle, type McWikiArticle } from "./article.ts"
+import { renderMcWikiArticle } from "./render.ts"
 
 const missing = "搜索不到此结果，请检查关键词是否准确无误"
 
-export function createMcWikiCommand({ signal, read = readMcWikiArticle, render = renderMcWikiArticle } = {}) {
-  return async function mcWiki(argument) {
+type Preview = { readonly png: Uint8Array; readonly engine?: Awaited<ReturnType<typeof renderMcWikiArticle>>["engine"] }
+
+interface McWikiCommandOptions {
+  readonly signal?: AbortSignal
+  readonly read?: typeof readMcWikiArticle
+  readonly render?: (article: McWikiArticle) => Promise<Preview>
+}
+
+export function createMcWikiCommand({ signal, read = readMcWikiArticle, render = renderMcWikiArticle }: McWikiCommandOptions = {}) {
+  return async function mcWiki(argument: string): Promise<CommandReply | undefined> {
     const title = mcWikiTitle(argument)
     if (!title) return "用法：#mcwiki 条目名称"
     const result = await read(title, { signal })
     if (signal?.aborted) return
     if (result.status === "missing") return missing
-    const nodes = [result.url]
+    const nodes: MessageReply[] = [result.url]
     if (result.status === "article") {
       const article = result.article
-      let card
+      let card: Preview | undefined
       try {
         card = await render(article)
         if (card?.engine) {

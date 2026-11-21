@@ -1,12 +1,22 @@
-import { Canvas } from "skia-canvas"
+import { Canvas, type CanvasRenderingContext2D } from "skia-canvas"
 import { renderPng } from "@lotus-yunzai/skia"
+import type { McWikiArticle } from "./article.ts"
+
+type RenderMode = Parameters<typeof renderPng>[3]
+
+interface TextStyle {
+  readonly size: number
+  readonly leading: number
+  readonly color: string
+  readonly weight?: string
+}
 
 const width = 860
 const pad = 54
 const fonts = '"Noto Sans CJK SC", "Microsoft YaHei", sans-serif'
 const words = new Intl.Segmenter("zh-Hans", { granularity: "word" })
 
-function wrap(ctx, text, maxWidth, size, weight) {
+function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, size: number, weight: string) {
   ctx.font = `${weight} ${size}px ${fonts}`
   const lines = []
   let line = ""
@@ -24,16 +34,16 @@ function wrap(ctx, text, maxWidth, size, weight) {
   return lines
 }
 
-export async function renderMcWikiArticle(article, { mode = process.env.LOTUS_SKIA_MODE ?? "auto" } = {}) {
+export async function renderMcWikiArticle(article: McWikiArticle, { mode }: { readonly mode?: RenderMode } = {}) {
   const metrics = new Canvas(1, 1)
   metrics.gpu = false
   const measure = metrics.getContext("2d")
   const innerWidth = width - 2 * pad
-  const operations = []
+  const operations: (Required<TextStyle> & { lines: string[]; x: number; y: number })[] = []
   let y = 48
-  function add(text, { size, leading, color, weight = "400", x = pad, available = innerWidth }) {
-    const lines = wrap(measure, text, available, size, weight)
-    operations.push({ lines, x, y, size, leading, color, weight })
+  function add(text: string, { size, leading, color, weight = "400" }: TextStyle) {
+    const lines = wrap(measure, text, innerWidth, size, weight)
+    operations.push({ lines, x: pad, y, size, leading, color, weight })
     y += lines.length * leading
   }
 
@@ -61,6 +71,8 @@ export async function renderMcWikiArticle(article, { mode = process.env.LOTUS_SK
   add(`中文 Minecraft Wiki 贡献者 · 修订 ${article.revisionId}`, { size: 19, leading: 29, color: "#40564e" })
   add("正文许可 CC BY-NC-SA 3.0 · 例外见原文", { size: 19, leading: 29, color: "#40564e" })
 
+  const configured = process.env.LOTUS_SKIA_MODE
+  mode ??= configured === undefined || configured === "auto" ? "auto" : configured === "gpu" ? "gpu" : "cpu"
   const scale = 4
   return renderPng(width * scale, (y + 36) * scale, ctx => {
     ctx.scale(scale, scale)

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
-import { mcWikiTitle, readMcWikiArticle } from "../services/mcwiki/article.js"
-import { createMcWikiCommand } from "../services/mcwiki/command.js"
+import { mcWikiTitle, readMcWikiArticle } from "../services/mcwiki/article.ts"
+import { createMcWikiCommand } from "../services/mcwiki/command.ts"
 
 const url = "https://zh.minecraft.wiki/w/%E5%90%88%E6%88%90"
 const html = `

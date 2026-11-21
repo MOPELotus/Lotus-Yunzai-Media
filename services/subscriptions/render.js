@@ -223,31 +223,29 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
     pushImages(forwarded)
   }
 
-  const max = Math.max(700,Math.min(4300,settings.split?settings.splitHeight:settings.noSplitHeight))
-  const pages=[[]]
-  let filled=0
-  const place=(block,required)=>{
-    if (filled && filled+required+310>max) {
-      if (!settings.split) return false
-      pages.push([])
-      filled=0
-    }
-    pages.at(-1).push(block)
-    filled+=required
-    return true
-  }
-  for (const block of drawBlocks) {
-    if (block.lines) {
-      const lineHeight=Math.ceil(block.size*1.53)
-      for (const line of block.lines) if (!place({...block,lines:[line],gap:0},lineHeight)) break
-      if (!place({gap:block.gap},block.gap)) break
-    } else if(!place(block,block.height+block.gap)) break
-  }
-  return Promise.all(pages.map(async (blocks,index)=>{
-    const elementHeight=block=>block.lines?block.lines.length*Math.ceil(block.size*1.53)+block.gap:(block.height||0)+block.gap
-    const height=310+blocks.reduce((total,block)=>total+elementHeight(block),0)
-    const rendered=await renderPng(width*2,height*2,ctx=>{
-      ctx.scale(2,2)
+  const bodyTop = 158
+  let bodyBottom = bodyTop
+  const blocks = drawBlocks.map(block => {
+    const top = bodyBottom
+    const blockHeight = block.lines ? block.lines.length*Math.ceil(block.size*1.53) : block.height
+    bodyBottom += blockHeight + block.gap
+    return { ...block,top,bottom:bodyBottom }
+  })
+  // Yuki clips only the content container in single-image mode. In split mode,
+  // the author, content and footer form one card that is sliced after layout.
+  const footerTop = settings.split ? bodyBottom : Math.min(bodyBottom,bodyTop+settings.noSplitHeight)
+  const height = footerTop + 152
+  const pageCount = settings.split ? Math.ceil(height/settings.splitHeight) : 1
+  // Keep the 2x resolution where it fits a 16K GPU surface, without reducing the layout height.
+  const scale = Math.ceil(height/pageCount)*2 <= 16384 ? 2 : 1
+  const pages = []
+  for (let index=0;index<pageCount;index++) {
+    signal?.throwIfAborted()
+    const top = Math.floor(height*index/pageCount)
+    const bottom = Math.floor(height*(index+1)/pageCount)
+    const rendered=await renderPng(width*scale,(bottom-top)*scale,ctx=>{
+      ctx.scale(scale,scale)
+      ctx.translate(0,-top)
       ctx.fillStyle="#f9f9f9";ctx.fillRect(0,0,width,height)
       ctx.shadowBlur=18;ctx.shadowColor="rgba(246,140,224,.23)"
       rounded(ctx,20,16,788,height-32,8,"#fff",pink)
@@ -260,22 +258,28 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
       linesAt(ctx,[provider.label+" · "+category(provider,post)],625,59,20,"#bb507e",true)
       ctx.setLineDash([6,5]);ctx.strokeStyle=divider
       ctx.beginPath();ctx.moveTo(40,142);ctx.lineTo(788,142);ctx.stroke()
-      let y=158
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0,bodyTop,width,footerTop-bodyTop)
+      ctx.clip()
       for(const block of blocks){
-        if(block.lines) linesAt(ctx,block.lines,40,y,block.size,block.color || ink,block.bold)
+        if (block.bottom<=top || block.top>=bottom || block.top>=footerTop) continue
+        if(block.lines) linesAt(ctx,block.lines,40,block.top,block.size,block.color || ink,block.bold)
         else if(block.row) for(const [column,img] of block.row.entries()){
-          drawPicture(ctx,img,40+column*(block.cellWidth+8),y,block.cellWidth,block.height,6,block.row.length>1)
+          drawPicture(ctx,img,40+column*(block.cellWidth+8),block.top,block.cellWidth,block.height,6,block.row.length>1)
         }
-        y+=elementHeight(block)
       }
+      ctx.restore()
+      const y = footerTop
       ctx.strokeStyle=pink;ctx.beginPath();ctx.moveTo(40,y+4);ctx.lineTo(788,y+4);ctx.stroke();ctx.setLineDash([])
       drawPicture(ctx,qr,40,y+18,114,114,4)
       const qrCaption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
-      linesAt(ctx,[qrCaption,pages.length>1?"第 "+(index+1)+" / "+pages.length+" 页":provider.label+"动态订阅"],179,y+49,20,"#555")
+      linesAt(ctx,[qrCaption,provider.label+"动态订阅"],179,y+49,20,"#555")
     },process.env.LOTUS_SKIA_MODE||"auto")
     onRender?.(rendered.engine)
-    return rendered.png
-  }))
+    pages.push(rendered.png)
+  }
+  return pages
 }
 
 export async function makeDynamicMessages(provider,post,settings,{signal,onRender}={}) {

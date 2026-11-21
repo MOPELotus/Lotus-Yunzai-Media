@@ -61,7 +61,9 @@ export async function renderMcWikiArticle(article, { mode = process.env.LOTUS_SK
   add(`中文 Minecraft Wiki 贡献者 · 修订 ${article.revisionId}`, { size: 19, leading: 29, color: "#40564e" })
   add("正文许可 CC BY-NC-SA 3.0 · 例外见原文", { size: 19, leading: 29, color: "#40564e" })
 
-  return renderPng(width, y + 36, ctx => {
+  const scale = 4
+  return renderPng(width * scale, (y + 36) * scale, ctx => {
+    ctx.scale(scale, scale)
     ctx.fillStyle = "#f3f7f4"
     ctx.fillRect(0, 0, width, y + 36)
     ctx.fillStyle = "#25775a"

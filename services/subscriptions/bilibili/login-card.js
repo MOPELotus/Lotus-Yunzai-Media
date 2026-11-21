@@ -22,7 +22,7 @@ export async function renderBiliSubscriptionLogin(url) {
   const matrix = QRCode.create(url, { errorCorrectionLevel: "M" }).modules
   await (fontLoaded ??= loadFont().catch(() => undefined))
   const width = 463, height = 462
-  const scale = 2
+  const scale = 4
   const configured = process.env.LOTUS_SKIA_MODE
   const mode = configured === "gpu" || configured === "cpu" ? configured : "auto"
   const { png } = await renderPng(width * scale, height * scale, (ctx) => {

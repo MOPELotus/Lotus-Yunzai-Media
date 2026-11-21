@@ -103,7 +103,7 @@ class SourceCanvas{
   const height=Math.max(240,this.y+50)
   this.height=height
   const configured=Number(options.renderScale??process.env.LOTUS_RENDER_SCALE??4)
-  const scale=(720/this.width)*(Number.isFinite(configured)?Math.min(4,Math.max(1,configured)):4)
+  const scale=Number.isFinite(configured)?Math.min(4,Math.max(1,configured)):4
   const images=new Map()
   await Promise.all([...this.refs].map(async src=>images.set(src,await getImage(src))))
   const rendered=await renderPng(Math.round(this.width*scale),Math.ceil(height*scale),ctx=>{

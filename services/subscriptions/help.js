@@ -34,7 +34,7 @@ const sections = [
 ]
 
 const assetDirectories = [resolveData("yuki-plugin/resources"), resolveRoot("plugins/yuki-plugin/resources")]
-const width = 788, scale = 1.5
+const width = 788, scale = 4
 
 async function legacyImage(relative) {
   for (const directory of assetDirectories) {

@@ -236,8 +236,7 @@ async function drawDynamic(provider,post,settings,signal,onRender) {
   const footerTop = settings.split ? bodyBottom : Math.min(bodyBottom,bodyTop+settings.noSplitHeight)
   const height = footerTop + 152
   const pageCount = settings.split ? Math.ceil(height/settings.splitHeight) : 1
-  // Keep the 2x resolution where it fits a 16K GPU surface, without reducing the layout height.
-  const scale = Math.ceil(height/pageCount)*2 <= 16384 ? 2 : 1
+  const scale = 4
   const pages = []
   for (let index=0;index<pageCount;index++) {
     signal?.throwIfAborted()

@@ -17,6 +17,8 @@ import { DouyinError } from "./http.js"
  * @property {string} platform
  * @property {string} title
  * @property {string} owner
+ * @property {{avatar?: string}} author
+ * @property {{blocks: Array<{type: "text"|"image", text?: string, urls?: string[]}>}|undefined} article
  * @property {string} url
  * @property {Array<Object>} media Ordered logical items; live photos contain image + motion.
  * @property {MediaSource[]} sources All video variants, not just the selected variant.

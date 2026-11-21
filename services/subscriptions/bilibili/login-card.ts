@@ -5,7 +5,7 @@ import { renderPng } from "@lotus-yunzai/skia"
 import { resolveData, resolveRoot } from "../../../core/path.js"
 
 let font = "sans-serif"
-let fontLoaded
+let fontLoaded: Promise<void> | undefined
 
 async function loadFont() {
   for (const file of [resolveData("yuki-plugin/resources/fonts/OPSans.woff2"),
@@ -18,7 +18,7 @@ async function loadFont() {
   }
 }
 
-export async function renderBiliSubscriptionLogin(url) {
+export async function renderBiliSubscriptionLogin(url: string) {
   const matrix = QRCode.create(url, { errorCorrectionLevel: "M" }).modules
   await (fontLoaded ??= loadFont().catch(() => undefined))
   const width = 463, height = 462

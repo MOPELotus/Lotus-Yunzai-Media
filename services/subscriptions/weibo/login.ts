@@ -1,17 +1,36 @@
-import { clearWeiboLogin, readWeiboLogin } from "../session.js"
+import type { MessageFallbackContext } from "../../../../../lib/commands.ts"
+import { clearWeiboLogin, readWeiboLogin, type SubscriptionSession } from "../session.ts"
+import type { GetSubscriptionRedis, SubscriptionRedis } from "../types.ts"
+
+type LoginRequest = (url: URL, options?: RequestInit) => Promise<Response>
+type StoredLogin = NonNullable<Awaited<ReturnType<typeof readWeiboLogin>>>
+
+interface LoginEnvelope {
+  data?: { login?: unknown; uid?: unknown; user_token?: unknown }
+  user?: { id?: unknown; idstr?: unknown; screen_name?: unknown; svip?: unknown; follow_count?: unknown }
+}
+
+interface WeiboLoginOptions {
+  getRedis: GetSubscriptionRedis
+  session: SubscriptionSession
+  owner: (context: MessageFallbackContext) => boolean
+  signal?: AbortSignal
+  fetch?: LoginRequest
+}
 
 const base = "https://m.weibo.cn"
 const show = /^[#/]\s*我的(?:微博|weibo)登录$/iu
 const remove = /^[#/]\s*(?:取消|删除|del)(?:微博|weibo)登录$/iu
 const tokenValue = /^[A-Za-z0-9_.%+=/-]{1,4096}$/u
 
-function userId(value) {
+function userId(value: unknown) {
   if (typeof value === "number" && !Number.isSafeInteger(value)) return
   const id = String(value ?? "")
   if (/^[1-9]\d{0,20}$/u.test(id)) return id
 }
 
-async function get(request, session, state, pathname, active, extra = {}) {
+async function get(request: LoginRequest, session: SubscriptionSession, state: StoredLogin, pathname: URL,
+  active: AbortSignal, extra: Record<string, string> = {}): Promise<{ expired?: boolean; data?: LoginEnvelope }> {
   active.throwIfAborted()
   const url = new URL(pathname, base)
   const deadline = AbortSignal.any([active, AbortSignal.timeout(10_000)])
@@ -26,15 +45,15 @@ async function get(request, session, state, pathname, active, extra = {}) {
     if (response.status === 401) return { expired: true }
     return {}
   }
-  const data = await response.json()
+  const data = await response.json() as LoginEnvelope
   deadline.throwIfAborted()
   await session.rotate(state, url, response.headers)
   active.throwIfAborted()
   return { data }
 }
 
-export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch: request = globalThis.fetch }) {
-  async function status(redis, active) {
+export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch: request = globalThis.fetch }: WeiboLoginOptions) {
+  async function status(redis: SubscriptionRedis, active: AbortSignal) {
     const url = new URL("/api/config", base)
     const state = await readWeiboLogin(redis, url)
     if (!state) return "当前没有微博登录会话。"
@@ -50,16 +69,16 @@ export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch
     if (typeof token === "string" && tokenValue.test(token)) {
       try {
         const current = await readWeiboLogin(redis, profileUrl)
-        if (current?.proof.key !== state.proof.key || current.proof.value !== state.proof.value) return rows.join("\n")
+        if (!current || current.proof.key !== state.proof.key || current.proof.value !== state.proof.value) return rows.join("\n")
         const detail = await get(request, session, current, profileUrl, active, { "x-h5-user-token": token })
         const user = detail.data?.user
-        if (userId(user?.id ?? user?.idstr) === uid) {
+        if (user && userId(user.id ?? user.idstr) === uid) {
           if (typeof user.screen_name === "string" && user.screen_name.trim()) {
             const name = user.screen_name.replace(/[\u0000-\u001f\u007f-\u009f]/gu, "").slice(0, 80).toWellFormed()
             rows.push("昵称：" + name)
           }
           for (const [label, value] of [["SVIP 等级", user.svip], ["关注", user.follow_count]]) {
-            if (Number.isSafeInteger(value) && value >= 0) rows.push(label + "：" + value)
+            if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) rows.push(label + "：" + value)
           }
         }
       } catch {
@@ -69,7 +88,7 @@ export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch
     return rows.join("\n")
   }
 
-  return async (message, context) => {
+  return async (message: string, context: MessageFallbackContext) => {
     const input = message.trim()
     const showing = show.test(input)
     const removing = remove.test(input)

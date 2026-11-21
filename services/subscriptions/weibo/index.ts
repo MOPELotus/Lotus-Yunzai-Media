@@ -1,7 +1,65 @@
 // Source format: snowtafir/yuki-plugin main3, b1d8fecf41d03f92746bb2404b0b0381a24103a5 (MIT).
-import { ExpiredSubscriptionSession, readWithSubscriptionSession } from "../session.js"
+import { ExpiredSubscriptionSession, readWithSubscriptionSession, type SubscriptionSession } from "../session.ts"
+import type { DynamicPost, SubscriptionProfile, SubscriptionProvider } from "../types.ts"
+
+interface WeiboUser {
+  id?: unknown
+  idstr?: unknown
+  screen_name?: unknown
+  profile_image_url?: unknown
+  avatar_large?: unknown
+  description?: unknown
+  gender?: unknown
+  verified_reason?: unknown
+  verified?: unknown
+  followers_count?: unknown
+  followers_count_str?: unknown
+  follow_count?: unknown
+}
+
+interface WeiboPost {
+  mid?: unknown
+  idstr?: unknown
+  id?: unknown
+  bid?: unknown
+  created_at?: unknown
+  longText?: { longTextContent?: unknown }
+  text?: unknown
+  user?: WeiboUser
+  pics?: unknown
+  pic_num?: unknown
+  isLongText?: unknown
+  page_info?: { page_pic?: { url?: unknown }; title?: unknown; type?: unknown }
+  retweeted_status?: WeiboPost
+  attitudes_count?: unknown
+  comments_count?: unknown
+  reposts_count?: unknown
+}
+
+interface WeiboCard {
+  card_type?: unknown
+  mblog?: WeiboPost
+  card_group?: unknown
+  users?: unknown
+  user?: WeiboUser
+}
+
+interface WeiboFeed {
+  cards?: unknown
+  userInfo?: WeiboUser
+}
+
+interface WeiboProviderOptions {
+  fetch?: (url: URL, options?: RequestInit) => Promise<Response>
+  session?: SubscriptionSession
+}
+
+interface DetailNeeds {
+  text: boolean
+  images: boolean
+}
 import { load } from "cheerio"
-import { publicCount } from "../profile.js"
+import { publicCount } from "../profile.ts"
 
 const entrypoint = "https://m.weibo.cn/api/container/getIndex"
 const detailRoot = "https://m.weibo.cn/detail/"
@@ -12,23 +70,23 @@ const typeNames = Object.freeze({
   DYNAMIC_TYPE_ARTICLE: "文章", DYNAMIC_TYPE_FORWARD: "转发",
 })
 
-function record(value) {
+function record(value: unknown): boolean {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
-function decimalId(value) {
+function decimalId(value: unknown) {
   if (typeof value === "number" && Number.isSafeInteger(value)) value = String(value)
   return typeof value === "string" && /^[1-9]\d{0,19}$/u.test(value) ? value : undefined
 }
 
-function clean(text, limit) {
+function clean(text: unknown, limit: number) {
   if (typeof text !== "string") return ""
   return text.replace(/\r\n?/gu, "\n")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, "")
     .trim().slice(0, limit).toWellFormed()
 }
 
-function contentOf(post) {
+function contentOf(post: WeiboPost) {
   const html = post.longText?.longTextContent || post.text
   if (typeof html !== "string") return ""
   const $ = load(html.slice(0, 131_072), {}, false)
@@ -39,7 +97,7 @@ function contentOf(post) {
   return clean($.root().text(), 16_000)
 }
 
-function imageUrl(value) {
+function imageUrl(value: unknown) {
   if (typeof value !== "string" || value.length > 4096) return
   const url = URL.parse(value.startsWith("//") ? `https:${value}` : value)
   if (!url || (url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password || url.port ||
@@ -48,14 +106,15 @@ function imageUrl(value) {
   return url.href
 }
 
-function pictures(post) {
+function pictures(post: WeiboPost) {
   const source = Array.isArray(post.pics) ? post.pics : []
-  return [...new Set(source.slice(0, maximumPictures).map((pic) =>
-    imageUrl(pic?.large?.url) ?? imageUrl(pic?.url) ?? imageUrl(pic?.bmiddle?.url)).filter(Boolean))]
+  return [...new Set(source.slice(0, maximumPictures).map((pic: { large?: { url?: unknown }; url?: unknown; bmiddle?: { url?: unknown } } | undefined) =>
+    imageUrl(pic?.large?.url) ?? imageUrl(pic?.url) ?? imageUrl(pic?.bmiddle?.url)).filter(value => value !== undefined))]
 }
 
-function profileOf(value) {
-  const uid = decimalId(value?.idstr) ?? decimalId(value?.id)
+function profileOf(value: WeiboUser | undefined): SubscriptionProfile | undefined {
+  if (!value) return
+  const uid = decimalId(value.idstr) ?? decimalId(value.id)
   const name = clean(value?.screen_name, 80)
   if (!uid || !name) return
   return {
@@ -67,22 +126,22 @@ function profileOf(value) {
   }
 }
 
-function publishedAt(value) {
+function publishedAt(value: unknown) {
   const parsed = typeof value === "string" ? Math.floor(Date.parse(value) / 1000) : value
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+  return typeof parsed === "number" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-function postId(post) {
+function postId(post: WeiboPost | undefined) {
   // The legacy polling receipt uses mid, then id. idstr is the lossless spelling of numeric id.
   return decimalId(post?.mid) ?? decimalId(post?.idstr) ?? decimalId(post?.id)
 }
 
-function authorId(post) {
+function authorId(post: WeiboPost | undefined) {
   return decimalId(post?.user?.idstr) ?? decimalId(post?.user?.id)
 }
 
-function postOf(post, depth = 0) {
-  if (!record(post)) return
+function postOf(post: WeiboPost | undefined, depth = 0): DynamicPost | undefined {
+  if (!post || !record(post)) return
   const id = postId(post)
   const uid = authorId(post)
   const createdAt = publishedAt(post.created_at)
@@ -107,8 +166,8 @@ function postOf(post, depth = 0) {
   }
 }
 
-function detailNeeds(raw, post) {
-  if (!post) return
+function detailNeeds(raw: WeiboPost | undefined, post: DynamicPost | undefined): DetailNeeds | undefined {
+  if (!raw || !post) return
   const inline = raw.longText?.longTextContent
   const text = (raw.isLongText === true || raw.isLongText === 1) && !(typeof inline === "string" && inline.trim())
   const count = Number(raw.pic_num)
@@ -116,24 +175,24 @@ function detailNeeds(raw, post) {
   if (text || images) return { text, images }
 }
 
-function samePost(raw, post) {
+function samePost(raw: WeiboPost | undefined, post: DynamicPost) {
   return postId(raw) === post.id && authorId(raw) === post.uid
 }
 
-function detailStatus(html, post) {
+function detailStatus(html: string, post: DynamicPost) {
   const $ = load(html)
   for (const script of $("script").toArray()) {
     const match = $(script).text().match(/"status"\s*:\s*(\{[\s\S]*?\})\s*,\s*"call"\s*:/u)
     if (!match) continue
     try {
-      const raw = JSON.parse(match[1])
+      const raw: WeiboPost = JSON.parse(match[1])
       if (samePost(raw, post)) return raw
     } catch { /* The detail format is optional. */ }
   }
 }
 
-function completePost(post, raw, needs) {
-  if (!needs || !samePost(raw, post)) return post
+function completePost(post: DynamicPost, raw: WeiboPost | undefined, needs: DetailNeeds | undefined) {
+  if (!raw || !needs || !samePost(raw, post)) return post
   const content = needs.text ? contentOf(raw) : ""
   const images = needs.images ? pictures(raw) : []
   return {
@@ -143,7 +202,7 @@ function completePost(post, raw, needs) {
   }
 }
 
-async function readText(response) {
+async function readText(response: Response) {
   const reader = response.body?.getReader()
   if (!reader) throw new Error("微博接口没有返回内容。")
   try {
@@ -163,14 +222,14 @@ async function readText(response) {
   }
 }
 
-export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) {
-  async function get(params, signal) {
+export function createWeiboProvider({ fetch = globalThis.fetch, session }: WeiboProviderOptions = {}): SubscriptionProvider {
+  async function get(params: Record<string, string>, signal?: AbortSignal) {
     signal?.throwIfAborted()
     const url = new URL(entrypoint)
     url.search = new URLSearchParams(params).toString()
     const timeout = AbortSignal.timeout(10_000)
     const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
-    const request = async (input, options) => {
+    const request = async (input: URL, options: RequestInit) => {
       try {
         return await fetch(input, options)
       } catch {
@@ -191,7 +250,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) 
         throw new Error("微博公开接口拒绝访问或暂不可用。")
       }
       // Login pages and risk-control responses must remain distinguishable from an empty public feed.
-      let envelope
+      let envelope: { ok?: unknown; data?: WeiboFeed; msg?: unknown } | undefined
       try {
         envelope = JSON.parse(await readText(response))
       } catch {
@@ -200,15 +259,15 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) 
       }
       deadline.throwIfAborted()
       if (envelope?.ok === 1 && record(envelope.data)) return envelope.data
-      if (envelope?.ok === 0 && emptyMessages.has(envelope.msg)) return
-      if (envelope?.ok === 0 && ["需要登录", "请先登录", "未登录"].includes(envelope.msg)) {
+      if (envelope?.ok === 0 && typeof envelope.msg === "string" && emptyMessages.has(envelope.msg)) return
+      if (envelope?.ok === 0 && typeof envelope.msg === "string" && ["需要登录", "请先登录", "未登录"].includes(envelope.msg)) {
         throw new ExpiredSubscriptionSession("微博登录无效或已过期。")
       }
       throw new Error("微博公开数据不可用。")
     })
   }
 
-  async function expand(raw, post, deadline, signal) {
+  async function expand(raw: WeiboPost, post: DynamicPost, deadline: AbortSignal, signal?: AbortSignal) {
     const needs = detailNeeds(raw, post)
     const originalNeeds = detailNeeds(raw.retweeted_status, post.forwarded)
     if ((!needs && !originalNeeds) || deadline.aborted) return post
@@ -224,7 +283,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) 
       const detail = detailStatus(await readText(response), post)
       if (!detail) return post
       const completed = completePost(post, detail, needs)
-      if (!originalNeeds) return completed
+      if (!originalNeeds || !post.forwarded) return completed
       return { ...completed, forwarded: completePost(post.forwarded, detail.retweeted_status, originalNeeds) }
     } catch {
       signal?.throwIfAborted()
@@ -234,17 +293,18 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) 
 
   return {
     id: "weibo", label: "微博", typeNames,
-    async fetchPosts(uid, { signal, oldest = 0 } = {}) {
-      uid = decimalId(uid)
+    async fetchPosts(account, { signal, oldest = 0 } = {}) {
+      const uid = decimalId(account)
       if (!uid) throw new Error("微博 UID 无效。")
       const data = await get({ containerid: `107603${uid}` }, signal)
       if (!data) return []
       if (!Array.isArray(data.cards)) throw new Error("微博动态列表格式无效。")
-      const posts = new Map()
+      const posts = new Map<string, DynamicPost>()
       const detailTimeout = AbortSignal.timeout(5000)
       const deadline = signal ? AbortSignal.any([signal, detailTimeout]) : detailTimeout
-      for (const card of data.cards.slice(0, 100)) {
-        if (card?.card_type !== 9) continue
+      const cards: (WeiboCard | undefined)[] = data.cards
+      for (const card of cards.slice(0, 100)) {
+        if (card?.card_type !== 9 || !card.mblog) continue
         const post = postOf(card.mblog)
         if (post?.uid !== uid || posts.has(post.id)) continue
         posts.set(post.id, post.createdAt >= oldest ? await expand(card.mblog, post, deadline, signal) : post)
@@ -252,8 +312,8 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) 
       signal?.throwIfAborted()
       return [...posts.values()]
     },
-    async profile(uid, { signal } = {}) {
-      uid = decimalId(uid)
+    async profile(account, { signal } = {}) {
+      const uid = decimalId(account)
       if (!uid) throw new Error("微博 UID 无效。")
       const data = await get({ type: "uid", value: uid, containerid: `100505${uid}` }, signal)
       if (!data) return
@@ -267,12 +327,14 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session } = {}) 
       const data = await get({ containerid: "100103", type: "1", q: query, page_type: "searchall" }, signal)
       if (!data) return []
       if (!Array.isArray(data.cards)) throw new Error("微博搜索结果格式无效。")
-      const profiles = new Map()
-      for (const card of data.cards.slice(0, 30)) {
+      const profiles = new Map<string, SubscriptionProfile>()
+      const cards: (WeiboCard | undefined)[] = data.cards
+      for (const card of cards.slice(0, 30)) {
         if (!Array.isArray(card?.card_group)) continue
-        for (const item of card.card_group.slice(0, 30)) {
+        const group: (WeiboCard | undefined)[] = card.card_group
+        for (const item of group.slice(0, 30)) {
           if (item?.card_type !== 3 && item?.card_type !== 10) continue
-          const users = Array.isArray(item?.users) ? item.users.slice(0, 10) : [item?.user]
+          const users: (WeiboUser | undefined)[] = Array.isArray(item?.users) ? item.users.slice(0, 10) : [item?.user]
           for (const user of users) {
             const profile = profileOf(user)
             if (profile && !profiles.has(profile.uid)) profiles.set(profile.uid, profile)

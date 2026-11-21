@@ -18,9 +18,13 @@ export default { commands: {} } satisfies Pick<CommandModule, "commands">
 
 export async function createModule(services: MediaServices): Promise<MediaCommandModule> {
   const subscriptions = await createSubscriptionModule(services)
-  const stopMaintenance = startMediaMaintenance(services)
+  const maintenance = startMediaMaintenance(services)
   const music = createMusicCommands(services)
-  const stopPartner = await createPartnerSchedule(services, { execute:music.executePartner, render:music.renderPartner })
+  const stopPartner = await createPartnerSchedule(services, {
+    execute: music.executePartner,
+    render: music.renderPartner,
+    waitForMaintenance: maintenance?.waitForFirstRound,
+  })
   const mcwiki = createMcWikiCommand({ signal: services.signal })
   const douyin = createDouyinCommands(services)
   const biliLogin = createBilibiliLogin(services)
@@ -29,7 +33,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   return {
     ...subscriptions,
     async dispose() {
-      await Promise.all([subscriptions.dispose(), stopPartner?.(), stopMaintenance?.(), douyin.dispose(), biliVideo.dispose(), music.dispose()])
+      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), biliVideo.dispose(), music.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {

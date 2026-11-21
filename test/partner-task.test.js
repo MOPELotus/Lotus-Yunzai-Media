@@ -10,6 +10,7 @@ import { NeteasePartnerTask } from "../services/music/partner-task.ts"
 import { PartnerReviewService } from "../services/music/partner-review.ts"
 import { partnerLogNodes, readPartnerLog } from "../services/music/partner-log.ts"
 import { createPartnerSchedule, partnerCron } from "../services/music/partner-schedule.ts"
+import { startMediaMaintenance } from "../services/tuneweave/startup.ts"
 
 test("合伙人先核验旧账号，沿用任务顺序、账号偏好和未确认评分记录", async () => {
   const dir = await mkdtemp(join(tmpdir(),"lotus-partner-task-"))
@@ -234,3 +235,99 @@ test("Codex 乐评沿用只读模式并要求可见的联网执行证据", async
   searched = false
   await expect(service.generate({title:"合成歌曲"},config)).rejects.toThrow("未执行联网搜索")
 })
+
+test.each(["成功", "健康但暂缓", "维护异常", "等待取消", "期间常规定时完成", "等待跨日"])(
+  "启动补跑与首轮实际维护协调：%s", async scenario => {
+    const firstAttempt = Promise.withResolvers()
+    const allowMaintenance = Promise.withResolvers()
+    const catchUpWaiting = Promise.withResolvers()
+    const observed = Promise.withResolvers()
+    const caughtUp = Promise.withResolvers()
+    const ready = []
+    const calls = []
+    const waits = []
+    let cronRun
+    let dayRecorded = false
+    let now = new Date(2026, 10, 21, 10)
+    const disconnect = new AbortController()
+    const services = { mediaRuntime: {
+      disconnect: disconnect.signal,
+      whenReady(action) { ready.push(action); return () => {} },
+      registerTask(_cron, action) { cronRun = action; return async () => {} },
+    } }
+    const maintenance = startMediaMaintenance(services, {
+      load: async () => ({}),
+      createTune: () => ({
+        localUrl: () => new URL("http://127.0.0.1"),
+        resume: async () => ({ skipped: true }),
+        async initialize() {
+          calls.push("维护检查")
+          firstAttempt.resolve()
+          await allowMaintenance.promise
+          if (scenario === "维护异常") throw new Error("模拟 TuneWeave 健康检查失败")
+          return { ok: true, updateDeferred: scenario === "健康但暂缓" }
+        },
+      }),
+      prepareTools: async () => ({ ok: true, items: [{ ok: true, name: "ffmpeg", status: "ready" }] }),
+      async wait(ms, signal) {
+        waits.push(ms)
+        if (ms === 180000) return
+        signal.throwIfAborted()
+        await new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))
+      },
+    })
+    const disposeSchedule = await createPartnerSchedule(services, {
+      load: async () => ({ netease_partner: { enable: true, auto_catch_up: true } }),
+      now: () => now,
+      hasRunToday: async () => dayRecorded,
+      wait: async ms => { expect(ms).toBe(60000) },
+      async waitForMaintenance(signal) {
+        catchUpWaiting.resolve()
+        const result = await maintenance.waitForFirstRound(signal)
+        observed.resolve(result)
+        return result
+      },
+      async ensureReady() { calls.push("任务前健康检查") },
+      async execute(_config, trigger) {
+        calls.push(trigger)
+        dayRecorded = true
+        if (trigger === "启动补跑") caughtUp.resolve()
+        return { accounts: [] }
+      },
+      render: async () => ({ text: "fixture" }),
+    })
+    try {
+      expect(calls).toEqual([])
+      for (const activate of ready) activate()
+      await Promise.all([firstAttempt.promise, catchUpWaiting.promise])
+      expect(calls).toEqual(["维护检查"])
+      if (scenario === "等待取消") {
+        await disposeSchedule()
+        expect(await observed.promise).toBe("cancelled")
+        expect(calls).toEqual(["维护检查"])
+        expect(waits).toEqual([180000])
+        allowMaintenance.resolve()
+        return
+      }
+      if (scenario === "期间常规定时完成") {
+        await cronRun()
+        expect(calls).toEqual(["维护检查", "自动任务"])
+      }
+      if (scenario === "等待跨日") now = new Date(2026, 10, 22, 10)
+      allowMaintenance.resolve()
+      expect(await observed.promise).toBe(scenario === "维护异常" ? "failed" : "ready")
+      if (scenario === "成功" || scenario === "健康但暂缓") {
+        await caughtUp.promise
+        expect(calls).toEqual(["维护检查", "任务前健康检查", "启动补跑"])
+        expect(waits).toEqual(scenario === "健康但暂缓" ? [180000, 300000] : [180000])
+      } else {
+        await Bun.sleep(1)
+        expect(calls).toEqual(scenario === "期间常规定时完成" ? ["维护检查", "自动任务"] : ["维护检查"])
+      }
+    } finally {
+      allowMaintenance.resolve()
+      disconnect.abort()
+      await Promise.all([disposeSchedule(), maintenance.dispose()])
+    }
+  }
+)

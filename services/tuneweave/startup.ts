@@ -33,6 +33,8 @@ interface StartupHooks {
   wait?: (ms: number, signal: AbortSignal) => Promise<unknown>
 }
 
+export type FirstMaintenanceResult = "ready" | "failed" | "cancelled"
+
 const initialDelay = 180_000
 const retryDelay = 300_000
 const maxAttempts = 3
@@ -55,6 +57,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
   if (!mediaRuntime) return
   const controller = new AbortController()
   const active = AbortSignal.any([controller.signal, signal, mediaRuntime.disconnect].filter((value): value is AbortSignal => Boolean(value)))
+  const firstRound = Promise.withResolvers<"ready" | "failed">()
   let startup: Promise<void> | undefined
   const notify = async (message: string) => {
     if (!active.aborted) {
@@ -108,6 +111,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
         await wait(attempt === 1 ? startupDelay(config.tuneweave?.update_delay_ms) : retryDelay, active)
         const items = await prepare(config, tune, local)
         const failed = items.filter(item => !item.ok).map(item => item.name)
+        if (attempt === 1) firstRound.resolve(failed.length ? "failed" : "ready")
         const changed = items.filter(item => item.changed).map(item => item.name)
         const deferred = items.filter(item => item.updateDeferred).map(item => item.name)
         if (failed.length) await notify("媒体开机环境尚未就绪：" + failed.join("、") + "。可发送 #初始化环境 重试。")
@@ -116,12 +120,26 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
         if (!failed.length && !deferred.length) return
       }
     })().catch(() => {
-      if (!active.aborted) console.warn("[media] 开机环境维护未完成，请检查媒体配置或发送 #初始化环境。")
+      if (!active.aborted) {
+        firstRound.resolve("failed")
+        console.warn("[media] 开机环境维护未完成，请检查媒体配置或发送 #初始化环境。")
+      }
     })
   })
-  return async () => {
-    controller.abort()
-    cancel()
-    await startup
+  return {
+    async waitForFirstRound(signal: AbortSignal): Promise<FirstMaintenanceResult> {
+      const waiting = AbortSignal.any([active, signal])
+      if (waiting.aborted) return "cancelled"
+      const cancelled = Promise.withResolvers<"cancelled">()
+      const onAbort = () => cancelled.resolve("cancelled")
+      waiting.addEventListener("abort", onAbort, { once: true })
+      try { return await Promise.race([firstRound.promise, cancelled.promise]) }
+      finally { waiting.removeEventListener("abort", onAbort) }
+    },
+    async dispose() {
+      controller.abort()
+      cancel()
+      await startup
+    },
   }
 }

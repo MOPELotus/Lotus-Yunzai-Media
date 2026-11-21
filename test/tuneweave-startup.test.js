@@ -22,13 +22,13 @@ test("TuneWeave 启动恢复只在宿主接管后启动，并随断开取消", a
     } }),
   }
   expect(startMediaMaintenance({},hooks)).toBeUndefined()
-  const dispose = startMediaMaintenance({mediaRuntime:runtime},hooks)
+  const maintenance = startMediaMaintenance({mediaRuntime:runtime},hooks)
   expect(calls).toEqual([])
   enter()
   await inFlight.promise
   expect(calls).toEqual(["读配置","恢复"])
   disconnect.abort()
-  await dispose()
+  await maintenance.dispose()
   expect(calls).toEqual(["读配置","恢复","取消登记","停止"])
 })
 
@@ -70,7 +70,7 @@ test("接管后才维护，FFmpeg 三轮各尝试三次，外部 TuneWeave 全�
     }] })
     return new Response(null, { status: 503 })
   } })
-  const dispose = startMediaMaintenance({ mediaRuntime: {
+  const maintenance = startMediaMaintenance({ mediaRuntime: {
     disconnect: new AbortController().signal,
     whenReady(start) { activate = start; return () => {} },
     async notifyMasters(message) {
@@ -95,13 +95,13 @@ test("接管后才维护，FFmpeg 三轮各尝试三次，外部 TuneWeave 全�
     activate()
     activate()
     await started.promise
-    await dispose()
+    await maintenance.dispose()
     expect(waits).toEqual([2300, 300000, 300000])
     expect(calls).toEqual(Array.from({ length: 3 }, () => ["metadata", "asset", "asset", "asset"]).flat())
     expect(notices.every(item => item.includes("尚未就绪：ffmpeg"))).toBe(true)
     expect(await readdir(join(dir, "downloads"))).toEqual([])
   } finally {
-    await dispose()
+    await maintenance.dispose()
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -126,7 +126,7 @@ test("TuneWeave 联网校验失败但原服务可用时仍重查，确认同一�
     return Response.json({ ok: true, data: [{ platform: "netease", registered: true,
       capabilities: ["platform_api", "qr_login", "account_profile", "caller_managed_credentials"] }] })
   }, spawn() { throw new Error("健康服务无需重启") } })
-  const dispose = startMediaMaintenance({ mediaRuntime: {
+  const maintenance = startMediaMaintenance({ mediaRuntime: {
     disconnect: new AbortController().signal,
     whenReady(action) { action(); return () => {} },
     async notifyMasters(message) {
@@ -143,13 +143,13 @@ test("TuneWeave 联网校验失败但原服务可用时仍重查，确认同一�
   })
   try {
     await finished.promise
-    await dispose()
+    await maintenance.dispose()
     expect(waits).toEqual([180000, 300000])
     expect(rounds).toBe(2)
     expect(calls.filter(url => url.endsWith("/healthz"))).toHaveLength(3)
     expect(await readdir(dir)).toEqual([])
   } finally {
-    await dispose()
+    await maintenance.dispose()
     await rm(dir, { recursive: true, force: true })
   }
 })

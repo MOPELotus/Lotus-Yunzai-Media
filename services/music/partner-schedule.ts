@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { formatLocalIso } from "../../core/time.ts"
 import { TuneWeaveService } from "../tuneweave/service.ts"
+import type { FirstMaintenanceResult } from "../tuneweave/startup.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
 
 type Global = Awaited<ReturnType<typeof loadGlobalConfig>>
@@ -21,6 +22,7 @@ interface ScheduleOptions {
   load?: () => Promise<Global>
   now?: () => Date
   hasRunToday?: () => Promise<boolean>
+  waitForMaintenance?: (signal: AbortSignal) => Promise<FirstMaintenanceResult>
   ensureReady?: (config: Global, signal: AbortSignal) => Promise<unknown>
   wait?: (ms: number, signal: AbortSignal) => Promise<void>
 }
@@ -52,6 +54,7 @@ function pastPartnerSlot(config: PartnerConfig | undefined, now: Date) {
 export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRuntime?: MediaRuntime; signal?: AbortSignal }, {
   execute, render, load = loadGlobalConfig, now = () => new Date(),
   hasRunToday = () => new NeteasePartnerTask().hasRunToday(),
+  waitForMaintenance,
   ensureReady = (config, active) => new TuneWeaveService({ config:config.tuneweave }).requireReady("netease", active),
   wait = (ms, active) => delay(ms, undefined, { signal:active, ref:false }),
 }: ScheduleOptions) {
@@ -92,13 +95,20 @@ export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRun
     if (active.aborted) return
     unregister = mediaRuntime.registerTask(partnerCron((config.netease_partner as PartnerConfig | undefined)?.schedule), async () => run("自动任务"))
     cancelReady = mediaRuntime.whenReady(() => {
-      if (active.aborted) return
+      if (active.aborted || ready) return
       ready = true
       startup = (async () => {
         const current = await load()
         const currentTime = now()
         if (active.aborted || !pastPartnerSlot(current.netease_partner as PartnerConfig | undefined, currentTime) || await hasRunToday()) return
         await wait(60000, active)
+        if (active.aborted) return
+        const maintenance = await waitForMaintenance?.(active)
+        if (active.aborted || maintenance === "cancelled") return
+        if (maintenance === "failed") {
+          console.warn("[media] 开机环境维护未就绪，跳过合伙人启动补跑。")
+          return
+        }
         await run("启动补跑", formatLocalIso(currentTime).slice(0,10))
       })().catch(logFailure)
     })

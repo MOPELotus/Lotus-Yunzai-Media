@@ -56,7 +56,7 @@ export async function createPartnerSchedule({ mediaRuntime, signal }, {
       const report = await execute(config, trigger, { signal:active, once:true })
       if (active.aborted || report.skipped || config.netease_partner.notify_master === false || !mediaRuntime.notifyMasters) return report
       const { image, text } = await render("合伙人自动任务", report)
-      if (!active.aborted) await mediaRuntime.notifyMasters(image ? globalThis.segment.image(image) : text, active)
+      if (!active.aborted) await mediaRuntime.notifyMasters(image ? { type:"image", file:image } : text, active)
       return report
     })().catch(logFailure).finally(() => { pending = undefined })
     return pending

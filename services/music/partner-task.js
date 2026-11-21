@@ -103,6 +103,11 @@ export class NeteasePartnerTask {
     return (await this.state()).last_run_date === formatLocalIso(this.now()).slice(0,10)
   }
 
+  /**
+   * @param {Record<string, unknown>} [config]
+   * @param {string} [trigger]
+   * @param {{signal?: AbortSignal, once?: boolean}} [options]
+   */
   async execute(config = {}, trigger = "手动执行", { signal, once = false } = {}) {
     if (signal?.aborted) signal.throwIfAborted()
     await fs.mkdir(path.dirname(this.stateFile), { recursive:true, mode:0o700 })

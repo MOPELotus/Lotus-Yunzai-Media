@@ -92,5 +92,5 @@ export function partnerLogNodes(report) {
     }
   }
   if (lines.length > maxNodes) lines.splice(maxNodes-1, 2, "日志较长，仅显示前 99 条。")
-  return lines.map(text => ({type:"text", text}))
+  return lines.map(text => ({type: /** @type {"text"} */ ("text"), text}))
 }

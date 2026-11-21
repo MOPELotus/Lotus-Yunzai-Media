@@ -108,18 +108,25 @@ export class MusicService {
   }
   recoverTasks() { return recoverMediaTasks(this.tasksDir) }
   async cleanup(result) { await releaseMediaTask(this.tasksDir, result.taskDir) }
-  async createLogin(platform, owner, loginType) {
+  async createLogin(platform, owner, loginType, { signal } = {}) {
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform)) throw new Error("不支持的音乐平台")
     const alias = platform === "netease" ? `lotus-nep-${String(owner).replace(/[^a-zA-Z0-9_-]/g, "_")}` : `lotus-music-${platform}`
-    const qr = await this.tuneweave.request("/v1/auth/qr", { method: "POST", body: { platform, account: alias, credential_mode: "both", ...(loginType ? { login_type: loginType } : {}) } })
+    const qr = await this.tuneweave.request("/v1/auth/qr", {
+      method: "POST", body: { platform, account: alias, credential_mode: "both", ...(loginType ? { login_type: loginType } : {}) },
+      signal, redirect: "error",
+    })
     if (!qr.transaction_id || !qr.url && !qr.image_data_url) throw new Error("平台没有返回可用二维码")
     return { platform, key: qr.transaction_id, alias, image: qr.image_data_url || await QRCode.toDataURL(qr.url), owner }
   }
+  /**
+   * @param {{platform: string, key: string, alias: string, owner?: number}} login
+   * @param {{signal?: AbortSignal, timeoutMs?: number, pollMs?: number}} [options]
+   */
   async waitLogin(login, { signal, timeoutMs = musicLoginTimeout(login.platform), pollMs = 3000 } = {}) {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       if (signal?.aborted) throw new Error("扫码登录已取消")
-      const result = await this.tuneweave.request(`/v1/auth/qr/${encodeURIComponent(login.key)}`)
+      const result = await this.tuneweave.request(`/v1/auth/qr/${encodeURIComponent(login.key)}`, { signal, redirect: "error" })
       if (signal?.aborted) throw new Error("扫码登录已取消")
       if (result.state === "confirmed") {
         const profile = await resolveQrProfile(this.tuneweave, { platform: login.platform, alias: login.alias, profile: result.profile, signal })

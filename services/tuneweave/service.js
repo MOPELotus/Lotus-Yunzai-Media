@@ -131,6 +131,7 @@ export class TuneWeaveService {
     return url
   }
 
+  /** @param {{onProgress?: (text: string) => Promise<void>, platform?: string}} [options] */
   async initialize({ onProgress = async () => {}, platform = "bilibili" } = {}) {
     return this.lifecycle(async () => {
       const status = await this.status(platform)

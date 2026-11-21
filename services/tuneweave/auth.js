@@ -10,7 +10,7 @@ export async function resolveQrProfile(tuneweave, { platform, alias, profile, si
   checkCancelled()
   checkBinding(profile)
   if (!profile?.authenticated || !profile.user_id) {
-    profile = await tuneweave.request(`/v1/account?${new URLSearchParams({ platform, account: alias })}`)
+    profile = await tuneweave.request(`/v1/account?${new URLSearchParams({ platform, account: alias })}`, { signal, redirect: "error" })
   }
   checkCancelled()
   checkBinding(profile)

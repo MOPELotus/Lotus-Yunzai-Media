@@ -1,15 +1,73 @@
 import path from "node:path"
-import { Canvas, FontLibrary, loadImage } from "skia-canvas"
+import { Canvas, FontLibrary, loadImage, type CanvasRenderingContext2D, type Image, type EngineDetails } from "skia-canvas"
 import { renderPng } from "@lotus-yunzai/skia"
-import { resourcesPath, resolveData } from "../path.js"
-import { fetchImageBytes } from "./image.js"
-import { plainGameText } from "./plain-text.js"
+import { resourcesPath, resolveData } from "../path.ts"
+import { fetchImageBytes } from "./image.ts"
+import { plainGameText } from "./plain-text.ts"
+import type { ArticleBlock } from "../../services/media/message.ts"
+
+export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "douyin-article"
+
+export interface RenderOptions {
+ readonly mode?: Parameters<typeof renderPng>[3]
+ readonly renderScale?: number
+ readonly saveId?: string
+ readonly onRender?: (engine: EngineDetails) => void
+}
+
+type StatusRow = string | { readonly label?: string; readonly title?: string; readonly value?: unknown; readonly body?: unknown }
+
+export interface SourceCard {
+ readonly title?: string
+ readonly subtitle?: string
+ readonly message?: string
+ readonly userId?: number | string
+ readonly badge?: string
+ readonly items?: readonly StatusRow[]
+ readonly generatedAt?: string
+ readonly avatar?: string
+ readonly owner?: string
+ readonly page?: number
+ readonly id?: string
+ readonly type?: string
+ readonly desc?: string
+ readonly cover?: string
+ readonly image?: string
+ readonly blocks?: readonly ArticleBlock[]
+ readonly duration?: number
+ readonly createdAt?: number
+ readonly media?: readonly unknown[]
+ readonly warnings?: readonly string[]
+ readonly music?: { readonly title?: string; readonly author?: string }
+ readonly collection?: { readonly title?: string }
+ readonly sources?: readonly { readonly quality?: string; readonly width?: number; readonly height?: number; readonly codec?: string }[]
+ readonly stat?: Partial<Record<"like" | "reply" | "favorite" | "coin" | "view" | "danmaku" | "share", number>>
+ readonly online?: number
+ readonly liveStatus?: string
+}
+
+interface TextOptions {
+ readonly align?: CanvasRenderingContext2D["textAlign"]
+ readonly font?: string
+ readonly leading?: number
+ readonly minSize?: number
+ readonly shadow?: boolean
+ readonly singleLine?: boolean
+}
+
+interface ImageOptions { readonly cover?: boolean; readonly radius?: number }
+type Draw = (ctx: CanvasRenderingContext2D, images: ReadonlyMap<string, Image | null>) => void
+
+export function renderMode(configured = process.env.LOTUS_SKIA_MODE): NonNullable<RenderOptions["mode"]> {
+ if(configured===undefined||configured==="auto")return "auto"
+ return configured==="gpu"?"gpu":"cpu"
+}
 
 // Bilibili and Douyin retain the genshin mysNews layout drawn by Lotus-ReFactor.
 const GOLD='#d3bc8e',WHITE='#fff'
 const TEXT='"MediaSourceText", MiSans, sans-serif'
 let fontsLoaded=false
-const cache=new Map()
+const cache=new Map<string, Promise<Image | null>>()
 
 
 const background = path.join(resourcesPath, "miao-theme/bg/bg-hydro.webp")
@@ -19,7 +77,7 @@ async function init() {
  for (const [name, candidates] of [
   ["MediaSourceText", [path.join(resourcesPath,"miao-theme/fonts/HYWH-65W.ttf"),resolveData("atlas/theme/fonts/HYWH-65W.ttf")]],
   ["MiSans", [path.join(resourcesPath,"fonts/MiSans-VF.ttf"),resolveData("atlas/theme/fonts/MiSans-VF.ttf")]],
- ]) {
+ ] as const) {
   for (const candidate of candidates) {
    if (await Bun.file(candidate).exists()) { FontLibrary.use(name,[candidate]); break }
   }
@@ -27,7 +85,7 @@ async function init() {
  fontsLoaded=true
 }
 
-async function getImage(src) {
+async function getImage(src: string | undefined) {
  if(!src)return null
  if(!cache.has(src)){
   cache.set(src,(async()=>{
@@ -36,16 +94,22 @@ async function getImage(src) {
    }
    return loadImage(await fetchImageBytes(src))
   })().catch(()=>{cache.delete(src);return null}))
-  if(cache.size>96)cache.delete(cache.keys().next().value)
+  const oldest=cache.keys().next().value
+  if(cache.size>96&&oldest!==undefined)cache.delete(oldest)
  }
  return cache.get(src)
 }
 
-const damageNumber=n=>Number(n||0).toLocaleString('zh-CN',{maximumFractionDigits:1})
+const damageNumber=(n: unknown)=>Number(n||0).toLocaleString('zh-CN',{maximumFractionDigits:1})
 
 class SourceCanvas{
- constructor(width){this.width=width;this.y=20;this.commands=[];this.refs=new Set();const metrics=new Canvas(1,1);metrics.gpu=false;this.ctx=metrics.getContext('2d')}
- lines(value,width,size=16,font=TEXT){
+ readonly commands: Draw[] = []
+ readonly refs = new Set<string>()
+ readonly ctx: CanvasRenderingContext2D
+ y=20
+ height=0
+ constructor(readonly width: number){const metrics=new Canvas(1,1);metrics.gpu=false;this.ctx=metrics.getContext('2d')}
+ lines(value: unknown,width: number,size=16,font=TEXT){
   this.ctx.font=`${size}px ${font}`
   const lines=[]
   for(const paragraph of plainGameText(value).split(/\r?\n/)){
@@ -58,23 +122,24 @@ class SourceCanvas{
   }
   return lines
  }
- rect(x,y,w,h,fill,radius=0){this.commands.push(ctx=>{ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,y,w,h,radius);ctx.fill()})}
- clip(x,y,w,h,radius=10){this.commands.push(ctx=>{ctx.save();ctx.beginPath();ctx.roundRect(x,y,w,h,radius);ctx.clip()})}
+ rect(x: number,y: number,w: number,h: number,fill: string,radius=0){this.commands.push(ctx=>{ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,y,w,h,radius);ctx.fill()})}
+ clip(x: number,y: number,w: number,h: number,radius=10){this.commands.push(ctx=>{ctx.save();ctx.beginPath();ctx.roundRect(x,y,w,h,radius);ctx.clip()})}
  restore(){this.commands.push(ctx=>ctx.restore())}
- rule(x,y,w,color='#ddd'){this.rect(x,y,w,1,color)}
- text(value,x,y,width,size=16,color=WHITE,options={}){
+ rule(x: number,y: number,w: number,color='#ddd'){this.rect(x,y,w,1,color)}
+ text(value: unknown,x: number,y: number,width: number,size=16,color=WHITE,options: TextOptions={}){
   const font=options.font||TEXT
   let lines
   if(options.singleLine){
-   lines=[plainGameText(value).replace(/\s*\n\s*/g,' ')]
+   const line=plainGameText(value).replace(/\s*\n\s*/g,' ')
+   lines=[line]
    this.ctx.font=`${size}px ${font}`
-   while(this.ctx.measureText(lines[0]).width>width&&size>(options.minSize||10)){size-=.5;this.ctx.font=`${size}px ${font}`}
+   while(this.ctx.measureText(line).width>width&&size>(options.minSize||10)){size-=.5;this.ctx.font=`${size}px ${font}`}
   }else lines=this.lines(value,width,size,font)
   const leading=options.leading||size*1.5
   this.commands.push(ctx=>{ctx.save();ctx.font=`${size}px ${font}`;ctx.textBaseline='top';ctx.fillStyle=color;ctx.textAlign=options.align||'left';if(options.shadow){ctx.shadowColor='#000';ctx.shadowBlur=2;ctx.shadowOffsetX=1;ctx.shadowOffsetY=1}lines.forEach((line,i)=>ctx.fillText(line,x+(options.align==='right'?width:options.align==='center'?width/2:0),y+i*leading));ctx.restore()})
   return lines.length*leading
  }
- image(src,x,y,w,h,options={}){
+ image(src: string | undefined,x: number,y: number,w: number,h: number,options: ImageOptions={}){
   if(!src)return
   this.refs.add(src)
   this.commands.push((ctx,images)=>{
@@ -85,7 +150,7 @@ class SourceCanvas{
    ctx.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh);ctx.restore()
   })
  }
- log(title,rows,lead=''){
+ log(title: string,rows: readonly StatusRow[],lead=''){
   const top=this.y,w=this.width-25,x=10
   const titleH=this.lines(title,w-40,20).length*28+16
   const contents=[lead,...rows.map(row=>typeof row==='string'?row:`${row.label||row.title||''}：${row.value??row.body??''}`)].filter(Boolean)
@@ -96,40 +161,40 @@ class SourceCanvas{
   this.rect(x,top,w,titleH,'rgba(0,0,0,.40)')
   this.text(title,x+20,top+10,w-40,20,GOLD,{leading:28})
   let y=top+titleH+10
-  contents.forEach((value,i)=>{this.text('•',x+20,y,15,14,WHITE);this.text(value,x+40,y,w-65,14,WHITE,{leading:22});y+=heights[i]})
+  contents.forEach((value,i)=>{this.text('•',x+20,y,15,14,WHITE);this.text(value,x+40,y,w-65,14,WHITE,{leading:22});y+=heights[i] ?? 0})
   this.restore();this.y+=h+10
  }
- async render(options){
+ async render(options: RenderOptions){
   const height=Math.max(240,this.y+50)
   this.height=height
   const configured=Number(options.renderScale??process.env.LOTUS_RENDER_SCALE??4)
   const scale=Number.isFinite(configured)?Math.min(4,Math.max(1,configured)):4
-  const images=new Map()
-  await Promise.all([...this.refs].map(async src=>images.set(src,await getImage(src))))
+  const images=new Map<string, Image | null>()
+  await Promise.all([...this.refs].map(async src=>images.set(src,await getImage(src) ?? null)))
   const rendered=await renderPng(Math.round(this.width*scale),Math.ceil(height*scale),ctx=>{
    ctx.scale(scale,scale)
    ctx.imageSmoothingEnabled=true
    ctx.imageSmoothingQuality='high'
    for(const draw of this.commands)draw(ctx,images)
-  },options.mode??process.env.LOTUS_SKIA_MODE??"auto")
+  },options.mode??renderMode())
   options.onRender?.(rendered.engine)
   return rendered.png
  }
 }
-function elemental(p){p.rect(0,0,p.width,100000,'#243344');p.commands.push((ctx,images)=>{const img=images.get(background);if(img)ctx.drawImage(img,0,0,p.width,p.height)});p.refs.add(background)}
-async function newsImage(p,src){
+function elemental(p: SourceCanvas){p.rect(0,0,p.width,100000,'#243344');p.commands.push((ctx,images)=>{const img=images.get(background);if(img)ctx.drawImage(img,0,0,p.width,p.height)});p.refs.add(background)}
+async function newsImage(p: SourceCanvas,src: string | undefined){
  if(!src)return
  const img=await getImage(src)
  if(!img){p.image(src,30,p.y,p.width-60,200);p.y+=215;return}
  const w=p.width-60,h=Math.min(3200,w*img.height/img.width)
  p.image(src,30,p.y,w,h,{radius:14});p.y+=h+20
 }
-function mediaStats(data,template){
- const s=data.stat||{},format=n=>n===undefined?'未记录':damageNumber(n)
+function mediaStats(data: SourceCard,template: SourceTemplate){
+ const s=data.stat||{},format=(n: number | undefined)=>n===undefined?'未记录':damageNumber(n)
  const stats=data.type==='live'?[['直播状态',data.liveStatus],['在线人数',format(data.online)]]:[['点赞',format(s.like)],['评论',format(s.reply)],['收藏',format(s.favorite)],...(template==='bilibili-info'?[['投币',format(s.coin)],['播放',format(s.view)],['弹幕',format(s.danmaku)]]:[['分享',format(s.share)]])]
  return stats.map(([label,value])=>`${label} ${value||'未记录'}`).join('    ')
 }
-async function news(p,data,template){
+async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
  // genshin mysNews content order inside Miao help/index's elemental, rounded
  // group container. Keep the article typography and real cover/media content.
  elemental(p)
@@ -163,7 +228,7 @@ async function news(p,data,template){
  frame.height=p.y-10;p.y+=15
 }
 
-export async function renderSourceCard(template,data={},options={}){
+export async function renderSourceCard(template: SourceTemplate,data: SourceCard={},options: RenderOptions={}){
  await init()
  const p=new SourceCanvas(template==="status"?600:900)
  if(template==="status"){

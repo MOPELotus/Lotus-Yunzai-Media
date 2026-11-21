@@ -1,4 +1,4 @@
-export function formatLocalDateTime(value = new Date()) {
+export function formatLocalDateTime(value: Date | number | string = new Date()) {
   const date = normalizeDate(value)
   return [
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
@@ -6,7 +6,7 @@ export function formatLocalDateTime(value = new Date()) {
   ].join(" ")
 }
 
-export function formatLocalIso(value = new Date()) {
+export function formatLocalIso(value: Date | number | string = new Date()) {
   const date = normalizeDate(value)
   const offsetMinutes = -date.getTimezoneOffset()
   const sign = offsetMinutes >= 0 ? "+" : "-"
@@ -18,7 +18,7 @@ export function formatLocalIso(value = new Date()) {
   ].join("")
 }
 
-export function formatLocalFileTimestamp(value = new Date()) {
+export function formatLocalFileTimestamp(value: Date | number | string = new Date()) {
   const date = normalizeDate(value)
   return [
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
@@ -27,15 +27,15 @@ export function formatLocalFileTimestamp(value = new Date()) {
   ].join("-")
 }
 
-function normalizeDate(value) {
+function normalizeDate(value: Date | number | string) {
   const date = value instanceof Date ? value : new Date(value)
   return Number.isNaN(date.getTime()) ? new Date() : date
 }
 
-function pad(value) {
+function pad(value: number) {
   return String(value).padStart(2, "0")
 }
 
-function padMs(value) {
+function padMs(value: number) {
   return String(value).padStart(3, "0")
 }

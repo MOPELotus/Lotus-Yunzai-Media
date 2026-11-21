@@ -1,7 +1,13 @@
-import { fetchCdn } from "../../services/media/cdn.js"
+import { fetchCdn, type MediaFetch } from "../../services/media/cdn.ts"
+
+interface ImageFetchOptions {
+  readonly fetch?: MediaFetch
+  readonly timeoutMs?: number
+  readonly maxBytes?: number
+}
 
 /** Bound both image headers and body; native canvas URL loading has no task timeout. */
-export async function fetchImageBytes(url, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, maxBytes = 16 * 1024 * 1024 } = {}) {
+export async function fetchImageBytes(url: string, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, maxBytes = 16 * 1024 * 1024 }: ImageFetchOptions = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {

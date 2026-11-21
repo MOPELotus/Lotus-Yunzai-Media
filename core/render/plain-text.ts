@@ -2,7 +2,7 @@ import { load } from "cheerio"
 
 // Strip presentation markup while retaining the text inside links/terms.
 // Game control and gender selectors have a readable, deterministic fallback.
-export function plainGameText(value) {
+export function plainGameText(value: unknown) {
   let text = String(value ?? "")
     .replace(/\{LINK#[^}]+\}|\{\/LINK\}/g, "")
     .replace(/\{TIMEZONE\}/g, "服务器时间")
@@ -12,7 +12,7 @@ export function plainGameText(value) {
     .replace(/\{(?:F|M)#[^}]+\}/g, match => match.slice(3, -1))
     .replace(/\{LAYOUT_CONSOLECONTROLLER#[^}]+\}\{LAYOUT_FALLBACK#([^}]+)\}/g, "$1")
     .replace(/\{LAYOUT_[A-Z_]+#([^}]+)\}/g, "$1")
-    .replace(/\{CAL:([^}]+)\}/g, (_, formula) => arithmeticText(formula.split(",")[0]))
+    .replace(/\{CAL:([^}]+)\}/g, (_, formula: string) => arithmeticText(formula.split(",")[0] ?? ""))
     .replace(/#?\{series_ref_skill_desc:[^}]+\}/g, "（关联技能说明暂缺）")
     .replace(/<icon\s+[^>]*SpriteName=[^>]*>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -24,12 +24,12 @@ export function plainGameText(value) {
   return /^[.。?？…\s]+$/.test(text) ? "" : text
 }
 
-function arithmeticText(expression) {
+function arithmeticText(expression: string) {
   if (/AvatarSkillLevel/.test(expression)) return expression.replace(/AvatarSkillLevel\(\d+\)/g, "技能等级").replace(/\*/g, " × ").replace(/\+/g, " + ").replace(/\//g, " ÷ ")
   const tokens = expression.match(/\d+(?:\.\d+)?|[()+*/-]/g) || []
   if (tokens.join("") !== expression.replace(/\s/g, "")) return "随技能效果变化"
   let cursor = 0
-  function factor() {
+  function factor(): number {
     if (tokens[cursor] === "-") { cursor++; return -factor() }
     if (tokens[cursor] === "+") { cursor++; return factor() }
     if (tokens[cursor] === "(") {
@@ -41,7 +41,7 @@ function arithmeticText(expression) {
     if (!/^\d/.test(token || "")) throw new Error("missing number")
     return Number(token)
   }
-  function product() {
+  function product(): number {
     let n = factor()
     while (tokens[cursor] === "*" || tokens[cursor] === "/") {
       const op = tokens[cursor++], rhs = factor()
@@ -49,7 +49,7 @@ function arithmeticText(expression) {
     }
     return n
   }
-  function sum() {
+  function sum(): number {
     let n = product()
     while (tokens[cursor] === "+" || tokens[cursor] === "-") {
       const op = tokens[cursor++], rhs = product()

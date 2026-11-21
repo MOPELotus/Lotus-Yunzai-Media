@@ -1,28 +1,13 @@
-import { join } from "node:path"
-import { Canvas, FontLibrary, loadImage } from "skia-canvas"
+import { loadImage } from "skia-canvas"
 import QRCode from "qrcode"
-import { renderPng } from "@lotus-yunzai/skia"
-import { resourcesPath, resolveData } from "../../core/path.js"
+import { drawInfoText, infoCardColors, measureInfoText, renderInfoCardPages } from "@lotus-yunzai/skia/info-card"
 
-// Layout and colors from Yuki's dynamic MainPage, Account, Content and Footer (MIT).
 const width = 828
-const pink = "#ff69b4", divider = "#ffcee6", ink = "#333"
-const bodyFont = '"SubscriptionMiSans", "Noto Sans CJK SC", sans-serif'
 const time = new Intl.DateTimeFormat("zh-CN",{
   timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",
 })
 const mediaDomains = {
   bilibili:["hdslb.com","biliimg.com"], weibo:["sinaimg.cn","sinaimg.com","weibocdn.com","weibo.com"],
-}
-
-let fonts
-async function enableFonts() {
-  fonts ??= (async () => {
-    for (const file of [join(resourcesPath,"fonts/MiSans-VF.ttf"),resolveData("atlas/theme/fonts/MiSans-VF.ttf")]) {
-      if (await Bun.file(file).exists()) { FontLibrary.use("SubscriptionMiSans",[file]); break }
-    }
-  })()
-  await fonts
 }
 
 function imageLink(provider, value) {
@@ -32,7 +17,7 @@ function imageLink(provider, value) {
   return url.href
 }
 
-async function picture(url, signal) {
+async function picture(url, signal, encoded = false) {
   try {
     const timeout = AbortSignal.timeout(12000)
     const response = await fetch(url,{redirect:"error",credentials:"omit",signal:signal?AbortSignal.any([signal,timeout]):timeout})
@@ -49,9 +34,10 @@ async function picture(url, signal) {
       parts.push(part)
     }
     if (!bytes) return
-    const image = await loadImage(Buffer.concat(parts,bytes))
+    const buffer = Buffer.concat(parts, bytes)
+    const image = await loadImage(buffer)
     if (image.width > 14000 || image.height > 14000) return
-    return image
+    return encoded ? buffer : image
   } catch { return }
 }
 
@@ -140,14 +126,6 @@ function textMessages(provider, post, settings) {
   return media.length ? (settings.merge ? [[message,...media]] : [message,...media]) : [message]
 }
 
-function rounded(ctx,x,y,w,h,r,fill,stroke) {
-  ctx.beginPath()
-  ctx.roundRect(x,y,w,h,r)
-  ctx.fillStyle=fill
-  ctx.fill()
-  if (stroke) { ctx.strokeStyle=stroke; ctx.stroke() }
-}
-
 function drawPicture(ctx,img,x,y,w,h,r,cover=false) {
   ctx.save()
   ctx.beginPath()
@@ -159,126 +137,95 @@ function drawPicture(ctx,img,x,y,w,h,r,cover=false) {
   ctx.restore()
 }
 
-function breakLines(metrics, content, size, space, bold=false) {
-  metrics.font=(bold?"bold ":"")+size+"px "+bodyFont
-  const lines = []
-  for (const paragraph of String(content || "").split(/\r?\n/u)) {
-    if (!paragraph) { lines.push(""); continue }
-    let line=""
-    for (const char of paragraph) {
-      if (line && metrics.measureText(line+char).width > space) { lines.push(line); line="" }
-      line+=char
-    }
-    lines.push(line)
-  }
-  return lines
-}
-
-function linesAt(ctx,lines,x,y,size,color,bold=false) {
-  ctx.fillStyle=color
-  ctx.font=(bold?"bold ":"")+size+"px "+bodyFont
-  ctx.textBaseline="top"
-  for (let i=0;i<lines.length;i++) ctx.fillText(lines[i],x,y+i*Math.ceil(size*1.53))
-}
-
-async function drawDynamic(provider,post,settings,signal,onRender) {
-  await enableFonts()
-  const build = item => Promise.all(mediaFor(provider,item,settings).map(url=>picture(url,signal)))
-  const avatarUrl = imageLink(provider,post.avatar)
-  const [avatar,images,forwarded,qr] = await Promise.all([
-    avatarUrl && picture(avatarUrl,signal),
+async function drawDynamic(provider, post, settings, signal, onRender) {
+  const build = item => Promise.all(mediaFor(provider, item, settings).map(url => picture(url, signal)))
+  const avatarUrl = imageLink(provider, post.avatar)
+  const [avatar, images, forwarded, qr] = await Promise.all([
+    avatarUrl && picture(avatarUrl, signal, true),
     build(post),
     post.forwarded ? build(post.forwarded) : [],
-    QRCode.toBuffer(post.url,{width:144,margin:1}).then(loadImage),
+    QRCode.toBuffer(post.url, { width: 144, margin: 1 }).then(loadImage),
   ])
   signal?.throwIfAborted()
-  const metricCanvas = new Canvas(1,1)
-  metricCanvas.gpu=false
-  const metrics=metricCanvas.getContext("2d")
-  const title=breakLines(metrics,post.title,28,748,true)
-  const body=breakLines(metrics,clipContent(post.content,settings),24,748)
-  const drawBlocks=[]
-  if(post.title) drawBlocks.push({lines:title,size:28,bold:true,gap:12})
-  if(post.content) drawBlocks.push({lines:body,size:24,gap:12})
-  const pushImages = list => {
-    const good = list.filter(Boolean)
-    const grid = settings.grid && good.length >= 2
-    const columns = grid ? (good.length <= 4?2:3) : 1
-    const gap = 8
-    for (let i=0;i<good.length;i+=columns) {
-      const row = good.slice(i,i+columns)
-      const cellWidth = Math.floor((748-(columns-1)*gap)/columns)
-      const height = grid ? Math.min(320,cellWidth) : Math.max(96,Math.min(720,Math.round(cellWidth*row[0].height/row[0].width)))
-      drawBlocks.push({row,cellWidth,height,gap:12})
-    }
-  }
-  pushImages(images)
-  if (post.forwarded) {
-    const original = post.forwarded
-    const heading = `原帖 · ${category(provider,original)} · ${original.author}`
-    drawBlocks.push({lines:breakLines(metrics,heading,22,748,true),size:22,bold:true,gap:2})
-    drawBlocks.push({lines:[published(original)],size:16,gap:10,color:"#666"})
-    const content=textBlock(original,clipContent(original.content,settings))
-    if (content) drawBlocks.push({lines:breakLines(metrics,content,22,748),size:22,gap:12})
-    pushImages(forwarded)
-  }
 
-  const bodyTop = 158
-  let bodyBottom = bodyTop
-  const blocks = drawBlocks.map(block => {
-    const top = bodyBottom
-    const blockHeight = block.lines ? block.lines.length*Math.ceil(block.size*1.53) : block.height
-    bodyBottom += blockHeight + block.gap
-    return { ...block,top,bottom:bodyBottom }
-  })
-  // Yuki clips only the content container in single-image mode. In split mode,
-  // the author, content and footer form one card that is sliced after layout.
-  const footerTop = settings.split ? bodyBottom : Math.min(bodyBottom,bodyTop+settings.noSplitHeight)
-  const height = footerTop + 152
-  const pageCount = settings.split ? Math.ceil(height/settings.splitHeight) : 1
-  const scale = 4
-  const pages = []
-  for (let index=0;index<pageCount;index++) {
-    signal?.throwIfAborted()
-    const top = Math.floor(height*index/pageCount)
-    const bottom = Math.floor(height*(index+1)/pageCount)
-    const rendered=await renderPng(width*scale,(bottom-top)*scale,ctx=>{
-      ctx.scale(scale,scale)
-      ctx.translate(0,-top)
-      ctx.fillStyle="#f9f9f9";ctx.fillRect(0,0,width,height)
-      ctx.shadowBlur=18;ctx.shadowColor="rgba(246,140,224,.23)"
-      rounded(ctx,20,16,788,height-32,8,"#fff",pink)
-      ctx.shadowBlur=0
-      if(avatar) drawPicture(ctx,avatar,40,34,88,88,44,true)
-      const left=avatar?145:40
-      const name=breakLines(metrics,post.author,25,520,true).slice(0,1)
-      linesAt(ctx,name,left,51,25,ink,true)
-      linesAt(ctx,[time.format(post.createdAt*1000)],left,88,16,"#666")
-      linesAt(ctx,[provider.label+" · "+category(provider,post)],625,59,20,"#bb507e",true)
-      ctx.setLineDash([6,5]);ctx.strokeStyle=divider
-      ctx.beginPath();ctx.moveTo(40,142);ctx.lineTo(788,142);ctx.stroke()
+  const label = `${provider.label} · ${category(provider, post)}`
+  const metadata = [post.title && label, time.format(post.createdAt * 1000)].filter(Boolean).join(" · ")
+  const pages = await renderInfoCardPages({ title: post.title || label, eyebrow: post.author, metadata, icon: avatar, width }, layout => {
+    const x = layout.x + 10
+    const contentWidth = layout.width - 20
+    const bodyTop = layout.y
+    const blocks = []
+    let cursor = bodyTop
+
+    function append(height, gap, draw) {
+      blocks.push({ top: cursor, bottom: cursor + height + gap, draw })
+      cursor += height + gap
+    }
+
+    function appendText(value, size, gap, color = infoCardColors.text) {
+      const lines = measureInfoText(layout.measure, value, contentWidth, size)
+      const leading = Math.ceil(size * 1.53)
+      append(lines.length * leading, gap, (ctx, y) => drawInfoText(ctx, lines, x, y, { size, leading, color }))
+    }
+
+    function appendImages(list) {
+      const good = list.filter(Boolean)
+      const grid = settings.grid && good.length >= 2
+      const columns = grid ? (good.length <= 4 ? 2 : 3) : 1
+      const gap = 8
+      for (let index = 0; index < good.length; index += columns) {
+        const row = good.slice(index, index + columns)
+        const cellWidth = Math.floor((contentWidth - (columns - 1) * gap) / columns)
+        const height = grid ? Math.min(320, cellWidth)
+          : Math.max(96, Math.min(720, Math.round(cellWidth * row[0].height / row[0].width)))
+        append(height, 12, (ctx, y) => {
+          for (const [column, image] of row.entries()) {
+            drawPicture(ctx, image, x + column * (cellWidth + gap), y, cellWidth, height, 6, row.length > 1)
+          }
+        })
+      }
+    }
+
+    if (post.content) appendText(clipContent(post.content, settings), 24, 12)
+    appendImages(images)
+    const original = post.forwarded
+    if (original) {
+      appendText(`原帖 · ${category(provider, original)} · ${original.author}`, 22, 2, infoCardColors.gold)
+      appendText(published(original), 16, 10, infoCardColors.muted)
+      const content = textBlock(original, clipContent(original.content, settings))
+      if (content) appendText(content, 22, 12)
+      appendImages(forwarded)
+    }
+
+    // Keep Yuki's one-layout pagination and clip only the body in single-image mode.
+    const footerTop = settings.split ? cursor : Math.min(cursor, bodyTop + settings.noSplitHeight)
+    return { height: footerTop - bodyTop + 152, draw(ctx, { top, bottom }) {
+      signal?.throwIfAborted()
       ctx.save()
       ctx.beginPath()
-      ctx.rect(0,bodyTop,width,footerTop-bodyTop)
+      ctx.rect(x, bodyTop, contentWidth, footerTop - bodyTop)
       ctx.clip()
-      for(const block of blocks){
-        if (block.bottom<=top || block.top>=bottom || block.top>=footerTop) continue
-        if(block.lines) linesAt(ctx,block.lines,40,block.top,block.size,block.color || ink,block.bold)
-        else if(block.row) for(const [column,img] of block.row.entries()){
-          drawPicture(ctx,img,40+column*(block.cellWidth+8),block.top,block.cellWidth,block.height,6,block.row.length>1)
-        }
+      for (const block of blocks) {
+        if (block.bottom > top && block.top < bottom && block.top < footerTop) block.draw(ctx, block.top)
       }
       ctx.restore()
-      const y = footerTop
-      ctx.strokeStyle=pink;ctx.beginPath();ctx.moveTo(40,y+4);ctx.lineTo(788,y+4);ctx.stroke();ctx.setLineDash([])
-      drawPicture(ctx,qr,40,y+18,114,114,4)
-      const qrCaption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
-      linesAt(ctx,[qrCaption,provider.label+"动态订阅"],179,y+49,20,"#555")
-    },process.env.LOTUS_SKIA_MODE||"auto")
-    onRender?.(rendered.engine)
-    pages.push(rendered.png)
-  }
-  return pages
+      ctx.fillStyle = infoCardColors.rule
+      ctx.fillRect(x, footerTop + 4, contentWidth, 1)
+      drawPicture(ctx, qr, x, footerTop + 18, 114, 114, 4)
+      const caption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
+      drawInfoText(ctx, [caption], x + 139, footerTop + 48, { size: 20, color: infoCardColors.gold })
+      drawInfoText(ctx, [`${provider.label}动态订阅`], x + 139, footerTop + 79, { size: 20, color: infoCardColors.muted })
+    } }
+  }, {
+    pageHeight: settings.split ? settings.splitHeight : undefined,
+    scale: 4,
+    mode: process.env.LOTUS_SKIA_MODE || "auto",
+    allowHalfScale: false,
+  })
+  return pages.map(page => {
+    onRender?.(page.engine)
+    return page.png
+  })
 }
 
 export async function makeDynamicMessages(provider,post,settings,{signal,onRender}={}) {

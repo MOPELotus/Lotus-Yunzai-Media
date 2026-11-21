@@ -166,6 +166,56 @@ test("B站匿名查询明确区分 HTTP 拒绝并读取原公开文章内嵌数�
   expect((await articleProvider.fetchPosts(uid))[0]).toMatchObject({content:"完整正文".repeat(200),images:["https://i0.hdslb.com/new.png"]})
 })
 
+test("订阅只在宿主接管后启动，取消接管或卸载均不继续轮询",async()=>{
+  const root=await directory()
+  const dir=join(root,"yuki-plugin","config","bilibili")
+  await mkdir(dir,{recursive:true})
+  await writeFile(join(dir,"config.yaml"),'checkDynamicCD: "* * * * * *"\n')
+  await writeFile(join(dir,"push.yaml"),YAML.stringify({group:{77:[{bot_id:99,uid,name:"试验发布者"}]}}))
+  let reads=0
+  const firstPoll=Promise.withResolvers()
+  const providers={bilibili:{id:"bilibili",label:"B站",async fetchPosts() {
+    reads++
+    firstPoll.resolve()
+    return []
+  }}}
+  let start
+  let canceled=0
+  const services={
+    lockFile,
+    subscriptionTransport:()=>[{botId:99,isGroupMember:async()=>true}],
+    mediaRuntime:{whenReady(callback) {
+      start=callback
+      return ()=>{ canceled++ }
+    }},
+  }
+  const options={directory:root,providers,getRedis:()=>({})}
+  const candidate=await createSubscriptionModule(services,options)
+  try {
+    await Bun.sleep(1100)
+    expect(reads).toBe(0)
+  } finally {
+    await candidate.dispose()
+  }
+  start?.()
+  expect(canceled).toBe(1)
+
+  const active=await createSubscriptionModule(services,options)
+  try {
+    start()
+    await Promise.race([
+      firstPoll.promise,
+      Bun.sleep(1750).then(()=>{ throw new Error("接管后订阅未按旧定时配置执行") }),
+    ])
+    expect(reads).toBe(1)
+  } finally {
+    await active.dispose()
+  }
+  await Bun.sleep(1100)
+  expect(canceled).toBe(2)
+  expect(reads).toBe(1)
+},6500)
+
 test("锅巴配置优先、群与私聊分离，旧类型增删安全保留另一个机器人",async()=>{
   const root=await directory()
   const dir=join(root,"yuki-plugin","config","bilibili")

@@ -74,7 +74,10 @@ export async function createSubscriptionModule(services, { providers, directory=
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
   const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
-  await dispatch.start()
+  let startup
+  const cancelReady = services.mediaRuntime?.whenReady(() => {
+    startup ??= dispatch.start().catch(error => console.warn("[media] 订阅 · 启动定时任务失败：" + error.message))
+  })
   const describe = provider => provider.label + "订阅"
 
   async function fallback(message,context) {
@@ -150,5 +153,12 @@ export async function createSubscriptionModule(services, { providers, directory=
       return describe(provider)+"处理失败："+error.message
     }
   }
-  return { commands:{}, fallback,dispose:dispatch.dispose }
+  return {
+    commands:{}, fallback,
+    async dispose() {
+      cancelReady?.()
+      await dispatch.dispose()
+      await startup
+    },
+  }
 }

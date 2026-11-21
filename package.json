@@ -2,9 +2,9 @@
   "name": "@lotus-yunzai/media",
   "private": true,
   "type": "module",
-  "exports": "./index.js",
+  "exports": "./index.ts",
   "lotusYunzai": {
-    "entry": "./index.js"
+    "entry": "./index.ts"
   },
   "dependencies": {
     "@lotus-yunzai/skia": "workspace:*",

@@ -11,9 +11,15 @@ function mediaUrl(value: string | URL, domains: readonly string[]) {
   return url
 }
 
-export type MediaFetch = (url: string, options?: RequestInit) => Promise<Response>
+interface MediaRequest {
+  readonly headers?: Record<string, string>
+  readonly redirect?: RequestRedirect
+  readonly signal?: AbortSignal
+}
 
-export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, options: RequestInit, kind?: "image") {
+export type MediaFetch = (url: string, options?: MediaRequest) => Promise<Response>
+
+export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, options: MediaRequest, kind?: "image") {
   const domains = kind === "image" ? imageDomains : douyinDomains
   let url = mediaUrl(value, domains)
   for (let hop = 0; hop <= 5; hop++) {

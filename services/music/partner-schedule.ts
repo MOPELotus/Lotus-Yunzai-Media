@@ -1,7 +1,7 @@
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { setTimeout as delay } from "node:timers/promises"
-import { loadGlobalConfig } from "../../core/config/global.js"
-import { formatLocalIso } from "../../core/time.js"
+import { loadGlobalConfig } from "../../core/config/global.ts"
+import { formatLocalIso } from "../../core/time.ts"
 import { TuneWeaveService } from "../tuneweave/service.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
 

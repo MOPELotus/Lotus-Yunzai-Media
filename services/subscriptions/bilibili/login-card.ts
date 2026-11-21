@@ -2,7 +2,7 @@ import { join } from "node:path"
 import QRCode from "qrcode"
 import { FontLibrary } from "skia-canvas"
 import { renderPng } from "@lotus-yunzai/skia"
-import { resolveData, resolveRoot } from "../../../core/path.js"
+import { resolveData, resolveRoot } from "../../../core/path.ts"
 
 let font = "sans-serif"
 let fontLoaded: Promise<void> | undefined

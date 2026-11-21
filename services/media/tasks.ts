@@ -43,7 +43,7 @@ export async function createMediaTask(root: string) {
   }
 }
 
-export async function releaseMediaTask(root: string, dir: string) {
+export async function releaseMediaTask(root: string, dir: string | undefined) {
   if (!dir || !isInside(root, dir) || path.dirname(path.resolve(dir)) !== path.resolve(root)) {
     throw new Error("拒绝清理不属于当前媒体任务的目录")
   }

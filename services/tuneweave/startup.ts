@@ -1,4 +1,4 @@
-import { loadGlobalConfig } from "../../core/config/global.js"
+import { loadGlobalConfig } from "../../core/config/global.ts"
 import { TuneWeaveService, type TuneWeaveConfig } from "./service.ts"
 
 interface StartupServices {

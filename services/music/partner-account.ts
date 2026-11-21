@@ -2,8 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
 import YAML from "yaml"
-import { resolveData } from "../../core/path.js"
-import { formatLocalIso } from "../../core/time.js"
+import { resolveData } from "../../core/path.ts"
+import { formatLocalIso } from "../../core/time.ts"
 
 export interface PartnerAccount {
   uid?: string | number

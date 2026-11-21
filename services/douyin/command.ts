@@ -1,10 +1,10 @@
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import { randomUUID } from "node:crypto"
-import { loadGlobalConfig } from "../../core/config/global.js"
-import { PermissionService } from "../../core/permissions/service.js"
-import { renderTemplate, renderStatusCard } from "../../core/render/service.js"
-import { sendMediaFile, mediaFailureMessage } from "../media/files.js"
-import { buildMediaMessageText, articlePages, isMediaCommandText } from "../media/message.js"
+import { loadGlobalConfig } from "../../core/config/global.ts"
+import { PermissionService } from "../../core/permissions/service.ts"
+import { renderTemplate, renderStatusCard } from "../../core/render/service.ts"
+import { sendMediaFile, mediaFailureMessage } from "../media/files.ts"
+import { buildMediaMessageText, articlePages, isMediaCommandText } from "../media/message.ts"
 import { DouyinService, normalizeDouyinDownloadConfig } from "./service.ts"
 
 const downloadCommand = /^#抖音(?:下载|下视频)\s+([\s\S]+)$/u
@@ -81,7 +81,7 @@ export function createDouyinCommands({ signal, mediaRuntime }: Services) {
         onEvent: (event: { message: string }) => console.debug("[media] 抖音下载：" + event.message),
       })
       if (signal?.aborted) return
-      if (!result.ok || !("files" in result)) throw new Error(mediaFailureMessage(result))
+      if (!result.ok || !("files" in result)) throw new Error(mediaFailureMessage("reason" in result ? result : undefined))
       if (result.warnings.length) await reply("[media] " + [...new Set(result.warnings)].join("；"))
       for (const file of result.files) {
         if (signal?.aborted) return

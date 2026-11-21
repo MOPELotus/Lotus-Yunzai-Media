@@ -1,5 +1,5 @@
-import { loadGlobalConfig } from "../../../core/config/global.js"
-import { BilibiliService } from "../../bilibili/service.js"
+import { loadGlobalConfig } from "../../../core/config/global.ts"
+import { BilibiliService } from "../../bilibili/service.ts"
 
 const capability = "bilibili_space_feed"
 const platform = "bilibili"
@@ -15,7 +15,7 @@ interface SharedRequestOptions {
 }
 
 interface SharedAccountService {
-  loadAccount(): Promise<{ tuneweave_account?: string } | undefined | null>
+  loadAccount(): Promise<{ tuneweave_account?: string | null } | undefined | null>
   tuneweave: {
     config: { api_url: string }
     request(route: string, options: SharedRequestOptions): Promise<unknown>
@@ -91,7 +91,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
     let alias: string | undefined
     try {
       service = await createService()
-      alias = (await service.loadAccount())?.tuneweave_account
+      alias = (await service.loadAccount())?.tuneweave_account ?? undefined
     } catch {
       signal?.throwIfAborted()
       return

@@ -1,10 +1,10 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { resolveData } from "../../core/path.js"
-import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/tasks.js"
-import { packMediaFiles, safeMediaName, mediaLimitFailure } from "../media/files.js"
-import { downloadMedia } from "../media/download.js"
-import { prepareVideo } from "../media/video.js"
+import { resolveData } from "../../core/path.ts"
+import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/tasks.ts"
+import { packMediaFiles, safeMediaName, mediaLimitFailure } from "../media/files.ts"
+import { downloadMedia } from "../media/download.ts"
+import { prepareVideo } from "../media/video.ts"
 import { extractDouyinTarget, resolveDouyinTarget, type DouyinTarget } from "./links.ts"
 import { fetchWebDetail, type DetailSigner } from "./api.ts"
 import { fetchSsrDetail } from "./ssr.ts"
@@ -162,7 +162,7 @@ export class DouyinService {
             const cap = download.max_estimated_size_mb * 1024 * 1024
             if (cap > 0 && consumed >= cap) throw new Error("作品媒体总大小超过下载限制")
             const options = {
-              fetch: this.fetch as typeof globalThis.fetch,
+              fetch: this.fetch,
               kind,
               headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/" },
               timeoutMs: remainingTime(),

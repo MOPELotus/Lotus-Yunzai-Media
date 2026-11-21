@@ -1,16 +1,22 @@
+import type { CommandModule } from "../../lib/commands.ts"
 import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
 import { createBilibiliVideoCommands } from "./services/bilibili/video-command.ts"
 import { createDouyinCommands } from "./services/douyin/command.ts"
 import { createMusicCommands } from "./services/music/command.ts"
 import { createMcWikiCommand } from "./services/mcwiki/command.ts"
-import { createPartnerSchedule } from "./services/music/partner-schedule.js"
-import { createSubscriptionModule } from "./services/subscriptions/module.js"
-import { resumeTuneWeaveOnStart } from "./services/tuneweave/startup.js"
+import { createPartnerSchedule } from "./services/music/partner-schedule.ts"
+import { createSubscriptionModule } from "./services/subscriptions/module.ts"
+import { resumeTuneWeaveOnStart } from "./services/tuneweave/startup.ts"
 import { createMediaEnvironment } from "./services/tools/command.ts"
 
-export default { commands: {} }
+type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
+  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof resumeTuneWeaveOnStart>[0]
 
-export async function createModule(services) {
+type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<void> }
+
+export default { commands: {} } satisfies Pick<CommandModule, "commands">
+
+export async function createModule(services: MediaServices): Promise<MediaCommandModule> {
   const subscriptions = await createSubscriptionModule(services)
   const stopTuneWeave = resumeTuneWeaveOnStart(services)
   const music = createMusicCommands(services)
@@ -25,7 +31,7 @@ export async function createModule(services) {
     async dispose() {
       await Promise.all([subscriptions.dispose(), stopPartner?.(), stopTuneWeave?.(), douyin.dispose(), biliVideo.dispose(), music.dispose()])
     },
-    commands: { ...subscriptions.commands, "#mcwiki": mcwiki },
+    commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {
       if (context.normalizedMessage === biliLogin.command || context.normalizedMessage === environment.command) return ["[media] B 站解析"]
       const features = biliVideo.features(context)

@@ -183,7 +183,7 @@ function detailStatus(html: string, post: DynamicPost) {
   const $ = load(html)
   for (const script of $("script").toArray()) {
     const match = $(script).text().match(/"status"\s*:\s*(\{[\s\S]*?\})\s*,\s*"call"\s*:/u)
-    if (!match) continue
+    if (!match?.[1]) continue
     try {
       const raw: WeiboPost = JSON.parse(match[1])
       if (samePost(raw, post)) return raw

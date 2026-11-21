@@ -265,7 +265,7 @@ export function biliSubscriptionLogin({ getRedis, owner, signal, directory, lock
         await setShared(enabled, active)
         return enabled ? "已允许 B 站动态在独立会话不可用时共用视频登录。" : "已停用 B 站动态共用。视频和独立动态登录均保留。"
       }
-      if (binding) return await bind(binding[1], active)
+      if (binding?.[1]) return await bind(binding[1], active)
       if (clearing) return await clearLocal(active)
       if (source) return await sourceStatus(redis, active)
       if (!redis) return "动态登录存储未连接。"

@@ -7,9 +7,9 @@ import { pathToFileURL } from "node:url"
 import YAML from "yaml"
 import { lockFile } from "../../../lib/file-lock.ts"
 import { supportGuoba } from "../guoba.support.js"
-import { createSubscriptionConfig } from "../services/subscriptions/config.js"
-import { createSubscriptionDelivery, useDynamicForward } from "../services/subscriptions/delivery.js"
-import { loadGlobalConfig } from "../core/config/global.js"
+import { createSubscriptionConfig } from "../services/subscriptions/config.ts"
+import { createSubscriptionDelivery, useDynamicForward } from "../services/subscriptions/delivery.ts"
+import { loadGlobalConfig } from "../core/config/global.ts"
 
 const Result = {
   ok: () => ({ ok: true }),

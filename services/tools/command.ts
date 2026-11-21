@@ -1,8 +1,8 @@
 import type { MessageFallback } from "../../../../lib/commands.ts"
-import { loadGlobalConfig } from "../../core/config/global.js"
-import { PermissionService } from "../../core/permissions/service.js"
-import { renderStatusCard } from "../../core/render/service.js"
-import { TuneWeaveService } from "../tuneweave/service.js"
+import { loadGlobalConfig } from "../../core/config/global.ts"
+import { PermissionService } from "../../core/permissions/service.ts"
+import { renderStatusCard } from "../../core/render/service.ts"
+import { TuneWeaveService } from "../tuneweave/service.ts"
 import { ToolInstallerService } from "./installer.ts"
 
 const command = "#初始化环境"

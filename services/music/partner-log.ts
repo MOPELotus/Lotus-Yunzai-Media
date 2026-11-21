@@ -1,7 +1,7 @@
 import { constants } from "node:fs"
 import { open, readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { resolveData } from "../../core/path.js"
+import { resolveData } from "../../core/path.ts"
 
 const maxBytes = 2 * 1024 * 1024
 const maxNodes = 100

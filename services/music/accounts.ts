@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
 import YAML from "yaml"
-import { resolveData } from "../../core/path.js"
+import { resolveData } from "../../core/path.ts"
 
 const defaultFile = resolveData("music", "accounts.yaml")
 export interface MusicAccount {

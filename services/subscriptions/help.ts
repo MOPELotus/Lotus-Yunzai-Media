@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { loadImage, type Image } from "skia-canvas"
 import { drawInfoText, infoCardColors, measureInfoText, renderInfoCard, type InfoCardOptions } from "@lotus-yunzai/skia/info-card"
-import { resolveData, resolveRoot } from "../../core/path.js"
+import { resolveData, resolveRoot } from "../../core/path.ts"
 
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { subscriptionRenderMode } from "./render.ts"

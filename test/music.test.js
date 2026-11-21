@@ -6,7 +6,7 @@ import YAML from "yaml"
 import { MusicService, musicSessionKey, musicShare } from "../services/music/service.ts"
 import { readMusicAccounts, saveMusicAccount } from "../services/music/accounts.ts"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.ts"
-import { TuneWeaveService } from "../services/tuneweave/service.js"
+import { TuneWeaveService } from "../services/tuneweave/service.ts"
 
 const temp = []
 async function directory() {

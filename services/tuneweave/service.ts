@@ -10,7 +10,7 @@ import http from "node:http"
 import https from "node:https"
 import { setTimeout as sleep } from "node:timers/promises"
 import { TUNEWEAVE_REQUIRED_VERSION, compareTuneWeaveVersions } from "./version.ts"
-import { resolveData } from "../../core/path.js"
+import { resolveData } from "../../core/path.ts"
 
 export const TUNEWEAVE_MANIFEST_URL = "https://raw.githubusercontent.com/MOPELotus/TuneWeave/main/release-manifest.json"
 const operations = new Map<string, Promise<unknown>>()

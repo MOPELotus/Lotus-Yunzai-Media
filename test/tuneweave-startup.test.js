@@ -2,8 +2,8 @@ import { expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { TuneWeaveService } from "../services/tuneweave/service.js"
-import { resumeTuneWeaveOnStart } from "../services/tuneweave/startup.js"
+import { TuneWeaveService } from "../services/tuneweave/service.ts"
+import { resumeTuneWeaveOnStart } from "../services/tuneweave/startup.ts"
 
 test("TuneWeave 启动恢复只在宿主接管后启动，并随断开取消", async () => {
   let enter

@@ -11,7 +11,7 @@ export function articleContent(html: string) {
   const opus = /"module_content"\s*:\s*([\s\S]+?)\s*,\s*"module_type"\s*:\s*"MODULE_TYPE_CONTENT"/u.exec(html)
   const old = /"readInfo":([\s\S]+?),"readViewInfo":/u.exec(html)
   try {
-    if (opus) {
+    if (opus?.[1]) {
       const { paragraphs }: { paragraphs?: OpusParagraph[] } = JSON.parse(opus[1])
       if (!Array.isArray(paragraphs)) return
       const content: string[] = []
@@ -26,7 +26,7 @@ export function articleContent(html: string) {
       }
       return { content:content.join("\n"),images }
     }
-    if (old) {
+    if (old?.[1]) {
       const { content }: { content?: unknown } = JSON.parse(old[1])
       if (typeof content !== "string") return
       const $ = load(content,{},false)

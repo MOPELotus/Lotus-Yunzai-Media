@@ -6,8 +6,8 @@ import { spawn } from "node:child_process"
 import { Readable } from "node:stream"
 import type { ReadableStream } from "node:stream/web"
 import { pipeline } from "node:stream/promises"
-import { loadGlobalConfig } from "../../core/config/global.js"
-import { resolveData, rootPath } from "../../core/path.js"
+import { loadGlobalConfig } from "../../core/config/global.ts"
+import { resolveData, rootPath } from "../../core/path.ts"
 
 const TOOL_NAMES = ["ffmpeg"] as const
 const DEFAULT_INSTALL_ATTEMPTS = 3
@@ -351,7 +351,7 @@ export function defaultAssetPatterns(tool: string, platform: string = process.pl
 
 export function scoreReleaseAsset(name: string, patterns: readonly RegExp[] = []) {
   for (let index = 0; index < patterns.length; index += 1) {
-    if (patterns[index].test(name)) return patterns.length - index
+    if (patterns[index]?.test(name)) return patterns.length - index
   }
   return -1
 }

@@ -1,5 +1,6 @@
 import { loadImage, type CanvasRenderingContext2D, type Image } from "skia-canvas"
 import QRCode from "qrcode"
+import { ImageSizeLimitError } from "@lotus-yunzai/skia"
 import { drawInfoText, infoCardColors, measureInfoText, renderInfoCardPages, type InfoCardOptions } from "@lotus-yunzai/skia/info-card"
 
 import type { MessageReply } from "../../../../lib/messages.ts"
@@ -11,6 +12,7 @@ type PageEngine = Awaited<ReturnType<typeof renderInfoCardPages>>[number]["engin
 
 export interface DynamicRenderOptions {
   signal?: AbortSignal
+  inlineImageByteLimit?: number
   onRender?: (engine: PageEngine) => void
 }
 
@@ -163,7 +165,7 @@ function drawPicture(ctx: CanvasRenderingContext2D, img: Image, x: number, y: nu
 }
 
 async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings: SubscriptionSettings,
-  signal?: AbortSignal, onRender?: DynamicRenderOptions["onRender"]) {
+  { signal, inlineImageByteLimit = Infinity, onRender }: DynamicRenderOptions) {
   const build = (item: DynamicPost) => Promise.all(mediaFor(provider, item, settings).map(url => picture(url, signal)))
   const avatarUrl = imageLink(provider, post.avatar)
   const [avatar, images, forwarded, qr] = await Promise.all([
@@ -176,7 +178,7 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
 
   const label = `${provider.label} · ${category(provider, post)}`
   const metadata = [post.title && label, time.format(post.createdAt * 1000)].filter(Boolean).join(" · ")
-  const pages = await renderInfoCardPages({ title: post.title || label, eyebrow: post.author, metadata, icon: avatar, width }, layout => {
+  const render = (scale: 2 | 4) => renderInfoCardPages({ title: post.title || label, eyebrow: post.author, metadata, icon: avatar, width }, layout => {
     const x = layout.x + 10
     const contentWidth = layout.width - 20
     const bodyTop = layout.y
@@ -245,10 +247,19 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
     } }
   }, {
     pageHeight: settings.split ? settings.splitHeight : undefined,
-    scale: 4,
+    scale,
     mode: subscriptionRenderMode(),
     allowHalfScale: false,
   })
+  let pages = await render(4).catch(error => {
+    if (!(error instanceof ImageSizeLimitError)) throw error
+  })
+  const oversized = (page: { readonly png: Uint8Array }) => page.png.byteLength > inlineImageByteLimit
+  if (!pages || pages.some(oversized)) {
+    signal?.throwIfAborted()
+    pages = await render(2)
+  }
+  if (pages.some(oversized)) throw new ImageSizeLimitError("动态图片超过当前会话大小上限。")
   return pages.map(page => {
     onRender?.(page.engine)
     return page.png
@@ -256,13 +267,13 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
 }
 
 export async function makeDynamicMessages(provider: RenderProvider, post: DynamicPost, settings: SubscriptionSettings,
-  {signal,onRender}: DynamicRenderOptions = {}): Promise<MessageReply[]> {
+  options: DynamicRenderOptions = {}): Promise<MessageReply[]> {
   if (settings.picture) {
     try {
-      const images = await drawDynamic(provider,post,settings,signal,onRender)
+      const images = await drawDynamic(provider,post,settings,options)
       return images.map((file,index)=>index===images.length-1?[{type:"image",file},post.url]:{type:"image",file})
     } catch (error) {
-      if (signal?.aborted) throw error
+      if (options.signal?.aborted) throw error
     }
   }
   return textMessages(provider,post,settings)

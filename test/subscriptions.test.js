@@ -465,6 +465,31 @@ test("订阅去重沿用群或私聊旧键，并排除过期、转发、关键�
   } finally { await d.dispose() }
 })
 
+test("订阅出图沿同一在线发送会话取得字节上限",async()=>{
+  const friend={...route,kind:"private",chat:"42",bot:"98"}
+  const note={id:"pictured",uid,type:draw,createdAt:seen,content:"正文",url:"https://t.bilibili.com/123"}
+  const budgets=[], sent=[], redis=mockReceipts(new Map())
+  const delivery=createSubscriptionDelivery({
+    providers:{bilibili:{id:"bilibili",label:"B站",fetchPosts:async()=>[note]}},
+    config:{settings:async()=>settingsFor({pushTaskLog:0}),routes:async()=>[route,friend]},
+    notifications:()=>[
+      {botId:99,inlineImageByteLimit:600000,isGroupMember:async()=>true,sendGroup:async(group,value)=>{
+        sent.push([group,value]);return "confirmed"
+      }},
+      {botId:98,isFriend:async()=>true,sendPrivate:async(user,value)=>{
+        sent.push([user,value]);return "confirmed"
+      }},
+    ],
+    getRedis:()=>redis,now:()=>seen*1000,
+    render:async(_,post,_settings,options)=>{budgets.push(options.inlineImageByteLimit);return [post.url]},
+  })
+  try {
+    expect(await delivery.run("bilibili")).toMatchObject({confirmed:2})
+    expect(budgets).toEqual([600000,undefined])
+    expect(sent).toEqual([[77,note.url],[42,note.url]])
+  } finally { await delivery.dispose() }
+})
+
 test("文字关键词检查转发与原帖链接，匹配屏蔽词时不写去重记录",async()=>{
   const kept={id:"12301",uid,type:"DYNAMIC_TYPE_FORWARD",createdAt:seen,title:"正文",
     url:"https://m.bilibili.com/dynamic/12301",forwarded:{url:"https://www.bilibili.com/read/cv456"}}

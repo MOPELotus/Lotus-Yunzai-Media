@@ -32,6 +32,7 @@ type Report = ReturnType<typeof result>
 type Send = (message: MessageReply) => Promise<CheckinNotifyDelivery>
 interface Sender {
   send: Send
+  inlineImageByteLimit?: number
   forward?: (nodes: readonly MessageReply[]) => Promise<CheckinNotifyDelivery>
 }
 
@@ -132,13 +133,14 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     const session = current.find(session => session.botId === bot)
     const forwardTarget = route.kind === "group" ? {groupId:chat} : {userId:chat}
     const forward = session?.sendForward?.bind(session, forwardTarget)
+    const inlineImageByteLimit = session?.inlineImageByteLimit
     if (route.kind === "private") {
-      if (session && await session.isFriend(chat)) return {send:message=>session.sendPrivate(chat,message),forward}
+      if (session && await session.isFriend(chat)) return {send:message=>session.sendPrivate(chat,message),forward,inlineImageByteLimit}
       return
     }
 
     if (session) {
-      if (await session.isGroupMember(chat,bot)) return {send:message=>session.sendGroup(chat,message),forward}
+      if (await session.isGroupMember(chat,bot)) return {send:message=>session.sendGroup(chat,message),forward,inlineImageByteLimit}
       return
     }
     if (groups?.onlineBots?.().includes(bot)) {
@@ -324,7 +326,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
             const journal = "lotus-yunzai:media:subscription:" + provider.id + ":" + route.kind + ":" + route.chat + ":" + post.id
             if (await redis.get(legacy) !== null || await redis.get(journal) !== null) { report.skipped++; continue }
             try {
-              const payloads=await render(provider,post,settings,{signal:active})
+              const payloads=await render(provider,post,settings,{signal:active,inlineImageByteLimit:sender.inlineImageByteLimit})
               candidates.set(post.id, { route, post, payloads, legacy, journal })
             } catch (error) {
               if (!active.aborted) {

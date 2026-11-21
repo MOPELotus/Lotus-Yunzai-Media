@@ -143,7 +143,7 @@ test("B站和微博图片布局沿用原开关与截图高度", async () => {
     const path = join(data,"yuki-plugin/config/weibo")
     await mkdir(path,{recursive:true})
     const base = join(path,"config.yaml"), override = join(path,"config.guoba.support.yaml")
-    const original = "# 旧微博图片设置\nisSplit: false\nboxGrid: true\nsplitHeight: 2048\nnoSplitHeight: 1360\n"
+    const original = "# 旧微博图片设置\nisSplit: false\nboxGrid: true\nsplitHeight: 16000\nnoSplitHeight: 20000\n"
     await writeFile(base,original)
     const {configInfo:form} = supportGuoba(data)
     expect((await form.getConfigData()).weibo).toMatchObject({isSplit:0,boxGrid:1})
@@ -152,11 +152,11 @@ test("B站和微博图片布局沿用原开关与截图高度", async () => {
     expect(await form.setConfigData({"weibo.isSplit":1,"weibo.boxGrid":0},{Result})).toEqual({ok:true})
     const config=createSubscriptionConfig(data,lockFile)
     expect(await config.settings("bilibili")).toMatchObject({split:true,grid:true})
-    expect(await config.settings("weibo")).toMatchObject({split:true,grid:false,splitHeight:2048,noSplitHeight:1360})
+    expect(await config.settings("weibo")).toMatchObject({split:true,grid:false,splitHeight:16000,noSplitHeight:20000})
     expect(await readFile(base,"utf8")).toBe(original)
     const raw = await readFile(override,"utf8")
     expect(raw).toContain("# 旧微博图片设置")
-    expect(YAML.parse(raw)).toEqual({isSplit:1,boxGrid:0,splitHeight:2048,noSplitHeight:1360})
+    expect(YAML.parse(raw)).toEqual({isSplit:1,boxGrid:0,splitHeight:16000,noSplitHeight:20000})
   } finally {
     await rm(data,{force:true,recursive:true})
   }

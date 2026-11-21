@@ -121,7 +121,7 @@ export class BilibiliService {
     }
     const description = stripHtml(data.description)
     const ownerRef = data.creators?.[0]?.ref ?? data.creators?.[0]?.resource_ref
-    return { type: "video", ref: data.ref, title: stripHtml(data.title), bvid: ext.bvid || target.bvid, aid: ext.aid || target.aid,
+    return { type: /** @type {"video"} */ ("video"), ref: data.ref, title: stripHtml(data.title), bvid: ext.bvid || target.bvid, aid: ext.aid || target.aid,
       url: `https://www.bilibili.com/video/${ext.bvid || target.bvid || "av" + target.aid}`,
       cover: normalizeBiliImage(data.cover_url || ""), owner: data.creators?.map(c => c.name).join(" / ") || "",
       ownerId: typeof ownerRef === "string" ? /^bilibili:user:([1-9]\d*)$/u.exec(ownerRef)?.[1] : undefined,
@@ -137,7 +137,7 @@ export class BilibiliService {
     if (json.code !== 0) throw new Error(json.message || `B站直播接口错误 ${json.code}`)
     const data = json.data || {}
     return {
-      type: "live",
+      type: /** @type {"live"} */ ("live"),
       title: stripHtml(data.title || `直播间 ${roomId}`),
       roomId: String(roomId),
       url: `https://live.bilibili.com/${roomId}`,
@@ -150,6 +150,7 @@ export class BilibiliService {
     }
   }
 
+  /** @returns {Promise<Array<{title: string, ref: string, bvid: string, author: string, play?: number, duration: number, url: string}>>} */
   async search(keyword, { page = 1, limit = this.searchLimit } = {}) {
     const items = await this.tuneRequest("/v1/search", { platform: "bilibili", type: "video", q: keyword, limit: String(limit), offset: String((page - 1) * limit) })
     return items.filter(item => item.type === "video").map(({ data }) => ({ title: stripHtml(data.title), ref: data.ref, bvid: data.extensions?.bvid || data.id.replace(/^bvid:/, ""), author: data.creators?.map(c => c.name).join(" / ") || "", play: data.play_count, duration: Number(data.duration_ms || 0) / 1000, url: `https://www.bilibili.com/video/${data.extensions?.bvid || data.id.replace(/^bvid:/, "")}` }))

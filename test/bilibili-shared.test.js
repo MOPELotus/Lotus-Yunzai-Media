@@ -142,3 +142,31 @@ test("B 站共用登录入口不重复扫码，停用只改动态配置", async 
     await rm(folder, { recursive: true, force: true })
   }
 })
+
+test("独立动态二维码出图失败只发送已验证的登录链接，并要求送达回执", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "lotus-bili-qr-render-"))
+  const link = "https://passport.bilibili.com/h5-app/passport/login/scan?qrcode_key=synthetic-123"
+  const redis = { mGet: async keys => keys.map(() => null), set: async () => "OK", eval: async () => 1 }
+  const calls = []
+  const handler = biliSubscriptionLogin({ getRedis: () => redis, owner: () => true, directory: folder, lockFile,
+    render: async () => { throw new Error("合成 Skia 失败") },
+    fetch: async (url) => {
+      calls.push(new URL(url).pathname)
+      return Response.json({ code: 0, data: { url: link, qrcode_key: "synthetic-123" } })
+    },
+  })
+  try {
+    const reply = await handler("#扫码B站动态登录", { message_type: "private",
+      privateCredentialSignal: new AbortController().signal,
+      reply(message) {
+        expect(typeof message).toBe("string")
+        expect(message).toContain(link)
+        return false
+      },
+    })
+    expect(reply).toContain("送达未确认")
+    expect(calls).toEqual(["/x/passport-login/web/qrcode/generate"])
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+})

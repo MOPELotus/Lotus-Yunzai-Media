@@ -1,4 +1,3 @@
-import QRCode from "qrcode"
 import { lstat, mkdir, rename, rm, unlink, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import { stringify } from "yaml"
@@ -146,13 +145,14 @@ export function biliSubscriptionLogin({ getRedis, owner, signal, directory, lock
         link?.origin !== passport || link.username || link.password || link.hash || link.searchParams.get("qrcode_key") !== codeKey) {
       return "未能取得 B 站登录二维码，请稍后重试。"
     }
-    const png = await render(link.href).catch(() => QRCode.toBuffer(link.href))
+    const png = await render(link.href).catch(() => undefined)
     active.throwIfAborted()
     let delivered = false
-    await context.reply([
+    await context.reply(png ? [
       { type: "text", text: "请在 3 分钟内使用哔哩哔哩 App 扫码确认。" },
       { type: "image", file: png },
-    ], false, { onDelivered: () => { delivered = true } })
+    ] : "二维码图片暂不可用。请在 3 分钟内打开 B 站登录链接。\n" + link.href,
+    false, { onDelivered: () => { delivered = true } })
     if (!delivered) return "B 站登录二维码送达未确认，请重试。"
     const pollSignal = AbortSignal.any([active, AbortSignal.timeout(maxWait)])
     const url = new URL(qrBase + "poll")

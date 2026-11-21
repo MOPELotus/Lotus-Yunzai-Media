@@ -6,14 +6,14 @@ export const configPath = path.join(rootPath, "config")
 export const dataPath = path.join(rootPath, "data")
 export const resourcesPath = path.join(rootPath, "data", "passport", "resources")
 
-export function resolveRoot(...segments) {
+export function resolveRoot(...segments: string[]) {
   return path.join(rootPath, ...segments)
 }
 
-export function resolveData(...segments) {
+export function resolveData(...segments: string[]) {
   return path.join(dataPath, ...segments)
 }
 
-export function resolveConfig(...segments) {
+export function resolveConfig(...segments: string[]) {
   return path.join(configPath, ...segments)
 }

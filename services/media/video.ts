@@ -1,9 +1,25 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { resolveData, rootPath } from "../../core/path.js"
-import { runMediaProcess } from "./files.js"
+import { resolveData, rootPath } from "../../core/path.ts"
+import { runMediaProcess } from "./files.ts"
 
-export async function findMediaTool(name, toolsPath = "data/tools/bin") {
+interface VideoOptions {
+  readonly tools_path?: string
+  readonly timeout_ms?: number
+  readonly codec?: string
+}
+
+interface Stream {
+  readonly codec_type: string
+  readonly codec_name?: string
+}
+
+function isStream(value: unknown): value is Stream {
+  return Boolean(value && typeof value === "object" && "codec_type" in value && typeof value.codec_type === "string" &&
+    (!("codec_name" in value) || typeof value.codec_name === "string"))
+}
+
+export async function findMediaTool(name: string, toolsPath = "data/tools/bin") {
   const configured = toolsPath === "data/tools/bin" ? resolveData("tools", "bin") : path.resolve(rootPath, toolsPath)
   for (const dir of [configured, ...(process.env.PATH || "").split(path.delimiter)]) {
     const file = path.join(dir, process.platform === "win32" ? `${name}.exe` : name)
@@ -12,14 +28,16 @@ export async function findMediaTool(name, toolsPath = "data/tools/bin") {
   return null
 }
 
-export async function prepareVideo(file, { tools_path, timeout_ms = 600000, codec } = {}) {
-  const warnings = []
+export async function prepareVideo(file: string, { tools_path, timeout_ms = 600000, codec }: VideoOptions = {}) {
+  const warnings: string[] = []
   const ffprobe = await findMediaTool("ffprobe", tools_path)
   let videoCodec = codec
-  let audioCodec
+  let audioCodec: string | undefined
   if (ffprobe) {
     const probe = await runMediaProcess(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { cwd: path.dirname(file), timeoutMs: Math.min(timeout_ms, 30000) })
-    const streams = JSON.parse(probe.output).streams || []
+    const report: unknown = JSON.parse(probe.output)
+    const raw = report && typeof report === "object" && "streams" in report ? report.streams : undefined
+    const streams = Array.isArray(raw) ? raw.filter(isStream) : []
     const video = streams.find(stream => stream.codec_type === "video")
     if (!video) throw new Error("下载的文件没有可用视频流")
     videoCodec = video.codec_name

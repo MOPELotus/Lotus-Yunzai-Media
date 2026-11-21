@@ -1,7 +1,7 @@
 const douyinDomains = ["douyin.com", "iesdouyin.com", "douyinpic.com", "douyincdn.com", "douyinvod.com", "byteimg.com", "bytefcdn.com", "bytedance.com", "bytecdn.cn", "ixigua.com"]
 const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.com"]
 
-function mediaUrl(value, domains) {
+function mediaUrl(value: string | URL, domains: readonly string[]) {
   const url = new URL(value)
   if (!["https:", "http:"].includes(url.protocol) || url.port || url.username || url.password ||
       !domains.some(domain => url.hostname === domain || url.hostname.endsWith("." + domain))) {
@@ -11,7 +11,9 @@ function mediaUrl(value, domains) {
   return url
 }
 
-export async function fetchCdn(fetchImpl, value, options, kind) {
+export type MediaFetch = (url: string, options?: RequestInit) => Promise<Response>
+
+export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, options: RequestInit, kind?: "image") {
   const domains = kind === "image" ? imageDomains : douyinDomains
   let url = mediaUrl(value, domains)
   for (let hop = 0; hop <= 5; hop++) {

@@ -1,4 +1,5 @@
 import { BilibiliMedia } from "./apps/bilibili.js"
+import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
 import { createDouyinCommands } from "./services/douyin/command.ts"
 import { MusicMedia, renderPartnerReport, runPartnerTask } from "./apps/music.js"
 import { createMcWikiCommand } from "./services/mcwiki/command.js"
@@ -15,15 +16,20 @@ export async function createModule(services) {
   const stopPartner = await createPartnerSchedule(services, { execute:runPartnerTask, render:renderPartnerReport })
   const mcwiki = createMcWikiCommand({ signal: services.signal })
   const douyin = createDouyinCommands(services)
+  const biliLogin = createBilibiliLogin(services)
   return {
     ...subscriptions,
     async dispose() {
       await Promise.all([subscriptions.dispose(), stopPartner?.(), stopTuneWeave?.(), douyin.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": mcwiki },
-    fallbackFeatures: douyin.features,
+    fallbackFeatures(context) {
+      if (context.normalizedMessage === biliLogin.command) return ["[media] B 站解析"]
+      return douyin.features(context)
+    },
     async fallback(message, context) {
       if (message.startsWith("#mcwiki") && /^\S/u.test(message.slice(7))) return mcwiki(message.slice(7))
+      if (message === biliLogin.command) return biliLogin.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? douyin.fallback(message, context)
     },
   }

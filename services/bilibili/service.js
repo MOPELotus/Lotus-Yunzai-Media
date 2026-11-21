@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import QRCode from "qrcode"
 import YAML from "yaml"
 import { resolveData, rootPath } from "../../core/path.js"
@@ -268,26 +269,35 @@ export class BilibiliService {
     return releaseMediaTask(this.tasksDir, result?.taskDir)
   }
 
-  async createQrLogin() {
+  async createQrLogin({ signal } = {}) {
     this.pendingAlias = "lotus-bilibili"
-    const qr = await this.tuneweave.request("/v1/auth/qr", { method: "POST", body: { platform: "bilibili", account: this.pendingAlias, credential_mode: "server" } })
+    const qr = await this.tuneweave.request("/v1/auth/qr", {
+      method: "POST", body: { platform: "bilibili", account: this.pendingAlias, credential_mode: "server" },
+      signal, redirect: "error",
+    })
     if (!qr.transaction_id || !qr.url) throw new Error("B站二维码创建失败")
     return { url: qr.url, qrcodeKey: qr.transaction_id, qrDataUrl: qr.image_data_url || await QRCode.toDataURL(qr.url) }
   }
 
-  async waitQrLogin({ qrcodeKey, timeoutMs = 180000, pollMs = 3000 } = {}) {
+  /** @param {{qrcodeKey?: string, timeoutMs?: number, pollMs?: number, signal?: AbortSignal}} [options] */
+  async waitQrLogin({ qrcodeKey, timeoutMs = 180000, pollMs = 3000, signal } = {}) {
+    if (!qrcodeKey) throw new Error("B站二维码事务缺失")
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      const result = await this.tuneweave.request(`/v1/auth/qr/${encodeURIComponent(qrcodeKey)}`)
+      signal?.throwIfAborted()
+      const result = await this.tuneweave.request(`/v1/auth/qr/${encodeURIComponent(qrcodeKey)}`, { signal, redirect: "error" })
       if (result.state === "confirmed") {
-        if (!result.profile?.authenticated) throw new Error("B站登录身份未核实")
-        const account = { tuneweave_account: this.pendingAlias || "lotus-bilibili", saved_at: formatLocalIso(this.now()), source: "tuneweave" }
-        await this.saveAccount(account)
+        const alias = this.pendingAlias || "lotus-bilibili"
+        const profile = result.profile
+        if (!profile?.authenticated || (profile.platform && profile.platform !== "bilibili") ||
+            (profile.account && profile.account !== alias)) throw new Error("B站登录身份未核实")
+        const account = { tuneweave_account: alias, saved_at: formatLocalIso(this.now()), source: "tuneweave" }
+        await this.saveAccount(account, { signal })
         this.tuneAccount = account.tuneweave_account
         return { ok: true, account }
       }
       if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("B站二维码已过期或需要附加验证，请重新登录")
-      await sleep(pollMs)
+      await delay(pollMs, undefined, { signal })
     }
     throw new Error("B站二维码登录超时")
   }
@@ -313,8 +323,9 @@ export class BilibiliService {
     return first ?? null
   }
 
-  async saveAccount(account = {}) {
+  async saveAccount(account = {}, { signal } = {}) {
     if (!account.cookie && !account.tuneweave_account) throw new Error("B站账号登录信息为空")
+    signal?.throwIfAborted()
     await fs.mkdir(path.dirname(this.accountFile), { recursive: true, mode: 0o700 })
     const data = YAML.stringify({
       ...(account.cookie ? { cookie: normalizeBiliCookie(account.cookie) } : {}),
@@ -331,6 +342,7 @@ export class BilibiliService {
       } finally {
         await output.close()
       }
+      signal?.throwIfAborted()
       await fs.rename(temporary, this.accountFile)
     } finally {
       await fs.rm(temporary, { force: true })
@@ -661,8 +673,4 @@ function readSetCookie(headers) {
 
 function livePlayerUrl(roomId) {
   return `https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=${encodeURIComponent(String(roomId || ""))}`
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }

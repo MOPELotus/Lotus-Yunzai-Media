@@ -19,7 +19,6 @@ import { buildMediaMessageText, isMediaCommandText } from "../services/media/mes
 import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../services/media/files.js"
 import { ToolInstallerService } from "../services/tools/installer.js"
 import { createSubscriptionConfig } from "../services/subscriptions/config.js"
-import { biliSharedSession } from "../services/subscriptions/bilibili/shared.js"
 
 const searchCache = new Map()
 const legacySettings = createSubscriptionConfig(dataPath,lockFile)
@@ -36,7 +35,6 @@ export class BilibiliMedia extends BasePlugin {
         { reg: "^#看[0-9]+$", fnc: "pickVideo" },
         { reg: "^#看视频.+", fnc: "directWatch" },
         { reg: "^#[Bb]站(?:下载|下视频)\\s+[\\s\\S]+$", fnc: "downloadVideo" },
-        { reg: "^#B站登录$", fnc: "login" },
         { reg: "^#初始化环境$", fnc: "initializeMediaTools" },
         { reg: "[\\s\\S]*", fnc: "parse" },
       ],
@@ -125,59 +123,6 @@ export class BilibiliMedia extends BasePlugin {
       await this.renderError("B站直看", error)
       return true
     }
-  }
-
-  async login() {
-    const globalConfig = await loadGlobalConfig()
-    const permission = new PermissionService({ permissions: globalConfig.permissions })
-      .explain(this.e, "bilibili.login")
-    if (!this.e.isPrivate || !canManagePackages(this.e) || !permission.ok) {
-      await this.renderError("B站登录", new Error("请由机器人主人在私聊登录 B 站账号。"))
-      return true
-    }
-
-    const service = await createService()
-    try {
-      const shared = biliSharedSession({ createService: async () => service,
-        enabled: async () => (await legacySettings.settings("bilibili")).sharedBiliLogin })
-      const allowsSharing = await shared.available().catch(() => false)
-      const qr = await service.createQrLogin()
-      const image = await renderTemplate("qr-login", {
-        title: "B站登录",
-        subtitle: "Lotus-Yunzai · B 站",
-        badge: "3 MIN",
-        notice: allowsSharing ? "使用 Bilibili App 扫码确认。登录可同时用于视频和未单独登录的动态订阅。" :
-          "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus-Yunzai 仅保存账号引用。",
-        qrDataUrl: qr.qrDataUrl,
-        profileId: "bilibili",
-      }, {
-        saveId: `media-bilibili-login-${this.e.user_id || "master"}`,
-      }).catch(() => undefined)
-      const prefix = "data:image/png;base64,"
-      const qrPng = image || (qr.qrDataUrl.startsWith(prefix) && Buffer.from(qr.qrDataUrl.slice(prefix.length), "base64"))
-      if (!qrPng || !await this.reply(globalThis.segment.image(qrPng))) throw new Error("B 站登录二维码发送失败。")
-      const result = await service.waitQrLogin({
-        qrcodeKey: qr.qrcodeKey,
-      })
-      const report = await renderStatusCard({
-        title: "B站登录",
-        subtitle: "Lotus-Yunzai · B 站",
-        badge: "完成",
-        message: allowsSharing ? "B站账号已保存，可用于视频及没有可用独立会话的动态订阅。" :
-          "B站账号引用已保存，后续搜索和解析会自动使用。",
-        userId: this.e.user_id,
-        items: [
-          { label: "来源", value: result.account.source },
-          { label: "保存时间", value: result.account.saved_at },
-        ],
-      }, {
-        saveId: `media-bilibili-login-ok-${this.e.user_id || "master"}`,
-      })
-      await replyImage(this, report, "[media] B站登录完成。")
-    } catch (error) {
-      await this.renderError("B站登录", error)
-    }
-    return true
   }
 
   async initializeMediaTools() {

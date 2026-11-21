@@ -170,3 +170,22 @@ test("独立动态二维码出图失败只发送已验证的登录链接，并�
     await rm(folder, { recursive: true, force: true })
   }
 })
+
+test("视频登录在好友连接取消后拒绝迟到确认并保留原账号", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "lotus-bili-video-cancel-"))
+  const accountFile = join(folder, "account.yaml")
+  const session = new AbortController()
+  const service = new BilibiliService({ accountFile, tuneweave: { async request(path, options) {
+    expect(path).toBe("/v1/auth/qr/test-login")
+    expect(options.signal).toBe(session.signal)
+    session.abort()
+    return { state: "confirmed", profile: { platform: "bilibili", account: "lotus-bilibili", authenticated: true } }
+  } } })
+  try {
+    await service.saveAccount({ tuneweave_account: "original" })
+    await expect(service.waitQrLogin({ qrcodeKey: "test-login", signal: session.signal })).rejects.toThrow()
+    expect((await service.loadAccount()).tuneweave_account).toBe("original")
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+})

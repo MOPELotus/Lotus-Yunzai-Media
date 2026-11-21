@@ -1,8 +1,24 @@
-import { WEB_UA, generateABogus } from "./signature.js"
-import { requestText, DouyinError } from "./http.js"
-import { signVisitorUrl } from "./guest-signature.js"
+import { WEB_UA, generateABogus } from "./signature.ts"
+import { requestText, DouyinError, type RequestOptions } from "./http.ts"
+import { signVisitorUrl } from "./guest-signature.ts"
+import type { AwemeDetail } from "./model.ts"
+import type { VisitorSession } from "./visitor.ts"
 
-export function buildDetailUrl(id, { sign = generateABogus, now = Date.now() } = {}) {
+export type DetailSigner = (query: string, options: { userAgent: string; now: number }) => string
+
+interface DetailOptions {
+  sign?: DetailSigner
+  now?: number
+}
+
+interface DetailResponse {
+  status_msg?: string
+  message?: string
+  status_code?: number
+  aweme_detail?: AwemeDetail
+}
+
+export function buildDetailUrl(id: string, { sign = generateABogus, now = Date.now() }: DetailOptions = {}) {
   const params = new URLSearchParams({
     device_platform: "webapp", aid: "6383", channel: "channel_pc_web", aweme_id: id,
     pc_client_type: "1", version_code: "190500", version_name: "19.5.0", cookie_enabled: "true",
@@ -15,8 +31,8 @@ export function buildDetailUrl(id, { sign = generateABogus, now = Date.now() } =
   return `https://www.douyin.com/aweme/v1/web/aweme/detail/?${query}&a_bogus=${encodeURIComponent(sign(query, { userAgent: WEB_UA, now }))}`
 }
 
-export async function fetchWebDetail(id, visitor, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, sign, now = Date.now() } = {}) {
-  const session = typeof visitor === "string" ? { ttwid: visitor } : visitor
+export async function fetchWebDetail(id: string, visitor: string | VisitorSession, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, sign, now = Date.now() }: RequestOptions & DetailOptions = {}) {
+  const session = typeof visitor === "string" ? { ttwid: visitor, uifid: undefined } : visitor
   const detailUrl = buildDetailUrl(id, { sign, now })
   const request = session?.uifid ? signVisitorUrl(detailUrl, session.uifid, { now }) : { url: detailUrl, headers: {} }
   const { response, text } = await requestText(fetchImpl, request.url, {
@@ -26,8 +42,8 @@ export async function fetchWebDetail(id, visitor, { fetch: fetchImpl = globalThi
     if (/ArgusSecurityPlugin|Uifid Not Found/i.test(text)) throw new DouyinError("risk_control", "抖音风控要求额外游客校验")
     throw new DouyinError("api_http", `抖音作品接口 HTTP ${response.status}`)
   }
-  let data
-  try { data = JSON.parse(text) } catch { throw new DouyinError("api_empty", "抖音作品接口返回空数据或非 JSON") }
+  let data: DetailResponse
+  try { data = JSON.parse(text) as DetailResponse } catch { throw new DouyinError("api_empty", "抖音作品接口返回空数据或非 JSON") }
   const message = String(data.status_msg || data.message || "")
   if (data.status_code !== 0) {
     if (/已删除|不存在|私密|无权|不可见/.test(message)) throw new DouyinError("unavailable", message)

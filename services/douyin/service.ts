@@ -5,27 +5,94 @@ import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/t
 import { packMediaFiles, safeMediaName, mediaLimitFailure } from "../media/files.js"
 import { downloadMedia } from "../media/download.js"
 import { prepareVideo } from "../media/video.js"
-import { extractDouyinTarget, resolveDouyinTarget } from "./links.js"
-import { fetchWebDetail } from "./api.js"
-import { fetchSsrDetail } from "./ssr.js"
-import { DouyinVisitor, getDefaultVisitor } from "./visitor.js"
-import { normalizeDouyinWork, selectVideoSources } from "./model.js"
-import { WEB_UA } from "./signature.js"
-import { DouyinError } from "./http.js"
+import { extractDouyinTarget, resolveDouyinTarget, type DouyinTarget } from "./links.ts"
+import { fetchWebDetail, type DetailSigner } from "./api.ts"
+import { fetchSsrDetail } from "./ssr.ts"
+import { DouyinVisitor, getDefaultVisitor, type VisitorSession, type VisitorRequest } from "./visitor.ts"
+import { normalizeDouyinWork, selectVideoSources, type DouyinWork, type MediaSource } from "./model.ts"
+import { WEB_UA } from "./signature.ts"
+import { DouyinError, type DouyinFetch } from "./http.ts"
 
-export function normalizeDouyinDownloadConfig(config = {}) {
+type MultiPagePolicy = "first" | "all" | "zip"
+type MediaKind = "image" | "video"
+type DownloadCandidate = Pick<MediaSource, "urls" | "codec">
+type WorkTarget = Pick<DouyinTarget, "id"> | DouyinTarget
+
+interface VideoPreparationOptions {
+  tools_path?: string
+  timeout_ms?: number
+  codec?: string
+}
+
+type VideoPreparation = (file: string, options: VideoPreparationOptions) => Promise<{ file: string; warnings: string[] }>
+
+interface DownloadSettings {
+  enable?: boolean
+  tools_path?: string
+  quality?: string
+  duration_limit_seconds?: number
+  video_size_limit_mb?: number
+  max_estimated_size_mb?: number
+  multi_page_policy?: string
+  timeout_ms?: number
+}
+
+interface DownloadConfig extends DownloadSettings {
+  download?: DownloadSettings
+}
+
+interface ServiceOptions {
+  fetch?: DouyinFetch
+  now?: () => number
+  sign?: DetailSigner
+  timeoutMs?: number
+  visitor?: {
+    get: (options: VisitorRequest) => Promise<string>
+    getSession?: (options: VisitorRequest) => Promise<VisitorSession>
+  }
+  tasksDir?: string
+  prepareVideo?: VideoPreparation
+  pack?: typeof packMediaFiles
+}
+
+interface DownloadHooks {
+  onEvent?: (event: { type: "download-start"; message: string }) => void | Promise<void>
+}
+
+interface DownloadFailure {
+  index: number
+  kind: MediaKind
+  message: string
+}
+
+type DownloadArtifact =
+  | { file: string; kind: string; sizeBytes: number; index: number }
+  | { file: string; kind: "text"; index: 0 }
+
+export function normalizeDouyinDownloadConfig(config: DownloadConfig = {}) {
   const source = config.download || config
+  const multiPagePolicy = source.multi_page_policy
+  const policy: MultiPagePolicy = multiPagePolicy === "first" || multiPagePolicy === "all" ? multiPagePolicy : "zip"
   return {
     enable: source.enable !== false, tools_path: String(source.tools_path || "data/tools/bin"),
     quality: source.quality || "adapt", duration_limit_seconds: Number(source.duration_limit_seconds ?? 3600),
     video_size_limit_mb: Number(source.video_size_limit_mb || 100), max_estimated_size_mb: Number(source.max_estimated_size_mb || 0),
-    multi_page_policy: ["first", "all", "zip"].includes(source.multi_page_policy) ? source.multi_page_policy : "zip",
+    multi_page_policy: policy,
     timeout_ms: Number(source.timeout_ms || 600000),
   }
 }
 
 export class DouyinService {
-  constructor(options = {}) {
+  readonly fetch: DouyinFetch
+  readonly now: () => number
+  readonly sign: DetailSigner | undefined
+  readonly timeoutMs: number
+  readonly visitor: NonNullable<ServiceOptions["visitor"]>
+  readonly tasksDir: string
+  readonly prepareVideo: VideoPreparation
+  readonly pack: typeof packMediaFiles
+
+  constructor(options: ServiceOptions = {}) {
     this.fetch = options.fetch || globalThis.fetch
     this.now = options.now || Date.now
     this.sign = options.sign
@@ -36,10 +103,10 @@ export class DouyinService {
     this.pack = options.pack || packMediaFiles
   }
 
-  extractTarget(message) { return extractDouyinTarget(message) }
-  resolveTarget(input) { return resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: this.timeoutMs }) }
+  extractTarget(message: unknown) { return extractDouyinTarget(message) }
+  resolveTarget(input: string) { return resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: this.timeoutMs }) }
 
-  async getInfo(input, { deadline = Infinity } = {}) {
+  async getInfo(input: string | WorkTarget, { deadline = Infinity } = {}): Promise<DouyinWork> {
     const requestBudget = () => {
       const remaining = Math.min(this.timeoutMs, deadline - Date.now())
       if (remaining <= 0) throw new DouyinError("timeout", "作品下载超时")
@@ -47,16 +114,16 @@ export class DouyinService {
     }
     const target = typeof input === "string" ? await resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: requestBudget() }) : input
     if (!/^\d+$/.test(target?.id || "")) throw new DouyinError("invalid_link", "抖音作品 ID 无效")
-    let previous = ""
-    let primaryError
+    let previous: string | VisitorSession = ""
+    let primaryError: unknown
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const getVisitor = this.visitor.getSession || this.visitor.get
+        const getVisitor: (options: VisitorRequest) => Promise<string | VisitorSession> = this.visitor.getSession || this.visitor.get
         previous = await getVisitor.call(this.visitor, { refresh: attempt > 0, previous, timeoutMs: requestBudget() })
         const detail = await fetchWebDetail(target.id, previous, { fetch: this.fetch, timeoutMs: requestBudget(), sign: this.sign, now: this.now() })
         return normalizeDouyinWork(detail, { source: "web", expectedId: target.id })
       } catch (error) {
-        if (error.code === "unavailable" || Date.now() >= deadline) throw error
+        if ((error as { code?: string }).code === "unavailable" || Date.now() >= deadline) throw error
         primaryError = error
       }
     }
@@ -64,37 +131,44 @@ export class DouyinService {
       const detail = await fetchSsrDetail(target.id, { fetch: this.fetch, timeoutMs: requestBudget() })
       return normalizeDouyinWork(detail, { source: "ssr", expectedId: target.id })
     } catch (error) {
-      if (error.code === "unavailable") throw error
+      if ((error as { code?: string }).code === "unavailable") throw error
       throw new DouyinError("parse_failed", "抖音主接口与分享页面均未取得可用作品，请检查链接或稍后重试", { cause: new AggregateError([primaryError, error]) })
     }
   }
 
-  async download(input, config = {}, hooks = {}) {
+  async download(input: string | WorkTarget | DouyinWork, config: DownloadConfig = {}, hooks: DownloadHooks = {}) {
     const download = normalizeDouyinDownloadConfig(config)
-    const info = typeof input === "object" && input.platform === "douyin" ? input : await this.getInfo(input)
+    const info = typeof input === "object" && "platform" in input && input.platform === "douyin" ? input : await this.getInfo(input)
     const limitFailure = mediaLimitFailure(info, download)
     if (limitFailure) return limitFailure
     const task = await createMediaTask(this.tasksDir)
     const deadline = Date.now() + download.timeout_ms
-    const files = []
-    const artifacts = []
+    const files: string[] = []
+    const artifacts: DownloadArtifact[] = []
     const warnings = [...info.warnings]
-    const failedItems = []
+    const failedItems: DownloadFailure[] = []
     let consumed = 0
-    let refreshed
+    let refreshed: Promise<DouyinWork> | undefined
     const remainingTime = () => {
       const remaining = deadline - Date.now()
       if (remaining <= 0) throw new Error("作品下载超时")
       return remaining
     }
-    const downloadItem = async (candidates, base, kind) => {
+    const downloadItem = async (candidates: DownloadCandidate[], base: string, kind: MediaKind) => {
       let lastError
       for (const candidate of candidates) {
         for (const url of candidate.urls) {
           try {
             const cap = download.max_estimated_size_mb * 1024 * 1024
             if (cap > 0 && consumed >= cap) throw new Error("作品媒体总大小超过下载限制")
-            const result = await downloadMedia(url, base, { fetch: this.fetch, kind, headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/" }, timeoutMs: remainingTime(), maxBytes: cap > 0 ? cap - consumed : 0 })
+            const options = {
+              fetch: this.fetch as typeof globalThis.fetch,
+              kind,
+              headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/" },
+              timeoutMs: remainingTime(),
+              maxBytes: cap > 0 ? cap - consumed : 0,
+            }
+            const result = await downloadMedia(url, base, options)
             consumed += result.sizeBytes
             if (kind === "video") {
               const prepared = await this.prepareVideo(result.file, { ...download, timeout_ms: remainingTime(), codec: candidate.codec })
@@ -124,7 +198,7 @@ export class DouyinService {
       const items = download.multi_page_policy === "first" ? info.media.slice(0, 1) : info.media
       for (const item of items) {
         const prefix = path.join(task.dir, String(item.index).padStart(3, "0"))
-        const processPart = async (kind, candidates, suffix) => {
+        const processPart = async (kind: MediaKind, candidates: DownloadCandidate[], suffix: string) => {
           try {
             let result
             try { result = await downloadItem(candidates, `${prefix}-${suffix}`, kind) } catch (firstError) {
@@ -136,7 +210,7 @@ export class DouyinService {
             }
             files.push(result.file); artifacts.push({ ...result, index: item.index })
           } catch (error) {
-            failedItems.push({ index: item.index, kind, message: error.message })
+            failedItems.push({ index: item.index, kind, message: (error as Error).message })
           }
         }
         if (item.type === "image" || item.type === "live_photo") await processPart("image", [{ urls: item.urls }], "image")
@@ -154,11 +228,11 @@ export class DouyinService {
       }
       return { ok: true, info, taskDir: task.dir, taskId: task.id, files: output, artifacts, warnings, partial: failedItems.length > 0, failedItems }
     } catch (error) {
-      await this.releaseTask({ taskDir: task.dir }).catch(cleanupError => globalThis.logger?.warn?.(`[media] 抖音任务清理失败： ${cleanupError.message}`))
+      await this.releaseTask({ taskDir: task.dir }).catch(cleanupError => (globalThis as typeof globalThis & { logger?: { warn?: (message: string) => void } }).logger?.warn?.(`[media] 抖音任务清理失败： ${cleanupError.message}`))
       throw error
     }
   }
 
   recoverTasks() { return recoverMediaTasks(this.tasksDir) }
-  releaseTask(result) { return releaseMediaTask(this.tasksDir, result?.taskDir) }
+  releaseTask(result?: { taskDir?: string }) { return releaseMediaTask(this.tasksDir, result?.taskDir) }
 }

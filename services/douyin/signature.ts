@@ -1,3 +1,4 @@
+/// <reference path="./sm-crypto.d.ts" />
 import { randomInt } from "node:crypto"
 import { sm3 as digestSm3 } from "sm-crypto"
 
@@ -13,7 +14,7 @@ const SLOT_ORDER = [34, 44, 56, 61, 73, 29, 70, 45, 35, 49, 38, 66, 51, 68, 28, 
 const EPOCH = 1721836800000
 const NOISE_MASKS = [0x91, 0x42, 0x2c]
 
-function platformBytes(text) {
+function platformBytes(text: string) {
   const bytes = []
   for (let i = 0; i < text.length; i++) {
     const unit = text.charCodeAt(i)
@@ -23,22 +24,22 @@ function platformBytes(text) {
   return Buffer.from(bytes)
 }
 
-function sm3(bytes) {
+function sm3(bytes: Uint8Array) {
   return Buffer.from(digestSm3(bytes), "hex")
 }
 
-function encode(bytes, alphabet) {
-  return Buffer.from(bytes).toString("base64").replace(/[A-Za-z0-9+/]/g, char => alphabet[BASE64.indexOf(char)])
+function encode(bytes: Uint8Array, alphabet: string) {
+  return Buffer.from(bytes).toString("base64").replace(/[A-Za-z0-9+/]/g, char => alphabet.charAt(BASE64.indexOf(char)))
 }
 
 /** Platform's modified RC4: reversed initial permutation and multiplicative scheduling. */
-export function sealPlatformBytes(bytes, key) {
+export function sealPlatformBytes(bytes: Uint8Array, key: ArrayLike<number>) {
   const permutation = Uint8Array.from({ length: 256 }, (_, index) => 255 - index)
   let cursor = 0
   for (let position = 0; position < 256; position++) {
-    cursor = (cursor * (permutation[position] + 1) + key[position % key.length]) & 255
-    const saved = permutation[position]
-    permutation[position] = permutation[cursor]
+    cursor = (cursor * (permutation[position]! + 1) + key[position % key.length]!) & 255
+    const saved = permutation[position]!
+    permutation[position] = permutation[cursor]!
     permutation[cursor] = saved
   }
   const result = Buffer.alloc(bytes.length)
@@ -46,20 +47,20 @@ export function sealPlatformBytes(bytes, key) {
   cursor = 0
   for (let index = 0; index < bytes.length; index++) {
     position = (position + 1) & 255
-    cursor = (cursor + permutation[position]) & 255
-    const saved = permutation[position]
-    permutation[position] = permutation[cursor]
+    cursor = (cursor + permutation[position]!) & 255
+    const saved = permutation[position]!
+    permutation[position] = permutation[cursor]!
     permutation[cursor] = saved
-    result[index] = bytes[index] ^ permutation[(permutation[position] + permutation[cursor]) & 255]
+    result[index] = bytes[index]! ^ permutation[(permutation[position]! + permutation[cursor]!) & 255]!
   }
   return result
 }
 
 /** Returns an unescaped signature. Only the HTTP query builder URL-encodes it. */
-export function generateABogus(query, { userAgent = WEB_UA, browserInfo = BROWSER_INFO, body = "", now = Date.now(), random = () => randomInt(0x1000000) / 0x1000000 } = {}) {
+export function generateABogus(query: string, { userAgent = WEB_UA, browserInfo = BROWSER_INFO, body = "", now = Date.now(), random = () => randomInt(0x1000000) / 0x1000000 } = {}) {
   if (!Number.isSafeInteger(now) || now < EPOCH) throw new Error("抖音签名时间必须为有效毫秒时间戳")
   const slots = Buffer.alloc(86)
-  const write = (offset, value, width) => slots.writeUIntLE(value, offset, width)
+  const write = (offset: number, value: number, width: number) => slots.writeUIntLE(value, offset, width)
   slots[24] = 41
   slots[26] = Math.floor((now - EPOCH) / 1209600000) & 255
   slots[27] = 6
@@ -80,13 +81,13 @@ export function generateABogus(query, { userAgent = WEB_UA, browserInfo = BROWSE
     [sm3(sm3(platformBytes(`${query}dhzx`))), [48, 49, 51], [9, 18], [3, 11, 12]],
     [sm3(sm3(platformBytes(`${body}dhzx`))), [52, 53, 55], [10, 19], [4, 8, 9]],
     [sm3(Buffer.from(encode(sealPlatformBytes(Buffer.from(userAgent.trim(), "latin1"), [0, 1, 14]), UA_ALPHABET))), [56, 57, 59], [11, 21], [5, 12, 13]],
-  ]
+  ] as const
   for (const [digest, offsets, indices, [start, sentinel, fallback]] of bindings) {
-    slots[offsets[0]] = digest[indices[0]]
-    slots[offsets[1]] = digest[indices[1]]
+    slots[offsets[0]] = digest[indices[0]]!
+    slots[offsets[1]] = digest[indices[1]]!
     slots[offsets[2]] = digest.subarray(start).find(byte => byte !== sentinel) ?? fallback
   }
-  const carrier = (left, right, low, high) => {
+  const carrier = (left: number, right: number, low?: number, high?: number) => {
     const noise = Math.floor(random() * 65535)
     const a = low ?? (noise & 255)
     const b = high ?? (noise >>> 8)
@@ -94,7 +95,7 @@ export function generateABogus(query, { userAgent = WEB_UA, browserInfo = BROWSE
   }
   const probe = Math.floor(random() * 240)
   const version = Buffer.concat([carrier(1, 0), carrier(1, 0, probe > 109 ? probe + probe % 2 + 1 : probe, Math.floor(random() * 255) & 0x4d | 0xb2)])
-  const fields = Buffer.from(SLOT_ORDER.map(offset => slots[offset]))
+  const fields = Buffer.from(SLOT_ORDER.map(offset => slots[offset]!))
   const check = [...version, ...fields].reduce((sum, byte) => sum ^ byte, 0)
   const payload = Buffer.concat([fields, geometry, tail, Buffer.from([check])])
   const expanded = []
@@ -104,8 +105,8 @@ export function generateABogus(query, { userAgent = WEB_UA, browserInfo = BROWSE
     const noise = Math.floor(random() * 1000) & 255
     let saved = 0
     for (let index = 0; index < 3; index++) {
-      expanded.push(noise & NOISE_MASKS[index] | group[index] & (255 ^ NOISE_MASKS[index]))
-      saved |= group[index] & NOISE_MASKS[index]
+      expanded.push(noise & NOISE_MASKS[index]! | group[index]! & (255 ^ NOISE_MASKS[index]!))
+      saved |= group[index]! & NOISE_MASKS[index]!
     }
     expanded.push(saved)
   }

@@ -1,11 +1,17 @@
+export type DouyinFetch = (input: string, init?: RequestInit) => Promise<Response>
+
+export interface RequestOptions {
+  fetch?: DouyinFetch
+  timeoutMs?: number
+}
+
 export class DouyinError extends Error {
-  constructor(code, message, options) {
+  constructor(readonly code: string, message: string, options?: ErrorOptions) {
     super(message, options)
-    this.code = code
   }
 }
 
-export async function requestText(fetchImpl, url, options = {}, { timeoutMs = 15000, maxBytes = 4 * 1024 * 1024, headersOnly = false } = {}) {
+export async function requestText(fetchImpl: DouyinFetch, url: string, options: RequestInit = {}, { timeoutMs = 15000, maxBytes = 4 * 1024 * 1024, headersOnly = false } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -15,7 +21,7 @@ export async function requestText(fetchImpl, url, options = {}, { timeoutMs = 15
       return { response, text: "" }
     }
     if (Number(response.headers.get("content-length")) > maxBytes) throw new DouyinError("response_too_large", "抖音响应超过大小限制")
-    const chunks = []
+    const chunks: Buffer[] = []
     let length = 0
     if (response.body) {
       for await (const chunk of response.body) {

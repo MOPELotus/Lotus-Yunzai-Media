@@ -5,7 +5,7 @@ import { PermissionService } from "../../core/permissions/service.js"
 import { renderTemplate, renderStatusCard } from "../../core/render/service.js"
 import { sendMediaFile, mediaFailureMessage } from "../media/files.js"
 import { buildMediaMessageText, articlePages, isMediaCommandText } from "../media/message.js"
-import { DouyinService, normalizeDouyinDownloadConfig } from "./service.js"
+import { DouyinService, normalizeDouyinDownloadConfig } from "./service.ts"
 
 const downloadCommand = /^#抖音(?:下载|下视频)\s+([\s\S]+)$/u
 const shareHost = /(?:douyin|iesdouyin)\.com/iu

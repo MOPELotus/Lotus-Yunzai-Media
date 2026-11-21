@@ -3,7 +3,7 @@ import { loadGlobalConfig } from "../../core/config/global.js"
 import { PermissionService } from "../../core/permissions/service.js"
 import { renderStatusCard } from "../../core/render/service.js"
 import { TuneWeaveService } from "../tuneweave/service.js"
-import { ToolInstallerService } from "./installer.js"
+import { ToolInstallerService } from "./installer.ts"
 
 const command = "#初始化环境"
 
@@ -20,9 +20,9 @@ export function createMediaEnvironment({ signal }: { readonly signal?: AbortSign
     }
     if (signal?.aborted) return []
     const ready = await new ToolInstallerService({ config: config.tools }).ensureAll()
-    const items = ready.items.map(item => ({
+    const items = ready.items.map<{ label: string; value: string }>(item => ({
       label: item.name,
-      value: item.ok && "status" in item ? item.status || "可用" : "reason" in item ? item.reason || "检查失败" : "检查失败",
+      value: item.ok ? item.status : item.reason || "检查失败",
     }))
     if (signal?.aborted) return []
     try {

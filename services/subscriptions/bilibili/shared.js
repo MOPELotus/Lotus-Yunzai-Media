@@ -6,11 +6,17 @@ const platform = "bilibili"
 const accountId = /^[1-9]\d{0,19}$/u
 const fallbackErrors = new Set(["capability_not_supported", "authentication_required", "tuneweave_unavailable", "HTTP 404", "HTTP 502", "HTTP 503", "HTTP 504"])
 
+function authenticated(profile, alias) {
+  return profile?.platform === platform && profile.account === alias && profile.authenticated === true &&
+    typeof profile.user_id === "string" && accountId.test(profile.user_id)
+}
+
 export function biliSharedSession({ enabled = async () => true, createService = async () => {
   const { tuneweave } = await loadGlobalConfig()
   return new BilibiliService({ tuneweaveConfig: tuneweave })
 } } = {}) {
   let known
+  let latestRefresh
 
   async function capable(service, signal) {
     signal?.throwIfAborted()
@@ -46,6 +52,31 @@ export function biliSharedSession({ enabled = async () => true, createService = 
     return { service, alias }
   }
 
+  async function ensureCurrent(service, alias, signal) {
+    signal?.throwIfAborted()
+    if (!await enabled() || (await service.loadAccount())?.tuneweave_account !== alias) {
+      throw new Error("B 站共享会话配置已变更，请稍后重试。")
+    }
+    signal?.throwIfAborted()
+  }
+
+  async function refresh(service, alias, signal) {
+    await ensureCurrent(service, alias, signal)
+    const endpoint = service.tuneweave.config.api_url
+    if (latestRefresh?.endpoint === endpoint && latestRefresh.alias === alias && Date.now() < latestRefresh.until) return false
+    latestRefresh = { endpoint, alias, until: Date.now() + 60_000 }
+    const response = await service.tuneweave.request("/v1/auth/session/refresh", {
+      method: "POST", body: { platform, account: alias, credential_mode: "server" },
+      signal, redirect: "error", accountSelection: { platform, alias },
+    })
+    await ensureCurrent(service, alias, signal)
+    const { data, accountSelected } = response
+    if (!accountSelected || data?.platform !== platform || data?.account !== alias) {
+      throw new Error("TuneWeave 未确认 B 站共享会话的刷新结果。")
+    }
+    return authenticated(data, alias)
+  }
+
   return {
     async available(signal) { return Boolean(await select(signal, false)) },
     async status(signal) {
@@ -61,7 +92,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
         signal?.throwIfAborted()
         if (!accountSelected || data?.platform !== platform || data?.account !== alias) return "unknown"
         if (data.authenticated === false) return "expired"
-        return data.authenticated === true && typeof data.user_id === "string" && accountId.test(data.user_id) ? "active" : "unknown"
+        return authenticated(data, alias) ? "active" : "unknown"
       } catch (error) {
         signal?.throwIfAborted()
         return error.code === "authentication_required" ? "expired" : "unknown"
@@ -72,12 +103,19 @@ export function biliSharedSession({ enabled = async () => true, createService = 
       const selected = await select(signal, true)
       if (!selected) return
       const { service, alias } = selected
+      const read = () => service.tuneweave.request(
+        "/v1/bilibili/users/" + uid + "/dynamics?" + new URLSearchParams({ account: alias }), {
+          signal, redirect: "error", accountSelection: { platform, alias },
+        })
       let response
       try {
-        response = await service.tuneweave.request(
-          "/v1/bilibili/users/" + uid + "/dynamics?" + new URLSearchParams({ account: alias }), {
-            signal, redirect: "error", accountSelection: { platform, alias },
-          })
+        try {
+          response = await read()
+        } catch (error) {
+          if (error.code !== "authentication_required") throw error
+          if (!await refresh(service, alias, signal)) return
+          response = await read()
+        }
       } catch (error) {
         signal?.throwIfAborted()
         if (fallbackErrors.has(error.code)) return
@@ -88,9 +126,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
       if (!accountSelected || data?.authenticated !== true || !Array.isArray(data.items)) {
         throw new Error("TuneWeave 未确认当前 B 站共享会话。")
       }
-      if (!await enabled() || (await service.loadAccount())?.tuneweave_account !== alias) {
-        throw new Error("B 站共享会话配置已变更，请稍后重试。")
-      }
+      await ensureCurrent(service, alias, signal)
       return data
     },
   }

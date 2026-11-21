@@ -20,10 +20,10 @@ const rawPost = {
 test("动态先用原会话，失效才共用视频账号，限制响应所属别名与回退", async () => {
   const folder = await mkdtemp(join(tmpdir(), "lotus-bili-shared-"))
   let registered = true
-  let feedError, outputAlias = alias, onFeed
+  let feedError, outputAlias = alias, onFeed, renew = false
   let enabled = true, directExpired = false
   let count = []
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const u = new URL(request.url)
     expect(request.headers.has("cookie")).toBe(false)
     expect(request.headers.has("authorization")).toBe(false)
@@ -31,10 +31,18 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     count.push(u.pathname)
     if (u.pathname === "/v1/capabilities") return Response.json({ ok: true,
       data: [{ platform: "bilibili", registered, capabilities: registered ? ["bilibili_space_feed"] : [] }] })
+    const profile = { ok: true, data: { platform: "bilibili", account: alias, authenticated: true, user_id: "90" },
+      meta: { platform: "bilibili", account: alias } }
+    if (u.pathname === "/v1/auth/session/refresh") {
+      expect(request.method).toBe("POST")
+      expect(await request.json()).toEqual({ platform: "bilibili", account: alias, credential_mode: "server" })
+      if (!renew) return Response.json({ ok: false, error: { code: "authentication_required" } }, { status: 401 })
+      feedError = undefined
+      return Response.json(profile)
+    }
     expect(u.searchParams.get("account")).toBe(alias)
     expect(request.method).toBe("GET")
-    if (u.pathname === "/v1/auth/session") return Response.json({ ok: true,
-      data: { platform: "bilibili", account: alias, authenticated: true, user_id: "90" }, meta: { platform: "bilibili", account: alias } })
+    if (u.pathname === "/v1/auth/session") return Response.json(profile)
     expect(u.pathname).toBe("/v1/bilibili/users/12/dynamics")
     if (feedError) return Response.json({ ok: false, error: { code: feedError } }, { status: 422 })
     onFeed?.()
@@ -67,6 +75,9 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     feedError = "authentication_required"
     count = []
     expect(await provider(shared).fetchPosts("12")).toEqual([])
+    expect(count).toEqual(["local", "/v1/bilibili/users/12/dynamics", "/v1/auth/session/refresh", "public"])
+    count = []
+    expect(await provider(shared).fetchPosts("12")).toEqual([])
     expect(count).toEqual(["local", "/v1/bilibili/users/12/dynamics", "public"])
     feedError = "upstream_error"
     count = []
@@ -83,6 +94,11 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     expect(count).toEqual(["local", "public"])
     enabled = true
     onFeed = undefined
+    renew = true
+    feedError = "authentication_required"
+    count = []
+    expect((await provider(createShared()).fetchPosts("12")).map(post => post.id)).toEqual(["117"])
+    expect(count).toEqual(["local", "/v1/capabilities", "/v1/bilibili/users/12/dynamics", "/v1/auth/session/refresh", "/v1/bilibili/users/12/dynamics"])
     registered = false
     count = []
     expect(await provider(createShared()).fetchPosts("12")).toEqual([])

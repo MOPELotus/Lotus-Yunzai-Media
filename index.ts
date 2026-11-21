@@ -6,11 +6,11 @@ import { createMusicCommands } from "./services/music/command.ts"
 import { createMcWikiCommand } from "./services/mcwiki/command.ts"
 import { createPartnerSchedule } from "./services/music/partner-schedule.ts"
 import { createSubscriptionModule } from "./services/subscriptions/module.ts"
-import { resumeTuneWeaveOnStart } from "./services/tuneweave/startup.ts"
+import { startMediaMaintenance } from "./services/tuneweave/startup.ts"
 import { createMediaEnvironment } from "./services/tools/command.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
-  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof resumeTuneWeaveOnStart>[0]
+  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0]
 
 type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<void> }
 
@@ -18,7 +18,7 @@ export default { commands: {} } satisfies Pick<CommandModule, "commands">
 
 export async function createModule(services: MediaServices): Promise<MediaCommandModule> {
   const subscriptions = await createSubscriptionModule(services)
-  const stopTuneWeave = resumeTuneWeaveOnStart(services)
+  const stopMaintenance = startMediaMaintenance(services)
   const music = createMusicCommands(services)
   const stopPartner = await createPartnerSchedule(services, { execute:music.executePartner, render:music.renderPartner })
   const mcwiki = createMcWikiCommand({ signal: services.signal })
@@ -29,7 +29,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   return {
     ...subscriptions,
     async dispose() {
-      await Promise.all([subscriptions.dispose(), stopPartner?.(), stopTuneWeave?.(), douyin.dispose(), biliVideo.dispose(), music.dispose()])
+      await Promise.all([subscriptions.dispose(), stopPartner?.(), stopMaintenance?.(), douyin.dispose(), biliVideo.dispose(), music.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {

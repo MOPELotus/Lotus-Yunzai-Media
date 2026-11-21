@@ -29,6 +29,7 @@ export interface ToolsConfig {
 }
 
 interface ProgressOptions {
+  signal?: AbortSignal
   onProgress?: ProgressHandler
 }
 
@@ -44,6 +45,7 @@ interface InstallerOptions extends EnsureOptions {
 }
 
 interface ProcessOptions {
+  signal?: AbortSignal
   timeoutMs?: number
   cwd?: string
 }
@@ -83,6 +85,21 @@ type ToolResult = ToolSuccess | { name: ToolName; ok: false; reason: string }
 
 const toolInstallations = new Map<string, Promise<ToolSuccess>>()
 
+async function awaitExisting(pending: Promise<ToolSuccess>, signal?: AbortSignal) {
+  if (!signal) return pending
+  signal.throwIfAborted()
+  const canceled = Promise.withResolvers<never>()
+  const onAbort = () => canceled.reject(signal.reason)
+  signal.addEventListener("abort", onAbort, { once: true })
+  try { return await Promise.race([pending, canceled.promise]) }
+  finally { signal.removeEventListener("abort", onAbort) }
+}
+
+function deadline(timeoutMs: number, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(timeoutMs)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
+}
+
 export class ToolInstallerService {
   readonly config?: ToolsConfig
   readonly fetch: typeof fetch
@@ -107,13 +124,16 @@ export class ToolInstallerService {
   }
 
   async ensureAll(options: EnsureOptions = {}) {
+    const { signal } = options
+    signal?.throwIfAborted()
     const onProgress = options.onProgress || this.onProgress
     const config = normalizeToolsConfig(options.config || await this.getConfig())
 
     const items: ToolResult[] = []
     for (const name of TOOL_NAMES) {
       await emitProgress(onProgress, `工具链：检查 ${name}`)
-      items.push(await this.ensureTool(name, config, { onProgress }).catch(async (error: unknown): Promise<ToolResult> => {
+      items.push(await this.ensureTool(name, config, { onProgress, signal }).catch(async (error: unknown): Promise<ToolResult> => {
+        signal?.throwIfAborted()
         const reason = errorMessage(error)
         await emitProgress(onProgress, `工具链：${name} 失败：${reason}`)
         return {
@@ -134,16 +154,19 @@ export class ToolInstallerService {
 
   async ensureTool(name: string, config: ToolsConfig | null = null, options: ProgressOptions = {}) {
     if (name !== "ffmpeg") throw new Error(`unknown tool: ${name}`)
+    options.signal?.throwIfAborted()
     const normalized = normalizeToolsConfig(config || await this.getConfig())
     const key = `${resolveMaybeData(normalized.dir)}:${resolveMaybeData(normalized.bin_dir)}:${name}`
     const active = toolInstallations.get(key)
-    if (active) return active
+    if (active) return awaitExisting(active, options.signal)
     const pending = this.installTool(name, normalized, options)
     toolInstallations.set(key, pending)
     try { return await pending } finally { toolInstallations.delete(key) }
   }
 
   async installTool(name: ToolName, normalized: ReturnType<typeof normalizeToolsConfig>, options: ProgressOptions = {}): Promise<ToolSuccess> {
+    const { signal } = options
+    signal?.throwIfAborted()
     const onProgress = options.onProgress || this.onProgress
     const tool = normalized[name]
     if (!tool) throw new Error(`unknown tool: ${name}`)
@@ -158,16 +181,16 @@ export class ToolInstallerService {
         const probe = await findCommandExecutable("ffprobe", [binDir], this.platform)
         if (!probe) throw new Error("外部 FFmpeg 缺少 ffprobe，请由部署者修复")
         try {
-          await runSpawn(this.spawn, existing, ["-version"], { timeoutMs: 15000 })
-          await runSpawn(this.spawn, probe, ["-version"], { timeoutMs: 15000 })
-        } catch { throw new Error("外部 FFmpeg 环境异常，请由部署者修复") }
+          await runSpawn(this.spawn, existing, ["-version"], { timeoutMs: 15000, signal })
+          await runSpawn(this.spawn, probe, ["-version"], { timeoutMs: 15000, signal })
+        } catch { signal?.throwIfAborted(); throw new Error("外部 FFmpeg 环境异常，请由部署者修复") }
         return { name, ok: true, status: "ready", path: existing, external: true }
       }
       health = await inspectToolInstall(name, existing, binDir, toolsDir, this.platform)
       if (health.ok) {
         await ensureExecutablePermissions(name, existing, binDir, this.platform)
-        try { await runSpawn(this.spawn, existing, ["-version"], { timeoutMs: 15000 }); await runSpawn(this.spawn, path.join(binDir, commandFileName("ffprobe", this.platform)), ["-version"], { timeoutMs: 15000 }) }
-        catch { health = { ok: false, reason: "工具无法正常执行" } }
+        try { await runSpawn(this.spawn, existing, ["-version"], { timeoutMs: 15000, signal }); await runSpawn(this.spawn, path.join(binDir, commandFileName("ffprobe", this.platform)), ["-version"], { timeoutMs: 15000, signal }) }
+        catch { signal?.throwIfAborted(); health = { ok: false, reason: "工具无法正常执行" } }
       }
       if (!health.ok) await emitProgress(onProgress, `工具链：${name} 需要修复：${health.reason}`)
     }
@@ -183,13 +206,14 @@ export class ToolInstallerService {
       if (error instanceof SyntaxError) receiptInvalid = true
       else if (!isMissingFile(error)) throw error
     }
-    const localFiles = health?.ok ? await fingerprintPayload(binDir, this.platform) : null
+    const localFiles = health?.ok ? await fingerprintPayload(binDir, this.platform, signal) : null
     const localVerified = health?.ok && !receiptInvalid && (!receipt || receipt.repo === tool.repo && JSON.stringify(localFiles) === JSON.stringify(receipt.files))
     try {
+      signal?.throwIfAborted()
       if (typeof this.fetch !== "function") throw new Error("fetch is unavailable")
       if (name === "ffmpeg") await removeSharedFfmpegArtifacts(toolsDir)
       await emitProgress(onProgress, `工具链：查询 ${tool.repo} 最新版本`)
-      const release = await this.fetchLatestRelease(tool.repo, normalized.github_api, null)
+      const release = await this.fetchLatestRelease(tool.repo, normalized.github_api, null, signal)
       const asset = pickReleaseAsset(name, release.assets, {
         platform: this.platform,
         arch: this.arch,
@@ -197,7 +221,7 @@ export class ToolInstallerService {
       })
       if (!asset) throw new Error(`no release asset matched ${name} ${this.platform}/${this.arch}`)
       if (health?.ok && receipt?.repo === tool.repo && receipt.assetId === asset.id && receipt.updatedAt === asset.updated_at && receipt.digest === asset.digest) {
-        const files = await fingerprintPayload(binDir, this.platform)
+        const files = await fingerprintPayload(binDir, this.platform, signal)
         if (JSON.stringify(files) === JSON.stringify(receipt.files)) return { name, ok: true, status: "ready", path: existing, asset: asset.name }
       }
 
@@ -210,23 +234,26 @@ export class ToolInstallerService {
       const attempts = Math.max(1, Number(normalized.download_retries || DEFAULT_INSTALL_ATTEMPTS))
       let lastError: unknown
       for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        signal?.throwIfAborted()
         try {
           await fs.rm(extractDir, { recursive: true, force: true })
           await fs.mkdir(extractDir, { recursive: true })
           await fs.rm(archive, { force: true }).catch(() => null)
 
           await emitProgress(onProgress, `工具链：下载 ${asset.name}${attempt > 1 ? `（重试 ${attempt}/${attempts}）` : ""}`)
-          await this.downloadAsset(asset.browser_download_url, archive, { timeoutMs: normalized.timeout_ms })
+          await this.downloadAsset(asset.browser_download_url, archive, { timeoutMs: normalized.timeout_ms, signal })
           if (!asset.digest || !/^sha256:[a-f0-9]{64}$/i.test(asset.digest)) throw new Error("发布包缺少 SHA-256，保留原工具")
-          if (await sha256File(archive) !== asset.digest.slice(7).toLowerCase()) throw new Error("FFmpeg 发布包 SHA-256 不匹配")
+          if (await sha256File(archive, signal) !== asset.digest.slice(7).toLowerCase()) throw new Error("FFmpeg 发布包 SHA-256 不匹配")
           await emitProgress(onProgress, `工具链：准备 ${asset.name}`)
-          await extractArchive(this.spawn, archive, extractDir, { timeoutMs: normalized.timeout_ms })
+          await extractArchive(this.spawn, archive, extractDir, { timeoutMs: normalized.timeout_ms, signal })
 
           const executable = await findExtractedExecutable(extractDir, tool.command, this.platform)
           if (!executable) throw new Error(`${tool.command} executable not found in ${asset.name}`)
-          await runSpawn(this.spawn, executable, ["-version"], { timeoutMs: 15000 })
-          await runSpawn(this.spawn, path.join(path.dirname(executable), commandFileName("ffprobe", this.platform)), ["-version"], { timeoutMs: 15000 })
+          await runSpawn(this.spawn, executable, ["-version"], { timeoutMs: 15000, signal })
+          await runSpawn(this.spawn, path.join(path.dirname(executable), commandFileName("ffprobe", this.platform)), ["-version"], { timeoutMs: 15000, signal })
 
+          // Finish publishing the checked pair and receipt as one operation once replacement starts.
+          signal?.throwIfAborted()
           const target = await copyToolPayload(name, executable, binDir, tool.command, this.platform)
           const receiptTemp = `${receiptFile}.${randomUUID()}.tmp`
           try {
@@ -247,6 +274,7 @@ export class ToolInstallerService {
         } catch (error) {
           lastError = error
           await cleanupBrokenInstallArtifacts(archive, extractDir)
+          signal?.throwIfAborted()
           if (attempt < attempts) {
             await emitProgress(onProgress, `工具链：${name} 安装包异常，已清理并准备重下：${errorMessage(error)}`)
           }
@@ -254,6 +282,7 @@ export class ToolInstallerService {
       }
       throw new Error(`${lastError ? errorMessage(lastError) : `${tool.command} install failed`}；已自动重试 ${attempts} 次`)
     } catch (error) {
+      signal?.throwIfAborted()
       // Only retain the exact healthy payload checked before attempting update.
       // Missing files, receipt mismatches and a failed rollback remain errors.
       if (localVerified && JSON.stringify(await fingerprintPayload(binDir, this.platform)) === JSON.stringify(localFiles)) {
@@ -263,10 +292,10 @@ export class ToolInstallerService {
     }
   }
 
-  async fetchLatestRelease(repo: string, api = "https://api.github.com", tag: string | null = null) {
+  async fetchLatestRelease(repo: string, api = "https://api.github.com", tag: string | null = null, signal?: AbortSignal) {
     const base = String(api || "https://api.github.com").replace(/\/+$/, "")
     const response = await this.fetch(`${base}/repos/${repo}/releases/${tag ? `tags/${encodeURIComponent(tag)}` : "latest"}`, {
-      signal: AbortSignal.timeout(30000),
+      signal: deadline(30000, signal),
       headers: {
         Accept: "application/vnd.github+json",
         "User-Agent": "Lotus-Yunzai",
@@ -278,10 +307,11 @@ export class ToolInstallerService {
     return { assets: assets.filter(isReleaseAsset) }
   }
 
-  async downloadAsset(url: string, target: string, { timeoutMs = 300000 }: ProcessOptions = {}) {
+  async downloadAsset(url: string, target: string, { timeoutMs = 300000, signal }: ProcessOptions = {}) {
+    signal?.throwIfAborted()
     const temp = `${target}.part-${process.pid}-${Date.now()}`
     const response = await this.fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: deadline(timeoutMs, signal),
       headers: {
         "User-Agent": "Lotus-Yunzai",
       },
@@ -291,10 +321,11 @@ export class ToolInstallerService {
     try {
       if (response.body && typeof response.body.getReader === "function") {
         // Bun and Node declare the same web stream with different convenience methods.
-        await pipeline(Readable.fromWeb(response.body as unknown as ReadableStream<Uint8Array>), fsSync.createWriteStream(temp))
+        await pipeline(Readable.fromWeb(response.body as unknown as ReadableStream<Uint8Array>), fsSync.createWriteStream(temp), { signal })
       } else {
         await fs.writeFile(temp, Buffer.from(await response.arrayBuffer()))
       }
+      signal?.throwIfAborted()
       await fs.rm(target, { force: true }).catch(() => null)
       await fs.rename(temp, target)
       return target
@@ -419,6 +450,8 @@ async function findExtractedExecutable(root: string, command: string, platform: 
 }
 
 function runSpawn(spawnImpl: typeof spawn, command: string, args: string[] = [], options: ProcessOptions = {}) {
+  const { signal } = options
+  signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
     const child = spawnImpl(command, args, {
       cwd: options.cwd || rootPath,
@@ -432,15 +465,19 @@ function runSpawn(spawnImpl: typeof spawn, command: string, args: string[] = [],
       child.kill("SIGTERM")
     }, Number(options.timeoutMs || 300000))
 
+    const onAbort = () => { child.kill("SIGKILL") }
+    signal?.addEventListener("abort", onAbort, { once: true })
+    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort) }
     child.stdout?.on("data", chunk => {
       stdout += chunk.toString()
     })
     child.stderr?.on("data", chunk => {
       stderr += chunk.toString()
     })
-    child.on("error", error => { clearTimeout(timer); reject(error) })
+    child.on("error", error => { cleanup(); reject(error) })
     child.on("close", code => {
-      clearTimeout(timer)
+      cleanup()
+      if (signal?.aborted) { reject(signal.reason); return }
       if (code === 0 && !timedOut) {
         resolve({ ok: true, code, stdout, stderr })
         return
@@ -528,15 +565,15 @@ async function copyToolPayload(name: ToolName, executable: string, binDir: strin
   return target
 }
 
-async function sha256File(file: string) {
+async function sha256File(file: string, signal?: AbortSignal) {
   const hash = createHash("sha256")
-  for await (const chunk of fsSync.createReadStream(file)) hash.update(chunk)
+  for await (const chunk of fsSync.createReadStream(file, { signal })) hash.update(chunk)
   return hash.digest("hex")
 }
 
-async function fingerprintPayload(binDir: string, platform: string): Promise<PayloadFingerprint> {
+async function fingerprintPayload(binDir: string, platform: string, signal?: AbortSignal): Promise<PayloadFingerprint> {
   const entries = (await fs.readdir(binDir, { withFileTypes: true })).filter(entry => entry.isFile() && shouldCopyFfmpegPayloadFile(entry.name, platform)).sort((a, b) => a.name.localeCompare(b.name))
-  return Object.fromEntries(await Promise.all(entries.map(async entry => [entry.name, await sha256File(path.join(binDir, entry.name))])))
+  return Object.fromEntries(await Promise.all(entries.map(async entry => [entry.name, await sha256File(path.join(binDir, entry.name), signal)])))
 }
 
 async function ensureExecutablePermissions(name: ToolName, executable: string, binDir: string, platform: string = process.platform) {

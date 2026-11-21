@@ -134,6 +134,7 @@ interface ProcessState {
 type Notify = (text: string) => void | Promise<void>
 
 interface UpdateOptions {
+  signal?: AbortSignal
   notify?: Notify
   status?: TuneWeaveStatus
   manifest?: TuneWeaveManifest
@@ -237,12 +238,17 @@ export class TuneWeaveService {
     return status
   }
 
-  async publicDownload(url: string, timeoutMs = 60000) {
-    try { return await this.fetch(url, { signal: AbortSignal.timeout(timeoutMs) }) } catch {
+  async publicDownload(url: string, timeoutMs = 60000, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const deadline = AbortSignal.timeout(timeoutMs)
+    try {
+      return await this.fetch(url, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline })
+    } catch {
+      signal?.throwIfAborted()
       // Public release files only. curl honors deployment proxy settings on
       // Node versions where fetch does not; account requests never use this.
       const { stdout } = await runFile("curl", ["--fail", "--location", "--silent", "--show-error", "--retry", "3", "--retry-all-errors", "--connect-timeout", "15", "--max-time", String(Math.ceil(timeoutMs / 1000)), url], {
-        encoding: "buffer", maxBuffer: 128 * 1024 * 1024, windowsHide: true,
+        encoding: "buffer", maxBuffer: 128 * 1024 * 1024, windowsHide: true, signal,
       }).catch(() => { throw new Error("TuneWeave 官方发布文件下载失败，请检查网络/代理；网络受限时需要可用的 curl。") })
       return new Response(stdout)
     }
@@ -265,32 +271,36 @@ export class TuneWeaveService {
     return url
   }
 
-  async initialize({ onProgress = async () => {}, platform = "bilibili" }: { onProgress?: Notify; platform?: TuneWeavePlatform } = {}) {
+  async initialize({ onProgress = async () => {}, platform = "bilibili", signal }: {
+    onProgress?: Notify; platform?: TuneWeavePlatform; signal?: AbortSignal
+  } = {}) {
     return this.lifecycle(async () => {
-      const status = await this.status(platform)
+      signal?.throwIfAborted()
+      const status = await this.status(platform, signal, signal ? "error" : undefined)
       try { this.localUrl() } catch {
         if (!status.ok || status.requiresUpdate) throw new Error(status.message)
         return { ...status, already: true }
       }
       try {
-        const manifest = await this.releaseManifest()
+        const manifest = await this.releaseManifest(signal)
         if (status.reachable) {
           const comparison = compareTuneWeaveVersions(status.version, manifest.version)
-          const intact = comparison > 0 || comparison === 0 && await this.verifyInstalled(manifest)
-          if (comparison < 0 || !intact) return await this.updateInstalled({ notify: onProgress, status, manifest, platform, repair: !intact && comparison === 0 })
+          const intact = comparison > 0 || comparison === 0 && await this.verifyInstalled(manifest, signal)
+          if (comparison < 0 || !intact) return await this.updateInstalled({ notify: onProgress, status, manifest, platform, signal, repair: !intact && comparison === 0 })
           if (!status.ok) throw new Error(status.message)
           return { ...status, already: true }
         }
         this.localUrl()
-        if (!await this.verifyInstalled(manifest)) {
+        if (!await this.verifyInstalled(manifest, signal)) {
           await onProgress("正在下载 TuneWeave 官方发布文件并校验 SHA-256。")
-          const release = await this.downloadRelease(manifest)
+          const release = await this.downloadRelease(manifest, signal)
           let backup = null
           const previous = `${this.executable}.previous-${crypto.randomUUID()}`
           try {
+            signal?.throwIfAborted()
             try { await fs.rename(this.executable, previous); backup = previous } catch (error) { if (errorCode(error) !== "ENOENT") throw error }
             await fs.rename(release.file, this.executable)
-            const ready = await this.startInstalled(release.version, platform)
+            const ready = await this.startInstalled(release.version, platform, signal)
             if (backup) await fs.rm(backup, { force: true })
             return { ...ready, installed: true }
           } catch (error) {
@@ -302,45 +312,47 @@ export class TuneWeaveService {
           } finally { await fs.rm(release.file, { force: true }) }
         }
         await onProgress("正在启动本机 TuneWeave 服务。")
-        const ready = await this.startInstalled(undefined, platform)
-        if (compareTuneWeaveVersions(ready.version, manifest.version) < 0) return await this.updateInstalled({ notify: onProgress, status: ready, manifest, platform })
+        const ready = await this.startInstalled(undefined, platform, signal)
+        if (compareTuneWeaveVersions(ready.version, manifest.version) < 0) return await this.updateInstalled({ notify: onProgress, status: ready, manifest, platform, signal })
         return { ...ready, installed: false }
       } catch (error) {
         // Update/verification availability is separate from service readiness.
         // Never accept an unhealthy service or one below the required version.
-        const current = await this.status(platform)
+        signal?.throwIfAborted()
+        const current = await this.status(platform, signal, signal ? "error" : undefined)
         if (!current.ok || compareTuneWeaveVersions(current.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw error
         return { ...current, already: true, updateDeferred: true, message: "现有 TuneWeave 服务可用，联网更新或校验暂未完成，稍后重试。" }
       }
     })
   }
 
-  async releaseManifest() {
-    const response = await this.publicDownload(TUNEWEAVE_MANIFEST_URL)
+  async releaseManifest(signal?: AbortSignal) {
+    const response = await this.publicDownload(TUNEWEAVE_MANIFEST_URL, undefined, signal)
     if (!response.ok) throw new Error(`TuneWeave 版本清单下载失败：HTTP ${response.status}`)
     const manifest: TuneWeaveManifest = await response.json()
     if (compareTuneWeaveVersions(manifest.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw new Error(`发布包 ${manifest.version} 低于要求 ${TUNEWEAVE_REQUIRED_VERSION}`)
     return manifest
   }
 
-  async releaseChecksum(manifest: TuneWeaveManifest) {
+  async releaseChecksum(manifest: TuneWeaveManifest, signal?: AbortSignal) {
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
-    const response = await this.publicDownload(artifact.verification.checksum_url)
+    const response = await this.publicDownload(artifact.verification.checksum_url, undefined, signal)
     if (!response.ok) throw new Error("TuneWeave 校验文件下载失败")
     const checksum = (await response.text()).trim().split(/\s+/)[0]?.toLowerCase() || ""
     if (!/^[a-f0-9]{64}$/.test(checksum)) throw new Error("TuneWeave 校验文件无效")
     return checksum
   }
 
-  async verifyInstalled(manifest: TuneWeaveManifest) {
+  async verifyInstalled(manifest: TuneWeaveManifest, signal?: AbortSignal) {
     try { await fs.access(this.executable) } catch (error) { if (errorCode(error) === "ENOENT") return false; throw error }
-    const expected = await this.releaseChecksum(manifest), hash = crypto.createHash("sha256")
-    for await (const chunk of createReadStream(this.executable)) hash.update(chunk)
+    const expected = await this.releaseChecksum(manifest, signal), hash = crypto.createHash("sha256")
+    for await (const chunk of createReadStream(this.executable, { signal })) hash.update(chunk)
     return hash.digest("hex") === expected
   }
 
-  async downloadRelease(manifest?: TuneWeaveManifest): Promise<TuneWeaveRelease> {
-    manifest ||= await this.releaseManifest()
+  async downloadRelease(manifest?: TuneWeaveManifest, signal?: AbortSignal): Promise<TuneWeaveRelease> {
+    signal?.throwIfAborted()
+    manifest ||= await this.releaseManifest(signal)
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
     const releasePath = `/MOPELotus/TuneWeave/releases/download/v${String(manifest.version).replace(/^v/, "")}/`
     if (![artifact.download_url, artifact.verification.checksum_url].every(value => new URL(value).pathname.startsWith(releasePath))) throw new Error("TuneWeave 发布清单版本与下载地址不一致")
@@ -348,8 +360,8 @@ export class TuneWeaveService {
     const file = `${this.executable}.download-${crypto.randomUUID()}`
     try {
       const [download, checksumResponse] = await Promise.all([
-        this.publicDownload(artifact.download_url, 180000),
-        this.publicDownload(artifact.verification.checksum_url),
+        this.publicDownload(artifact.download_url, 180000, signal),
+        this.publicDownload(artifact.verification.checksum_url, undefined, signal),
       ])
       if (!download.ok || !checksumResponse.ok || !download.body) throw new Error("TuneWeave 下载失败")
       const checksum = (await checksumResponse.text()).trim().split(/\s+/)[0]?.toLowerCase() || ""
@@ -358,7 +370,7 @@ export class TuneWeaveService {
       // Bun's Web Stream declaration adds helpers that Node's runtime bridge does not use.
       const stream = Readable.fromWeb(download.body as unknown as Parameters<typeof Readable.fromWeb>[0])
       stream.on("data", chunk => hash.update(chunk))
-      await pipeline(stream, createWriteStream(file, { mode: 0o700, flags: "wx" }))
+      await pipeline(stream, createWriteStream(file, { mode: 0o700, flags: "wx" }), { signal })
       if (hash.digest("hex") !== checksum) throw new Error("TuneWeave SHA-256 校验不匹配")
       await fs.chmod(file, 0o700)
       return { file, version: manifest.version }
@@ -443,8 +455,9 @@ export class TuneWeaveService {
     return this.lifecycle(() => this.updateInstalled({ notify }))
   }
 
-  async updateInstalled({ notify, status, manifest, repair = false, platform = "bilibili" }: UpdateOptions = {}) {
-    status ||= await this.status(platform)
+  async updateInstalled({ notify, status, manifest, repair = false, platform = "bilibili", signal }: UpdateOptions = {}) {
+    signal?.throwIfAborted()
+    status ||= await this.status(platform, signal, signal ? "error" : undefined)
     if (!status.reachable) return { ...status, skipped: true, reason: "not_running" }
     const targetVersion = manifest?.version || TUNEWEAVE_REQUIRED_VERSION
     if (!repair && compareTuneWeaveVersions(status.version, targetVersion) >= 0) return { ...status, skipped: true, reason: "up_to_date" }
@@ -459,15 +472,16 @@ export class TuneWeaveService {
     await send(`TuneWeave 当前 ${status.version}，正在${repair ? "修复" : "更新至"} ${targetVersion}；下载校验后自动重启服务。`)
     let release: TuneWeaveRelease | undefined, backup: string | null | undefined, replaced = false, stopped = false
     try {
-      release = await this.downloadRelease(manifest)
+      release = await this.downloadRelease(manifest, signal)
       if ((await this.managedProcess()).pid !== state.pid) throw new Error("下载期间 TuneWeave 进程已变化，取消更新")
+      signal?.throwIfAborted()
       try { await this.stopManaged(state.pid); stopped = true }
       catch (error) { stopped = !await processAlive(state.pid); throw error }
       backup = `${this.executable}.previous-${crypto.randomUUID()}`
       try { await fs.rename(this.executable, backup) } catch (error) { if (errorCode(error) === "ENOENT") backup = null; else throw error }
       try { await fs.rename(release.file, this.executable); replaced = true }
       catch (error) { if (backup) await fs.rename(backup, this.executable); backup = null; throw error }
-      const ready = await this.startInstalled(release.version, platform)
+      const ready = await this.startInstalled(release.version, platform, signal)
       if (backup) await fs.rm(backup, { force: true }); backup = null
       await send(`TuneWeave 已从 ${status.version} 更新至 ${ready.version}，服务已自动重启并通过健康与能力检查。`)
       return { ...ready, updated: true, previousVersion: status.version }

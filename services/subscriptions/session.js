@@ -212,12 +212,16 @@ function sessionCredentialKey(platform, entry) {
   return entry.source + ":" + createHash("sha256").update(values.join("\0")).digest("hex")
 }
 
-export async function readWithSubscriptionSession(transport, sessions, url, options, decode) {
+export async function readWithSubscriptionSession(transport, sessions, url, options, decode, beforeAnonymous) {
   const candidates = [...(await sessions?.candidates(url) ?? []), undefined]
   let retriedRenewal = false
   while (candidates.length) {
     const session = candidates.shift()
     options.signal?.throwIfAborted()
+    if (!session && beforeAnonymous) {
+      const shared = await beforeAnonymous(options.signal)
+      if (shared !== undefined) return shared
+    }
     const response = await transport(url, session ? { ...options, headers: sessions.headers(session, options.headers) } : options)
     try {
       const data = await decode(response)

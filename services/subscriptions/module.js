@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url"
 import { biliSubscriptionLogin } from "./bilibili/login.js"
 import { createBiliProvider } from "./bilibili/index.js"
+import { biliSharedSession } from "./bilibili/shared.js"
 import { weiboSubscriptionLogin } from "./weibo/login.js"
 import { createWeiboProvider } from "./weibo/index.js"
 import { createSubscriptionConfig, numericId } from "./config.js"
@@ -58,17 +59,19 @@ function display(provider,items,heading) {
   }).join("\n")
 }
 
-export async function createSubscriptionModule(services, { providers, directory=dataDirectory,
+export async function createSubscriptionModule(services, { providers, directory=dataDirectory, shared,
   getRedis=()=>globalThis.redis, render, now, renderHelp=renderSubscriptionHelp } = {}) {
   const weiboSession = subscriptionSession("weibo", directory, getRedis)
+  const config = createSubscriptionConfig(directory,services.lockFile)
+  shared ??= biliSharedSession({ enabled: async () => (await config.settings("bilibili")).sharedBiliLogin })
   providers ??= {
-    bilibili: createBiliProvider({ session: subscriptionSession("bilibili", directory, getRedis) }),
+    bilibili: createBiliProvider({ session: subscriptionSession("bilibili", directory, getRedis), shared }),
     weibo: createWeiboProvider({ session: weiboSession }),
   }
   const biliLogin = biliSubscriptionLogin({ getRedis, owner: isSubscriptionOwner, signal: services.signal,
-    directory, lockFile: services.lockFile })
+    directory, lockFile: services.lockFile, shared,
+    setShared: (enabled, signal) => config.editSettings("bilibili", () => ({ sharedBiliLogin: enabled }), signal) })
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
-  const config = createSubscriptionConfig(directory,services.lockFile)
   const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
   await dispatch.start()

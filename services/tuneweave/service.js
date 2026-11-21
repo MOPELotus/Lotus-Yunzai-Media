@@ -50,7 +50,9 @@ export class TuneWeaveService {
     const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, options))
       .catch(() => {
         signal?.throwIfAborted()
-        throw new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。")
+        const error = new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。")
+        error.code = "tuneweave_unavailable"
+        throw error
       })
     const updates = String(response.headers?.get("X-TuneWeave-Updated-Credential") || "").split(",").map(value => value.trim()).filter(Boolean).map(value => {
       const split = value.indexOf("="); return { platform: value.slice(0, split), credential: value.slice(split + 1) }

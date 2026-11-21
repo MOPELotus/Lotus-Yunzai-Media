@@ -20,7 +20,7 @@ async function read(path) {
   catch (error) { if (error.code !== "ENOENT") throw error }
 }
 
-async function writeDocument(path, document) {
+async function writeDocument(path, document, signal) {
   let mode = 0o600
   try {
     const current = await lstat(path)
@@ -38,6 +38,7 @@ async function writeDocument(path, document) {
     } finally {
       await file.close()
     }
+    signal?.throwIfAborted()
     await rename(temporary, path)
   } finally {
     await rm(temporary, { force: true })
@@ -133,6 +134,7 @@ export function settingsFor(value) {
     liveCooldown:number(value.liveAtAllCD,1800,1,86400),
     liveFailureNotice:flag(value.liveAtAllErrMsg,true),
     parseVideoLink:flag(value.parseVideoLink,true),
+    sharedBiliLogin:flag(value.sharedBiliLogin,true),
     log:flag(value.pushTaskLog,true),
   }
 }
@@ -177,12 +179,13 @@ export function createSubscriptionConfig(dataDirectory, lockFile) {
   return {
     async settings(id) { return settingsFor((await effective(id,"config")).data) },
     async routes(id) { return routesFrom((await effective(id,"push")).data) },
-    async editSettings(id, changes) {
+    async editSettings(id, changes, signal) {
       const path = file(id, "config.guoba.support")
       const folder = dirname(path)
       await mkdir(folder, { recursive: true, mode: 0o700 })
       const lock = await lockFile(join(folder, ".config-lock.sqlite"), "动态推送设置")
       try {
+        signal?.throwIfAborted()
         const { raw, data } = await effective(id, "config")
         const entries = Object.entries(changes(settingsFor(data)))
         if (!entries.length) return
@@ -190,7 +193,7 @@ export function createSubscriptionConfig(dataDirectory, lockFile) {
         const document = YAML.parseDocument(raw)
         if (!YAML.isMap(document.contents)) document.contents = document.createNode({})
         for (const [field, value] of entries) document.set(field, value)
-        await writeDocument(path, document)
+        await writeDocument(path, document, signal)
       } finally {
         lock.close()
       }

@@ -19,6 +19,7 @@ import { buildMediaMessageText, isMediaCommandText } from "../services/media/mes
 import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../services/media/files.js"
 import { ToolInstallerService } from "../services/tools/installer.js"
 import { createSubscriptionConfig } from "../services/subscriptions/config.js"
+import { biliSharedSession } from "../services/subscriptions/bilibili/shared.js"
 
 const searchCache = new Map()
 const legacySettings = createSubscriptionConfig(dataPath,lockFile)
@@ -137,12 +138,16 @@ export class BilibiliMedia extends BasePlugin {
 
     const service = await createService()
     try {
+      const shared = biliSharedSession({ createService: async () => service,
+        enabled: async () => (await legacySettings.settings("bilibili")).sharedBiliLogin })
+      const allowsSharing = await shared.available().catch(() => false)
       const qr = await service.createQrLogin()
       const image = await renderTemplate("qr-login", {
         title: "B站登录",
         subtitle: "Lotus-Yunzai · B 站",
         badge: "3 MIN",
-        notice: "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus-Yunzai 仅保存账号引用。",
+        notice: allowsSharing ? "使用 Bilibili App 扫码确认。登录可同时用于视频和未单独登录的动态订阅。" :
+          "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus-Yunzai 仅保存账号引用。",
         qrDataUrl: qr.qrDataUrl,
         profileId: "bilibili",
       }, {
@@ -158,7 +163,8 @@ export class BilibiliMedia extends BasePlugin {
         title: "B站登录",
         subtitle: "Lotus-Yunzai · B 站",
         badge: "完成",
-        message: "B站账号引用已保存，后续搜索和解析会自动使用。",
+        message: allowsSharing ? "B站账号已保存，可用于视频及没有可用独立会话的动态订阅。" :
+          "B站账号引用已保存，后续搜索和解析会自动使用。",
         userId: this.e.user_id,
         items: [
           { label: "来源", value: result.account.source },

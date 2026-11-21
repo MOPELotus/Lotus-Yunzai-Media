@@ -122,8 +122,8 @@ export function normalizeBiliDynamic(raw, expectedUid, allowForward = true) {
   }
 }
 
-export function createBiliProvider({ fetch: request = globalThis.fetch, session } = {}) {
-  async function get(route, query, signal) {
+export function createBiliProvider({ fetch: request = globalThis.fetch, session, shared } = {}) {
+  async function get(route, query, signal, beforeAnonymous) {
     const url = new URL(route, apiRoot)
     url.search = new URLSearchParams(query).toString()
     const timeout = AbortSignal.timeout(15000)
@@ -143,7 +143,7 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session 
       if (json.code === -352 || json.code === -403) throw new PublicAccessDenied("B 站公开接口返回 " + json.code)
       if (json.code !== 0 || !json.data) throw new Error("B 站公开接口返回 " + String(json.code))
       return json.data
-    })
+    }, beforeAnonymous)
   }
 
   async function expand(post, signal) {
@@ -179,7 +179,8 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session 
     id: "bilibili", label: "B站", typeNames: biliTypes,
     async fetchPosts(uid, {signal,oldest=0} = {}) {
       if (!accountId(uid)) return []
-      const data = await get("/x/polymer/web-dynamic/v1/feed/space", {host_mid:uid, offset:""}, signal)
+      const data = await get("/x/polymer/web-dynamic/v1/feed/space", {host_mid:uid, offset:""}, signal,
+        shared && (active => shared.fetchPosts(uid, active)))
       if (!data || !Array.isArray(data.items)) throw new Error("B 站动态列表结构无效")
       const posts=data.items.map(raw=>normalizeBiliDynamic(raw,uid)).filter(Boolean)
       for (const [index,post] of posts.entries()) if (post.createdAt>=oldest) posts[index]=await expand(post,signal)

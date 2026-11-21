@@ -1,11 +1,13 @@
-export function publicCount(value) {
-  if (Number.isSafeInteger(value) && value >= 0) return String(value)
+import type { SubscriptionProfile } from "./types.ts"
+
+export function publicCount(value: unknown) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value)
   if (typeof value !== "string") return
   const text = value.trim()
   if (/^(?:\d{1,20}|\d{1,12}(?:\.\d{1,3})?[万亿]\+?)$/u.test(text)) return text
 }
 
-export function profileText(profile) {
+export function profileText(profile: SubscriptionProfile) {
   const lines = [`${profile.name} · UID ${profile.uid}`]
   const fields = [
     ["性别", profile.gender], ["等级", profile.level], ["微博认证", profile.verification],

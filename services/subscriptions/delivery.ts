@@ -1,10 +1,45 @@
 import { setTimeout as pause } from "node:timers/promises"
 import { Job } from "node-schedule"
-import { makeDynamicMessages } from "./render.js"
+import type { GroupTransport } from "../../../../lib/adapters/onebot-groups.ts"
+import type { BotNotifications, CheckinNotifyDelivery } from "../../../../lib/checkin-notify.ts"
+import type { MessageReply } from "../../../../lib/messages.ts"
+import type { createSubscriptionConfig, SubscriptionRoute, SubscriptionSettings } from "./config.ts"
+import { makeDynamicMessages } from "./render.ts"
+import type { DynamicPost, GetSubscriptionRedis, SubscriptionPlatform, SubscriptionProvider, SubscriptionProviders, SubscriptionRedis } from "./types.ts"
+
+export type SubscriptionGroups = Pick<GroupTransport, "onlineBots" | "listGroups" | "sendGroup">
+
+interface DeliveryOptions {
+  providers: SubscriptionProviders
+  config: Pick<ReturnType<typeof createSubscriptionConfig>, "settings" | "routes">
+  groups?: SubscriptionGroups
+  notifications?: () => readonly BotNotifications[]
+  getRedis: GetSubscriptionRedis
+  signal?: AbortSignal
+  now?: () => number
+  render?: typeof makeDynamicMessages
+}
+
+interface Candidate {
+  route: SubscriptionRoute
+  post: DynamicPost
+  payloads: readonly MessageReply[]
+  legacy: string
+  journal: string
+}
+type Claim = Candidate & { token: string }
+type Report = ReturnType<typeof result>
+type Send = (message: MessageReply) => Promise<CheckinNotifyDelivery>
+interface Sender {
+  send: Send
+  forward?: (nodes: readonly MessageReply[]) => Promise<CheckinNotifyDelivery>
+}
+
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 const legacyPrefix = { bilibili:"bili", weibo:"weibo" }
 const holdSeconds = 72 * 3600
-export function receiptKey(platform, route, post) {
+export function receiptKey(platform: SubscriptionPlatform, route: Pick<SubscriptionRoute, "kind" | "chat">, post: Pick<DynamicPost, "id">) {
   return "Yz:yuki:" + legacyPrefix[platform] + ":upPush:" + route.kind + ":" + route.chat + ":" + post.id
 }
 
@@ -41,7 +76,7 @@ const settleLiveNoticeLua = [
   "return 1",
 ].join("\n")
 
-function allowedPost(post, route, settings, wall) {
+function allowedPost(post: DynamicPost, route: SubscriptionRoute, settings: SubscriptionSettings, wall: number) {
   if (!post?.id || post.uid !== route.uid || !Number.isSafeInteger(post.createdAt) ||
       post.createdAt > wall || post.createdAt < wall - settings.horizon ||
       post.type === "DYNAMIC_TYPE_FORWARD" && !settings.forwards ||
@@ -59,40 +94,44 @@ function result() {
 
 const maxForwardPosts = 99
 
-function postNode(payloads) {
-  return payloads.flatMap(payload => Array.isArray(payload) ? payload : [payload])
+function postNode(payloads: readonly MessageReply[]) {
+  return payloads.flat()
 }
 
 // Use the combined size of unrepeated posts for the destination and a strict threshold.
-export function useDynamicForward(posts, settings) {
+export function useDynamicForward(posts: readonly Pick<Candidate, "payloads">[], settings: SubscriptionSettings) {
   if (!settings.mergeForward) return false
   let images = 0, textLength = 0
   for (const {payloads} of posts) {
     for (const part of postNode(payloads)) {
       if (typeof part === "string") textLength += part.length
       else if (part?.type === "image") images++
-      else if (part?.type === "text") textLength += (part.text ?? part.data?.text ?? "").length
+      else if (part?.type === "text") {
+        const text = "text" in part ? part.text : part.data?.text
+        if (typeof text === "string") textLength += text.length
+      }
     }
   }
   return images > settings.forwardPictureThreshold || textLength > settings.forwardTextThreshold
 }
 
-function destinationKey(route) {
+function destinationKey(route: SubscriptionRoute) {
   return [route.kind,route.chat,route.bot].join(":")
 }
 
-export function createSubscriptionDelivery({providers,config,groups,notifications,getRedis,signal,now=Date.now,render=makeDynamicMessages}) {
+export function createSubscriptionDelivery({providers,config,groups,notifications,getRedis,signal,now=Date.now,render=makeDynamicMessages}: DeliveryOptions) {
   const controller = new AbortController()
   const active = signal ? AbortSignal.any([signal,controller.signal]) : controller.signal
-  const runs = new Map()
-  const jobs = []
+  const runs = new Map<SubscriptionPlatform, Promise<Report>>()
+  const jobs: Job[] = []
 
-  async function senderFor(route, current, groupChecks) {
+  async function senderFor(route: SubscriptionRoute, current: readonly BotNotifications[],
+    groupChecks: Map<string, Promise<Set<number>>>): Promise<Sender | undefined> {
     const bot = Number(route.bot), chat = Number(route.chat)
     if (!Number.isSafeInteger(bot) || !Number.isSafeInteger(chat)) return
     const session = current.find(session => session.botId === bot)
     const forwardTarget = route.kind === "group" ? {groupId:chat} : {userId:chat}
-    const forward = session?.sendForward ? nodes => session.sendForward(forwardTarget,nodes) : undefined
+    const forward = session?.sendForward?.bind(session, forwardTarget)
     if (route.kind === "private") {
       if (session && await session.isFriend(chat)) return {send:message=>session.sendPrivate(chat,message),forward}
       return
@@ -104,29 +143,31 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
     if (groups?.onlineBots?.().includes(bot)) {
       const key = route.bot
-      if (!groupChecks.has(key)) {
-        groupChecks.set(key,groups.listGroups(bot)
-          .then(values => new Set(values.map(value=>value.id))).catch(()=>new Set()))
+      let membership = groupChecks.get(key)
+      if (!membership) {
+        membership = groups.listGroups(bot)
+          .then(values => new Set(values.map(value=>value.id))).catch(()=>new Set<number>())
+        groupChecks.set(key, membership)
       }
-      if (!(await groupChecks.get(key)).has(chat)) return
+      if (!(await membership).has(chat)) return
       return {send:async message => {
         try { return Number.isSafeInteger(await groups.sendGroup(bot,chat,message)) ? "confirmed" : "unknown" }
-        catch (error) { return error?.delivery === "not-sent" ? "rejected" : "unknown" }
+        catch (error) { return error && typeof error === "object" && "delivery" in error && error.delivery === "not-sent" ? "rejected" : "unknown" }
       }}
     }
   }
 
-  function finish(redis, entries, state) {
+  function finish(redis: SubscriptionRedis, entries: readonly Claim[], state: CheckinNotifyDelivery) {
     return redis.eval(settleLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
       arguments: [state, ...entries.map(item => item.token)] })
   }
 
-  async function claim(redis, candidates, report) {
+  async function claim(redis: SubscriptionRedis, candidates: readonly Candidate[], report: Report): Promise<Claim[]> {
     const entries = candidates.map(item => ({ ...item, token: "pending:" + crypto.randomUUID() }))
     try {
       const selected = await redis.eval(claimLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
         arguments: [String(holdSeconds), ...entries.map(item => item.token)] })
-      if (!Array.isArray(selected) || selected.some(index => !Number.isInteger(index) || index < 1 || index > entries.length)) {
+      if (!Array.isArray(selected) || selected.some(index => typeof index !== "number" || !Number.isInteger(index) || index < 1 || index > entries.length)) {
         throw new Error("动态投递占位结果无效。")
       }
       const claimed = new Set(selected)
@@ -139,7 +180,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  async function sendSeparately(send,item) {
+  async function sendSeparately(send: Send, item: Candidate): Promise<CheckinNotifyDelivery> {
     let sent = 0
     for (const payload of item.payloads) {
       if (active.aborted) return sent ? "unknown" : "rejected"
@@ -152,14 +193,14 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     return sent ? "confirmed" : "rejected"
   }
 
-  async function notifyLiveAtAll(redis, route, sender, settings) {
+  async function notifyLiveAtAll(redis: SubscriptionRedis, route: SubscriptionRoute, sender: Sender, settings: SubscriptionSettings) {
     const mark = "Yz:yuki:bili:upPush:group:" + route.chat + ":liveAtAllMark"
     const token = "pending:" + crypto.randomUUID()
     const cooldown = settings.liveCooldown
     // Hold the claim through the gateway request even if the configured cooldown is short.
     if (await redis.set(mark,token,{NX:true,EX:Math.max(cooldown,120)}) !== "OK") return
 
-    let state = "rejected"
+    let state: CheckinNotifyDelivery = "rejected"
     if (!active.aborted) {
       try { state = await sender.send([{type:"at",qq:"all"}," B站 直播提醒"]) }
       catch { state = "unknown" }
@@ -170,11 +211,13 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  async function dispatchTarget(provider, redis, sender, entries, settings, report) {
-    if (!entries.length) return
-    const route = entries[0].route
+  async function dispatchTarget(provider: SubscriptionProvider, redis: SubscriptionRedis, sender: Sender,
+    entries: readonly Candidate[], settings: SubscriptionSettings, report: Report) {
+    const first = entries[0]
+    if (!first) return
+    const route = first.route
     let liveNoticeAttempted = false
-    async function liveNotice(claimed) {
+    async function liveNotice(claimed: readonly Claim[]) {
       if (liveNoticeAttempted || active.aborted || provider.id !== "bilibili" || route.kind !== "group" || !settings.liveAtAll ||
           !settings.liveGroups.has(route.chat) || !claimed.some(item => item.post.type === "DYNAMIC_TYPE_LIVE_RCMD")) return
       liveNoticeAttempted = true
@@ -182,13 +225,14 @@ export function createSubscriptionDelivery({providers,config,groups,notification
       catch { /* The dynamic itself is still deliverable. */ }
     }
 
-    async function sendItems(items) {
+    async function sendItems(items: readonly Candidate[]) {
       for (const item of items) {
         if (active.aborted) break
         const claimed = await claim(redis, [item], report)
-        if (!claimed.length) continue
+        const entry = claimed[0]
+        if (!entry) continue
         await liveNotice(claimed)
-        const state = await sendSeparately(sender.send, claimed[0])
+        const state = await sendSeparately(sender.send, entry)
         await finish(redis, claimed, state)
         report[state]++
       }
@@ -212,7 +256,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
         await finish(redis, batch, "rejected")
         break
       }
-      let status
+      let status: CheckinNotifyDelivery
       try { status = await sender.forward(["有新的"+provider.label+"动态了~", ...batch.map(item => postNode(item.payloads))]) }
       catch { status = "unknown" }
       if (status === "rejected") {
@@ -226,13 +270,15 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  async function poll(provider) {
+  async function poll(provider: SubscriptionProvider) {
     const report = result()
     const redis = getRedis()
     if (!redis || active.aborted) return report
     const [settings,routes] = await Promise.all([config.settings(provider.id),config.routes(provider.id)])
     const current = notifications?.() ?? []
-    const groupChecks = new Map(), destinations = new Map(), postsByUid = new Map()
+    const groupChecks = new Map<string, Promise<Set<number>>>()
+    const destinations = new Map<string, SubscriptionRoute[]>()
+    const postsByUid = new Map<string, readonly DynamicPost[]>()
     for (const route of routes) {
       const key = destinationKey(route)
       let list = destinations.get(key)
@@ -241,30 +287,34 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
     const wall = Math.floor(now()/1000)
     let requested = false
-    async function postsFor(uid) {
-      if (!postsByUid.has(uid)) {
-        if (requested && settings.delay > 0) {
-          const min = Math.min(settings.delay,2000)
-          await pause(min + Math.floor(Math.random()*(settings.delay-min+1)),undefined,{signal:active})
-        }
-        requested = true
-        try { postsByUid.set(uid,await provider.fetchPosts(uid,{signal:active,oldest:wall-settings.horizon})) }
-        catch (error) {
-          postsByUid.set(uid,[])
-          if (!active.aborted) {
-            report.failed++
-            console.warn("[media] 订阅 · " + provider.label + "动态读取失败：" + error.message)
-          }
+    async function postsFor(uid: string): Promise<readonly DynamicPost[]> {
+      const cached = postsByUid.get(uid)
+      if (cached) return cached
+      if (requested && settings.delay > 0) {
+        const min = Math.min(settings.delay,2000)
+        await pause(min + Math.floor(Math.random()*(settings.delay-min+1)),undefined,{signal:active})
+      }
+      requested = true
+      let posts: readonly DynamicPost[]
+      try { posts = await provider.fetchPosts(uid,{signal:active,oldest:wall-settings.horizon}) }
+      catch (error) {
+        posts = []
+        if (!active.aborted) {
+          report.failed++
+          console.warn("[media] 订阅 · " + provider.label + "动态读取失败：" + errorText(error))
         }
       }
-      return postsByUid.get(uid)
+      postsByUid.set(uid, posts)
+      return posts
     }
     for (const [target,subscriptions] of destinations) {
       if (active.aborted) break
       try {
-        const sender = await senderFor(subscriptions[0],current,groupChecks)
+        const first = subscriptions[0]
+        if (!first) continue
+        const sender = await senderFor(first,current,groupChecks)
         if (!sender) { report.skipped+=subscriptions.length; continue }
-        const candidates = new Map()
+        const candidates = new Map<string, Candidate>()
         for (const route of subscriptions) {
           if (active.aborted) break
           for (const post of await postsFor(route.uid)) {
@@ -279,7 +329,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
             } catch (error) {
               if (!active.aborted) {
                 report.failed++
-                console.warn("[media] 订阅 · " + provider.label + "动态构建失败：" + error.message)
+                console.warn("[media] 订阅 · " + provider.label + "动态构建失败：" + errorText(error))
               }
             }
           }
@@ -293,7 +343,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
       } catch (error) {
         if (!active.aborted) {
           report.failed++
-          console.warn("[media] 订阅 · " + provider.label + "推送失败：" + error.message)
+          console.warn("[media] 订阅 · " + provider.label + "推送失败：" + errorText(error))
         }
       }
     }
@@ -303,7 +353,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     return report
   }
 
-  function run(id, automatic=false) {
+  function run(id: SubscriptionPlatform, automatic = false) {
     const provider = providers[id]
     if (!provider || active.aborted || runs.has(id)) return
     const task = (async () => {
@@ -320,14 +370,16 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     run,
     async start() {
       if (!getRedis() || active.aborted) return
-      for (const id of Object.keys(providers)) {
+      for (const provider of Object.values(providers)) {
+        if (!provider) continue
+        const { id } = provider
         try {
           const settings = await config.settings(id)
           if (!settings.enable || active.aborted) continue
-          const job = new Job(() => { void run(id,true)?.catch(error => console.warn("[media] 订阅 · " + error.message)) })
+          const job = new Job(() => { void run(id,true)?.catch(error => console.warn("[media] 订阅 · " + errorText(error))) })
           if (!job.schedule({rule:settings.cron,tz:"Asia/Shanghai"})) throw new Error("定时配置无效")
           jobs.push(job)
-        } catch (error) { console.warn("[media] 订阅 · " + providers[id].label + " " + error.message) }
+        } catch (error) { console.warn("[media] 订阅 · " + provider.label + " " + errorText(error)) }
       }
     },
     async dispose() {

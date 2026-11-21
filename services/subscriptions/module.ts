@@ -1,14 +1,42 @@
 import { fileURLToPath } from "node:url"
-import { biliSubscriptionLogin } from "./bilibili/login.js"
-import { createBiliProvider } from "./bilibili/index.js"
-import { biliSharedSession } from "./bilibili/shared.js"
-import { weiboSubscriptionLogin } from "./weibo/login.js"
-import { createWeiboProvider } from "./weibo/index.js"
-import { createSubscriptionConfig, numericId } from "./config.js"
-import { createSubscriptionDelivery } from "./delivery.js"
-import { profileText } from "./profile.js"
-import { subscriptionSession } from "./session.js"
-import { renderSubscriptionHelp } from "./help.js"
+import type { MessageFallback } from "../../../../lib/commands.ts"
+import type { BotNotifications } from "../../../../lib/checkin-notify.ts"
+import type { MessageReply } from "../../../../lib/messages.ts"
+import { biliSubscriptionLogin } from "./bilibili/login.ts"
+import { createBiliProvider } from "./bilibili/index.ts"
+import { biliSharedSession } from "./bilibili/shared.ts"
+import { weiboSubscriptionLogin } from "./weibo/login.ts"
+import { createWeiboProvider } from "./weibo/index.ts"
+import { createSubscriptionConfig, numericId, type SubscriptionRoute, type SubscriptionDestination } from "./config.ts"
+import { createSubscriptionDelivery, type SubscriptionGroups } from "./delivery.ts"
+import { profileText } from "./profile.ts"
+import { subscriptionSession } from "./session.ts"
+import { renderSubscriptionHelp } from "./help.ts"
+import type { makeDynamicMessages } from "./render.ts"
+import type {
+  GetSubscriptionRedis, LockSubscriptionFile, SubscriptionContext, SubscriptionPlatform, SubscriptionProvider,
+  SubscriptionProviders, SubscriptionRedis,
+} from "./types.ts"
+
+interface SubscriptionServices {
+  readonly lockFile: LockSubscriptionFile
+  readonly groups?: SubscriptionGroups
+  readonly signal?: AbortSignal
+  readonly subscriptionTransport?: () => readonly BotNotifications[]
+  readonly mediaRuntime?: { whenReady(start: () => void): () => void }
+}
+
+interface SubscriptionOptions {
+  providers?: SubscriptionProviders
+  directory?: string
+  shared?: ReturnType<typeof biliSharedSession>
+  getRedis?: GetSubscriptionRedis
+  render?: typeof makeDynamicMessages
+  now?: () => number
+  renderHelp?: () => Promise<MessageReply>
+}
+
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 const dataDirectory = fileURLToPath(new URL("../../../../data",import.meta.url))
 const prefix = /^[#/]/u
@@ -20,11 +48,11 @@ const manual = new RegExp("^执行"+platformName+"任务$","iu")
 const profile = new RegExp("^"+platformName+"(?:up|up主|博主|bo主)(uid|昵称)\\s*[:：]?\\s*(.*)$","iu")
 const categories = /^(视频|图文|文章|转发|直播)\s*/u
 
-function platform(value) {
+function platform(value: string): SubscriptionPlatform {
   return /^(微博|weibo)$/iu.test(value) ? "weibo" : "bilibili"
 }
 
-function target(context) {
+function target(context: SubscriptionContext): SubscriptionDestination | undefined {
   const kind = context.message_type
   if (kind !== "group" && kind !== "private") return
   const chat = numericId(kind === "group" ? context.group_id : context.user_id)
@@ -32,18 +60,18 @@ function target(context) {
   if (chat && bot) return { kind,chat,bot }
 }
 
-function isSubscriptionOwner(context) {
+function isSubscriptionOwner(context: SubscriptionContext) {
   if (context.adapter !== "milky") return context.isMaster === true
   const user = context.user_id
-  return context.isDelegated !== true && Number.isSafeInteger(user) && user > 0 && context.isBotMaster?.(user) === true
+  return context.isDelegated !== true && typeof user === "number" && Number.isSafeInteger(user) && user > 0 && context.isBotMaster?.(user) === true
 }
 
-function editArguments(input,provider) {
-  const selected = new Set()
+function editArguments(input: string,provider: SubscriptionProvider) {
+  const selected = new Set<string>()
   let rest = input.trim()
   for (let match; (match=categories.exec(rest));) {
     for (const [code,label] of Object.entries(provider.typeNames)) if (label === match[1]) selected.add(code)
-    if (![...Object.values(provider.typeNames)].includes(match[1])) return
+    if (!match[1] || !Object.values(provider.typeNames).includes(match[1])) return
     rest = rest.slice(match[0].length)
   }
   rest = rest.replace(/^(?:uid\s*)?[:：]?\s*/iu,"")
@@ -51,7 +79,7 @@ function editArguments(input,provider) {
   if (uid) return {uid,selected:[...selected]}
 }
 
-function display(provider,items,heading) {
+function display(provider: SubscriptionProvider, items: readonly SubscriptionRoute[], heading: string) {
   if (!items.length) return heading+"\n当前没有订阅。"
   return heading+"\n"+items.map(item=>{
     const types = [...new Set(item.types.map(type=>provider.typeNames[type]).filter(Boolean))]
@@ -59,28 +87,29 @@ function display(provider,items,heading) {
   }).join("\n")
 }
 
-export async function createSubscriptionModule(services, { providers, directory=dataDirectory, shared,
-  getRedis=()=>globalThis.redis, render, now, renderHelp=renderSubscriptionHelp } = {}) {
+export async function createSubscriptionModule(services: SubscriptionServices, { providers, directory=dataDirectory, shared,
+  getRedis=()=>(globalThis as { redis?: SubscriptionRedis }).redis, render, now,
+  renderHelp=renderSubscriptionHelp }: SubscriptionOptions = {}) {
   const weiboSession = subscriptionSession("weibo", directory, getRedis)
   const config = createSubscriptionConfig(directory,services.lockFile)
   shared ??= biliSharedSession({ enabled: async () => (await config.settings("bilibili")).sharedBiliLogin })
-  providers ??= {
+  const sources = providers ?? {
     bilibili: createBiliProvider({ session: subscriptionSession("bilibili", directory, getRedis), shared }),
     weibo: createWeiboProvider({ session: weiboSession }),
   }
   const biliLogin = biliSubscriptionLogin({ getRedis, owner: isSubscriptionOwner, signal: services.signal,
     directory, lockFile: services.lockFile, shared,
-    setShared: (enabled, signal) => config.editSettings("bilibili", () => ({ sharedBiliLogin: enabled }), signal) })
+    setShared: (enabled: boolean, signal?: AbortSignal) => config.editSettings("bilibili", () => ({ sharedBiliLogin: enabled }), signal) })
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
-  const dispatch = createSubscriptionDelivery({ providers,config,groups:services.groups,notifications:services.subscriptionTransport,
+  const dispatch = createSubscriptionDelivery({ providers:sources,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
-  let startup
+  let startup: Promise<void> | undefined
   const cancelReady = services.mediaRuntime?.whenReady(() => {
-    startup ??= dispatch.start().catch(error => console.warn("[media] 订阅 · 启动定时任务失败：" + error.message))
+    startup ??= dispatch.start().catch(error => console.warn("[media] 订阅 · 启动定时任务失败：" + errorText(error)))
   })
-  const describe = provider => provider.label + "订阅"
+  const describe = (provider: SubscriptionProvider) => provider.label + "订阅"
 
-  async function fallback(message,context) {
+  const fallback: MessageFallback = async (message,context) => {
     if (help.test(message.trim())) return renderHelp()
     if (!prefix.test(message)) return
     const command=message.replace(prefix,"").trim()
@@ -90,18 +119,18 @@ export async function createSubscriptionModule(services, { providers, directory=
     const lookup=profile.exec(command)
     const selected=match?.[2]||view?.[1]||run?.[1]||lookup?.[1]
     if (!selected) return (await biliLogin(message, context)) ?? weiboLogin(message, context)
-    const provider=providers[platform(selected)]
+    const provider=sources[platform(selected)]
     if (!provider) return
     const current=target(context)
     try {
       if (match) {
         if (!isSubscriptionOwner(context)) return "只有机器人主人可以修改"+describe(provider)+"。"
         if (!current) return "请在订阅要发送的群聊或私聊中设置。"
-        const args=editArguments(match[3],provider)
+        const args=editArguments(match[3] ?? "",provider)
         if (!args) return "请在指令末尾填写有效的纯数字 UID。"
-        const operation=/^(删除|取消|del)$/iu.test(match[1])?"remove":"add"
+        const operation=/^(删除|取消|del)$/iu.test(match[1] ?? "")?"remove":"add"
         let name=args.uid
-        let verificationFailure
+        let verificationFailure: string | undefined
         if (operation === "add" && !(await config.routes(provider.id)).some(item=>
           item.uid === args.uid && item.bot === current.bot && item.chat === current.chat && item.kind === current.kind)) {
           try {
@@ -110,7 +139,7 @@ export async function createSubscriptionModule(services, { providers, directory=
             name=info.name
             verificationFailure=info.verificationFailure
           } catch (error) {
-            return provider.label+"用户校验失败："+error.message
+            return provider.label+"用户校验失败："+errorText(error)
           }
         }
         const updated=await config.update(provider.id,current,args.uid,operation,args.selected,Object.keys(provider.typeNames),name)
@@ -123,8 +152,8 @@ export async function createSubscriptionModule(services, { providers, directory=
         if (view[2] && !isSubscriptionOwner(context)) return "只有机器人主人可以查看全部"+describe(provider)+"。"
         if (!current && (!view[2] || context.message_type !== "terminal")) return "请在群聊或私聊中查询当前会话。"
         const all=await config.routes(provider.id)
-        if (!view[2]) return display(provider,all.filter(item=>item.kind===current.kind && item.chat===current.chat && item.bot===current.bot),describe(provider))
-        const blocks=new Map()
+        if (!view[2] && current) return display(provider,all.filter(item=>item.kind===current.kind && item.chat===current.chat && item.bot===current.bot),describe(provider))
+        const blocks=new Map<string, SubscriptionRoute[]>()
         for (const item of all) {
           if (current && item.bot !== current.bot) continue
           const name=(item.kind==="group"?"群 ":"私聊 ")+item.chat+" · 机器人 "+item.bot
@@ -143,14 +172,16 @@ export async function createSubscriptionModule(services, { providers, directory=
         return "已确认 "+record.confirmed+" 条，未发出 "+record.rejected+" 条，结果未确认 "+record.unknown+
           " 条，跳过 "+record.skipped+" 条，异常 "+record.failed+" 次。"
       }
-      const value=lookup[2].toLowerCase()==="uid"?numericId(lookup[3]):lookup[3].trim()
+      const mode = lookup?.[2]?.toLowerCase()
+      const query = lookup?.[3] ?? ""
+      const value = mode === "uid" ? numericId(query) : query.trim()
       if (!value) return "请输入要查询的 UID 或昵称。"
-      const found=lookup[2].toLowerCase()==="uid" ? [await provider.profile(value,{signal:services.signal})] :
+      const found=mode==="uid" ? [await provider.profile(value,{signal:services.signal})] :
         await provider.search?.(value,{signal:services.signal}) ?? []
-      const rows=found.filter(Boolean).slice(0,8).map(profileText)
+      const rows=found.filter(value => value !== undefined).slice(0,8).map(profileText)
       return rows.length ? [{type:"text",text:rows.join("\n\n")}] : "没有找到公开用户资料。"
     } catch (error) {
-      return describe(provider)+"处理失败："+error.message
+      return describe(provider)+"处理失败："+errorText(error)
     }
   }
   return {

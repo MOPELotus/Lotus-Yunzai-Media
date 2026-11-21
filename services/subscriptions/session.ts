@@ -3,8 +3,30 @@ import { constants } from "node:fs"
 import { open } from "node:fs/promises"
 import { join } from "node:path"
 import { parse } from "yaml"
+import type { GetSubscriptionRedis, SubscriptionPlatform, SubscriptionRedis } from "./types.ts"
 
-const platforms = {
+interface Platform {
+  prefix: string
+  origin: string
+  paths: ReadonlySet<string>
+  domains: readonly string[]
+  names: readonly string[]
+  identity: readonly string[]
+  xsrf?: string
+}
+
+interface StoredCookie { name: string; key: string; value: string }
+interface IssuedCookie { name: string; domain: string; value: string; path: string; seconds?: number }
+type Credential = { fields: Map<string, string> } & (
+  { source: "local" } |
+  { source: "session"; records: Map<string, StoredCookie>; proof: StoredCookie }
+)
+type LocalCredential = Extract<Credential, { source: "local" }>
+type StoredCredential = Extract<Credential, { source: "session" }>
+
+export type SubscriptionSession = ReturnType<typeof subscriptionSession>
+
+const platforms: Record<SubscriptionPlatform, Platform> = {
   bilibili: {
     prefix: "Yz:yuki:bili:cookie",
     origin: "https://api.bilibili.com",
@@ -24,34 +46,34 @@ const platforms = {
   },
 }
 
-const validValue = (value) => typeof value === "string" && value.length <= 4096 &&
+const validValue = (value: unknown): value is string => typeof value === "string" && value.length <= 4096 &&
   /^[\x21-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/u.test(value) && !/^deleted$/iu.test(value)
-const allowed = (platform, url) => url.origin === platform.origin && !url.username && !url.password && platform.paths.has(url.pathname)
-const keyFor = (platform, domain, name) => `${platform.prefix}:${domain}:${name}`
+const allowed = (platform: Platform, url: URL) => url.origin === platform.origin && !url.username && !url.password && platform.paths.has(url.pathname)
+const keyFor = (platform: Platform, domain: string, name: string) => `${platform.prefix}:${domain}:${name}`
 
-function matchesPath(path, pathname) {
+function matchesPath(path: string, pathname: string) {
   return path === pathname || pathname.startsWith(path.endsWith("/") ? path : path + "/")
 }
 
-function cookieParts(header) {
-  return header.split(";").flatMap((part) => {
+function cookieParts(header: string): [string, string][] {
+  return header.split(";").flatMap<[string, string]>((part) => {
     const split = part.indexOf("=")
     return split < 0 ? [] : [[part.slice(0, split).trim(), part.slice(split + 1).trim()]]
   })
 }
 
-export function biliLocalPath(directory) {
+export function biliLocalPath(directory: string) {
   return join(directory, "yuki-plugin", "biliCookie.yaml")
 }
 
-export function parseBiliLocal(value) {
+export function parseBiliLocal(value: unknown): LocalCredential | undefined {
   if (typeof value !== "string" || value.length > 32_768 || /[\r\n]/u.test(value)) return
   const names = platforms.bilibili.names
   const fields = new Map(cookieParts(value).filter(([name, field]) => names.includes(name) && validValue(field)))
   if (fields.has("SESSDATA")) return { fields, source: "local" }
 }
 
-export async function readBiliLocal(directory) {
+export async function readBiliLocal(directory: string) {
   let file
   try {
     file = await open(biliLocalPath(directory), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
@@ -65,7 +87,7 @@ export async function readBiliLocal(directory) {
   }
 }
 
-async function storedSession(redis, platform, url) {
+async function storedSession(redis: SubscriptionRedis | undefined, platform: Platform, url: URL): Promise<StoredCredential | undefined> {
   if (typeof redis?.mGet !== "function") return
   const keys = []
   const candidates = []
@@ -79,16 +101,19 @@ async function storedSession(redis, platform, url) {
     }
   }
   const values = await redis.mGet(keys)
-  const fields = new Map()
-  const records = new Map()
+  const fields = new Map<string, string>()
+  const records = new Map<string, StoredCookie>()
   for (const [index, entry] of candidates.entries()) {
     const { name, domain, key } = entry
     const value = values[index * 2]
     if (fields.has(name) || !validValue(value)) continue
-    let path = "/"
+    let path: unknown = "/"
     try {
       const meta = values[index * 2 + 1]
-      if (meta) path = JSON.parse(meta)?.path ?? "/"
+      if (meta) {
+        const decoded: unknown = JSON.parse(meta)
+        if (decoded && typeof decoded === "object" && "path" in decoded) path = decoded.path ?? "/"
+      }
     } catch {
       continue
     }
@@ -100,12 +125,13 @@ async function storedSession(redis, platform, url) {
   if (proof) return { fields, records, proof, source: "session" }
 }
 
-function rotation(platform, url, headers) {
-  const result = new Map()
+function rotation(platform: Platform, url: URL, headers: Headers) {
+  const result = new Map<string, IssuedCookie>()
   for (const header of headers.getSetCookie()) {
     const parts = cookieParts(header)
-    if (!parts.length) continue
-    const [name, value] = parts[0]
+    const first = parts[0]
+    if (!first) continue
+    const [name, value] = first
     if (!platform.names.includes(name)) continue
     const attributes = new Map(parts.slice(1).map(([name, value]) => [name.toLowerCase(), value]))
     const domain = (attributes.get("domain") ?? url.hostname).toLowerCase().replace(/^\./u, "")
@@ -115,7 +141,10 @@ function rotation(platform, url, headers) {
     let seconds
     const maxAge = attributes.get("max-age")
     if (maxAge && /^-?\d+$/u.test(maxAge)) seconds = Number(maxAge)
-    else if (attributes.has("expires")) seconds = Math.floor((Date.parse(attributes.get("expires")) - Date.now()) / 1000)
+    else {
+      const expires = attributes.get("expires")
+      if (expires !== undefined) seconds = Math.floor((Date.parse(expires) - Date.now()) / 1000)
+    }
     if (seconds !== undefined && !Number.isSafeInteger(seconds)) continue
     if ((seconds === undefined || seconds > 0) && !validValue(value)) continue
     result.set(keyFor(platform, domain, name), { name, domain, value, path, seconds })
@@ -155,13 +184,13 @@ return 1`
 
 export class ExpiredSubscriptionSession extends Error {}
 
-export function subscriptionSession(id, directory, getRedis) {
+export function subscriptionSession(id: SubscriptionPlatform, directory: string, getRedis: GetSubscriptionRedis) {
   const platform = platforms[id]
-  const rejected = new Set()
+  const rejected = new Set<string>()
   return {
-    async candidates(url) {
+    async candidates(url: URL): Promise<Credential[]> {
       if (!allowed(platform, url)) return []
-      const entries = []
+      const entries: Credential[] = []
       if (id === "bilibili") {
         const local = await readBiliLocal(directory)
         if (local) entries.push(local)
@@ -174,18 +203,20 @@ export function subscriptionSession(id, directory, getRedis) {
       }
       return entries.filter((entry) => !rejected.has(sessionCredentialKey(platform, entry)))
     },
-    headers(session, headers) {
+    headers(session: Credential, headers?: RequestInit["headers"]) {
       const result = new Headers(headers)
       result.set("Cookie", [...session.fields].map(([n, v]) => `${n}=${v}`).join("; "))
-      const xsrf = session.fields.get(platform.xsrf)
-      if (xsrf) result.set(platform.xsrf, xsrf)
+      if (platform.xsrf) {
+        const xsrf = session.fields.get(platform.xsrf)
+        if (xsrf) result.set(platform.xsrf, xsrf)
+      }
       return result
     },
-    reject(session) {
+    reject(session: Credential) {
       if (rejected.size >= 8) rejected.clear()
       rejected.add(sessionCredentialKey(platform, session))
     },
-    async rotate(session, url, headers) {
+    async rotate(session: Credential, url: URL, headers: Headers) {
       if (!allowed(platform, url) || session.source !== "session") return
       const changes = rotation(platform, url, headers)
       if (!changes.size) return
@@ -205,30 +236,32 @@ export function subscriptionSession(id, directory, getRedis) {
   }
 }
 
-function sessionCredentialKey(platform, entry) {
+function sessionCredentialKey(platform: Platform, entry: Credential) {
   const values = platform.identity.map((name) => entry.fields.get(name) ?? "")
   // The API can renew the request's CSRF token while keeping the account cookie.
   if (platform.xsrf) values.push(entry.fields.get(platform.xsrf) ?? "")
   return entry.source + ":" + createHash("sha256").update(values.join("\0")).digest("hex")
 }
 
-export async function readWithSubscriptionSession(transport, sessions, url, options, decode, beforeAnonymous) {
+export async function readWithSubscriptionSession<T>(transport: (url: URL, options: RequestInit) => Promise<Response>,
+  sessions: SubscriptionSession | undefined, url: URL, options: RequestInit,
+  decode: (response: Response) => T | Promise<T>, beforeAnonymous?: (signal?: AbortSignal) => Promise<T | undefined>) {
   const candidates = [...(await sessions?.candidates(url) ?? []), undefined]
   let retriedRenewal = false
   while (candidates.length) {
     const session = candidates.shift()
     options.signal?.throwIfAborted()
     if (!session && beforeAnonymous) {
-      const shared = await beforeAnonymous(options.signal)
+      const shared = await beforeAnonymous(options.signal ?? undefined)
       if (shared !== undefined) return shared
     }
-    const response = await transport(url, session ? { ...options, headers: sessions.headers(session, options.headers) } : options)
+    const response = await transport(url, session && sessions ? { ...options, headers: sessions.headers(session, options.headers) } : options)
     try {
       const data = await decode(response)
-      if (session) await sessions.rotate(session, url, response.headers)
+      if (session && sessions) await sessions.rotate(session, url, response.headers)
       return data
     } catch (error) {
-      if (!session || !(error instanceof ExpiredSubscriptionSession)) throw error
+      if (!session || !sessions || !(error instanceof ExpiredSubscriptionSession)) throw error
       sessions.reject(session)
       if (await sessions.rotate(session, url, response.headers) && !retriedRenewal) {
         retriedRenewal = true
@@ -243,7 +276,7 @@ const biliLoginLock = "lotus-yunzai:media:dynamic:bilibili:signin"
 const releaseBiliLock = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
 const biliFeedURL = new URL("/x/polymer/web-dynamic/v1/feed/space", platforms.bilibili.origin)
 
-function biliFieldKeys(names) {
+function biliFieldKeys(names: readonly string[]) {
   const platform = platforms.bilibili
   return names.flatMap((name) => platform.domains.flatMap((domain) => [
     keyFor(platform, "." + domain, name), keyFor(platform, domain, name),
@@ -266,18 +299,18 @@ for i = 2 + tonumber(ARGV[start - 1]), #KEYS do
 end
 return 1`
 
-export async function readBiliLogin(redis) {
+export async function readBiliLogin(redis: SubscriptionRedis | undefined) {
   const session = await storedSession(redis, platforms.bilibili, biliFeedURL)
-  if (!session) return
+  if (!session || !redis) return
   const ttl = typeof redis.pTTL === "function" ? await redis.pTTL(session.proof.key) : undefined
-  const expiresAt = ttl === -1 ? null : ttl > 0 ? Date.now() + ttl : undefined
+  const expiresAt = ttl === -1 ? null : ttl !== undefined && ttl > 0 ? Date.now() + ttl : undefined
   return { ...session, expiresAt }
 }
 
-export function biliIssuedLogin(headers, url) {
-  const issued = new Map()
+export function biliIssuedLogin(headers: Headers, url: URL) {
+  const issued = new Map<string, IssuedCookie>()
   for (const cookie of rotation(platforms.bilibili, url, headers).values()) {
-    if (cookie.seconds <= 0 || !matchesPath(cookie.path, biliFeedURL.pathname)) continue
+    if (cookie.seconds !== undefined && cookie.seconds <= 0 || !matchesPath(cookie.path, biliFeedURL.pathname)) continue
     issued.set(cookie.name, cookie)
   }
   const uid = issued.get("DedeUserID")?.value
@@ -285,14 +318,14 @@ export function biliIssuedLogin(headers, url) {
   return issued
 }
 
-export async function lockBiliLogin(redis) {
+export async function lockBiliLogin(redis: SubscriptionRedis) {
   const token = crypto.randomUUID()
   if (await redis.set(biliLoginLock, token, { NX: true, EX: 240 }) !== "OK") return
   try {
     const guard = biliFieldKeys(["SESSDATA"])
     const snapshot = (await redis.mGet(guard)).map(value => value ?? "")
     return {
-      async replace(issued = new Map()) {
+      async replace(issued: ReadonlyMap<string, IssuedCookie> = new Map()) {
         const platform = platforms.bilibili
         const clear = [...new Set([...guard, ...biliFieldKeys(biliAccountFields)])]
         const values = [...issued.values()]
@@ -324,11 +357,11 @@ for i = 1, #KEYS do
 end
 return 1`
 
-export function readWeiboLogin(redis, url) {
+export function readWeiboLogin(redis: SubscriptionRedis | undefined, url: URL) {
   return storedSession(redis, platforms.weibo, url)
 }
 
-export async function clearWeiboLogin(redis) {
+export async function clearWeiboLogin(redis: SubscriptionRedis) {
   const platform = platforms.weibo
   const keys = platform.names.flatMap((name) => platform.domains.flatMap((domain) => [
     keyFor(platform, "." + domain, name), keyFor(platform, domain, name),

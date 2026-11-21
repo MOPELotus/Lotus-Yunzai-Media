@@ -1,11 +1,27 @@
 import { join } from "node:path"
-import { loadImage } from "skia-canvas"
-import { drawInfoText, infoCardColors, measureInfoText, renderInfoCard } from "@lotus-yunzai/skia/info-card"
+import { loadImage, type Image } from "skia-canvas"
+import { drawInfoText, infoCardColors, measureInfoText, renderInfoCard, type InfoCardOptions } from "@lotus-yunzai/skia/info-card"
 import { resolveData, resolveRoot } from "../../core/path.js"
+
+import type { MessageReply } from "../../../../lib/messages.ts"
+import { subscriptionRenderMode } from "./render.ts"
+
+interface HelpRow { label: string; value: string; icon?: string }
+interface HelpSection { title: string; rows: HelpRow[] }
+interface HelpGroup { title: string; top: number; tiles: HelpTile[] }
+interface HelpTile {
+  x: number
+  top: number
+  height: number
+  textOffset: number
+  label: readonly string[]
+  value: readonly string[]
+  icon?: Image
+}
 
 const title = "动态订阅帮助"
 
-function platformSection(platform, account, categories, extra = []) {
+function platformSection(platform: string, account: string, categories: string, extra: HelpRow[] = []): HelpSection {
   return {
     title: `${platform}动态`,
     rows: [
@@ -22,7 +38,7 @@ function platformSection(platform, account, categories, extra = []) {
   }
 }
 
-const sections = [
+const sections: HelpSection[] = [
   { title: "指令前缀", rows: [
     { label: "#", value: "如 #B站订阅列表", icon: "diagram" },
     { label: "/", value: "如 /微博订阅列表", icon: "diagram" },
@@ -36,7 +52,7 @@ const sections = [
 const assetDirectories = [resolveData("yuki-plugin/resources"), resolveRoot("plugins/yuki-plugin/resources")]
 const width = 788
 
-async function legacyImage(relative) {
+async function legacyImage(relative: string) {
   for (const directory of assetDirectories) {
     const path = join(directory, relative)
     if (!(await Bun.file(path).exists())) continue
@@ -46,26 +62,26 @@ async function legacyImage(relative) {
 }
 
 async function legacyHelpIcons() {
-  const names = [...new Set(sections.flatMap(section => section.rows.map(row => row.icon).filter(Boolean)))]
-  return new Map(await Promise.all(names.map(async name => [name, await legacyImage(`img/icon/puplic/${name}.png`)])))
+  const names = [...new Set(sections.flatMap(section => section.rows.map(row => row.icon).filter(name => name !== undefined)))]
+  return new Map(await Promise.all(names.map(async name => [name, await legacyImage(`img/icon/puplic/${name}.png`)] as const)))
 }
 
-let assets
+let assets: ReturnType<typeof legacyHelpIcons> | undefined
 
-export async function drawSubscriptionHelp({ mode = process.env.LOTUS_SKIA_MODE || "auto" } = {}) {
+export async function drawSubscriptionHelp({ mode = subscriptionRenderMode() }: Pick<InfoCardOptions, "mode"> = {}) {
   const icons = await (assets ??= legacyHelpIcons())
   return renderInfoCard({ title, eyebrow: "媒体", width }, layout => {
     const gap = 10
     const tileWidth = Math.floor((layout.width - 2 * gap) / 3)
-    const groups = []
+    const groups: HelpGroup[] = []
     let cursor = layout.y
 
     for (const section of sections) {
-      const group = { title: section.title, top: cursor, tiles: [] }
+      const group: HelpGroup = { title: section.title, top: cursor, tiles: [] }
       cursor += 36
       for (let index = 0; index < section.rows.length; index += 3) {
         const tiles = section.rows.slice(index, index + 3).map((row, column) => {
-          const icon = icons.get(row.icon)
+          const icon = row.icon ? icons.get(row.icon) : undefined
           const textOffset = icon ? 38 : 10
           const textWidth = tileWidth - textOffset - 10
           const label = measureInfoText(layout.measure, row.label, textWidth, 16)
@@ -100,7 +116,7 @@ export async function drawSubscriptionHelp({ mode = process.env.LOTUS_SKIA_MODE 
   }, { mode, scale: 4, allowHalfScale: false })
 }
 
-export async function renderSubscriptionHelp(render = drawSubscriptionHelp) {
+export async function renderSubscriptionHelp(render: () => Promise<{ png: Uint8Array }> = drawSubscriptionHelp): Promise<MessageReply> {
   try {
     const {png} = await render()
     return { type: "image", file:png }

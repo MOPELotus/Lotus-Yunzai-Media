@@ -33,7 +33,7 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
     try {
       active.throwIfAborted()
       const config = await loadGlobalConfig()
-      if (!new PermissionService({ permissions: config.permissions }).explain(context, "bilibili.login").ok) {
+      if (!new PermissionService({ permissions: config.permissions }).explain({ ...context, isMaster: true }, "bilibili.login").ok) {
         return loginError(context, "没有 B 站登录权限。")
       }
       if (signingIn) return "已有 B 站登录正在进行，请稍后重试。"

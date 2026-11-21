@@ -8,7 +8,30 @@ const maxNodes = 100
 const dateFile = /^nep-\d{12}\.json$/u
 const credentialText = /https?:\/\/|\b(?:bearer\s+|(?:set-cookie|cookie|authorization|token|credential|api[_-]?key|SESSDATA|MUSIC_U|MUSIC_A)\s*[:=])/iu
 
-async function readReport(file) {
+interface PartnerLogReport {
+  time?: unknown
+  trigger?: unknown
+  accounts: unknown[]
+}
+
+interface PartnerLogAccount {
+  nickname?: unknown
+  success?: unknown
+  fail?: unknown
+  attempts?: unknown
+  evaluations?: unknown
+}
+
+interface PartnerLogEntry {
+  status?: unknown
+  name?: unknown
+  comment?: unknown
+  score?: unknown
+  extraScore?: unknown
+  attempt?: unknown
+}
+
+async function readReport(file: string): Promise<PartnerLogReport> {
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   try {
     const stat = await handle.stat()
@@ -21,7 +44,7 @@ async function readReport(file) {
       length += bytesRead
     }
     if (length > maxBytes) throw new Error("合伙人日志超出读取上限")
-    const report = JSON.parse(bytes.subarray(0,length).toString("utf8"))
+    const report: PartnerLogReport | null = JSON.parse(bytes.subarray(0,length).toString("utf8"))
     if (!report || !Array.isArray(report.accounts)) throw new Error("合伙人日志格式无效")
     return report
   } finally {
@@ -33,41 +56,42 @@ export async function readPartnerLog(directory = resolveData("logs")) {
   try {
     return await readReport(join(directory,"nep-latest.json"))
   } catch (error) {
-    if (error.code !== "ENOENT") throw error
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
   let entries
   try {
     entries = await readdir(directory,{withFileTypes:true})
   } catch (error) {
-    if (error.code === "ENOENT") return null
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
     throw error
   }
   const name = entries.filter(entry => entry.isFile() && dateFile.test(entry.name)).map(entry => entry.name).sort().at(-1)
   return name ? readReport(join(directory,name)) : null
 }
 
-function safeText(value, limit) {
+function safeText(value: unknown, limit: number) {
   if (typeof value !== "string" || credentialText.test(value)) return
   return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, "").trim().slice(0,limit).toWellFormed()
 }
 
-function count(value) {
-  return Number.isSafeInteger(value) && value >= 0 ? String(value) : "未记录"
+function count(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : "未记录"
 }
 
-function scores(value) {
+function scores(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return ""
-  return Object.entries(value).slice(0,10).flatMap(([key, score]) =>
-    /^[\p{L}\p{N}_-]{1,32}$/u.test(key) && Number.isFinite(score) && score >= 0 ? [`${key}:${score}`] : [],
+  const entries: [string, unknown][] = Object.entries(value)
+  return entries.slice(0,10).flatMap(([key, score]) =>
+    /^[\p{L}\p{N}_-]{1,32}$/u.test(key) && typeof score === "number" && Number.isFinite(score) && score >= 0 ? [`${key}:${score}`] : [],
   ).join(" / ")
 }
 
-function songNode(entry) {
+function songNode(entry: PartnerLogEntry) {
   const completed = entry.status === "already_completed"
   const unknown = entry.status === "unknown"
   const state = entry.status === "success" ? "成功" : completed ? "此前已完成" : unknown ? "结果未确认" : "失败"
   const comment = unknown ? "结果未确认" : safeText(entry.comment,500)
-  const score = Number.isFinite(entry.score) && entry.score >= 0 ? entry.score : "未返回"
+  const score = typeof entry.score === "number" && Number.isFinite(entry.score) && entry.score >= 0 ? entry.score : "未返回"
   return [
     `歌曲：${safeText(entry.name,160) || "曲目"}`,
     `主分：${score}`,
@@ -77,11 +101,12 @@ function songNode(entry) {
   ].join("\n")
 }
 
-export function partnerLogNodes(report) {
+export function partnerLogNodes(report: PartnerLogReport) {
   const title = ["合伙人日志",safeText(report.time,80),safeText(report.trigger,80)].filter(Boolean).join(" · ")
   const lines = [title]
-  for (const account of report.accounts) {
-    if (!account || typeof account !== "object") continue
+  for (const row of report.accounts) {
+    if (!row || typeof row !== "object") continue
+    const account: PartnerLogAccount = row
     if (lines.length > maxNodes) break
     lines.push(`${safeText(account.nickname,100) || "账号"}：成功 ${count(account.success)} · 失败 ${count(account.fail)} · 执行 ${account.attempts == null ? 1 : count(account.attempts)} 轮`)
     const evaluations = Array.isArray(account.evaluations) ? account.evaluations : []
@@ -92,5 +117,5 @@ export function partnerLogNodes(report) {
     }
   }
   if (lines.length > maxNodes) lines.splice(maxNodes-1, 2, "日志较长，仅显示前 99 条。")
-  return lines.map(text => ({type: /** @type {"text"} */ ("text"), text}))
+  return lines.map(text => ({type: "text" as const, text}))
 }

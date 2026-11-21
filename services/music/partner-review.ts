@@ -1,24 +1,80 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+export interface ReviewConfig {
+  mode?: string
+  max_chars?: number
+  api_key?: string
+  api_url?: string
+  model?: string
+  timeout_ms?: number
+  codex_command?: string
+}
+
+type SongId = string | number
+type Artist = { id?: SongId; name?: unknown }
+type Song = { id?: SongId; name?: unknown; ar?: Artist[]; artists?: Artist[]; al?: { name?: unknown };
+  album?: { name?: unknown }; description?: unknown; tags?: unknown }
+
+export interface ReviewWork {
+  id?: SongId
+  song?: Song
+  songInfo?: Song
+  music?: Song
+  resourceId?: SongId
+  songId?: SongId
+  musicId?: SongId
+  lyricContent?: unknown
+  artists?: Artist[]
+  artistList?: Artist[]
+  name?: unknown
+  authorName?: unknown
+  description?: unknown
+  desc?: unknown
+  style?: unknown
+  tags?: unknown
+}
+
+type ReviewApi = (uri: string, data: Record<string, string | number>) => Promise<{
+  songs?: Song[]
+  lrc?: { lyric?: unknown }
+  briefDesc?: unknown
+}>
+
+type ReviewContext = Awaited<ReturnType<typeof collectReviewContext>>
+type ReviewOutput = { comment?: unknown; sources?: unknown }
+type SearchSource = { url?: unknown; type?: unknown }
+type ResponseOutput = { type?: string; status?: string; action?: { sources?: SearchSource[] };
+  content?: { type?: string; text?: string; annotations?: SearchSource[] }[] }
+
+interface ReviewServiceOptions {
+  fetch?: (input: URL, init: RequestInit) => Promise<Response>
+  spawnProcess?: (command: string, args: string[], options: {
+    cwd: string
+    detached: boolean
+    stdio: ["pipe", "pipe", "pipe"]
+    shell: false
+  }) => ChildProcessWithoutNullStreams
+}
+
 // Review collection and schema from Lotus-ReFactor e28c6df.
-const text = (value, limit = 4000) => String(value || "").replace(/<[^>]*>/g, "").slice(0, limit)
-const names = values => (Array.isArray(values) ? values : []).map(value => text(typeof value === "string" || typeof value === "number" ? value : value?.name, 100)).filter(Boolean)
+const text = (value: unknown, limit = 4000) => String(value || "").replace(/<[^>]*>/g, "").slice(0, limit)
+const names = (values: unknown) => (Array.isArray(values) ? values : []).map(value => text(typeof value === "string" || typeof value === "number" ? value : value?.name, 100)).filter(Boolean)
 const schema = {
   type: "object", additionalProperties: false,
   properties: { comment: { type: "string" }, sources: { type: "array", items: { type: "string" } } },
   required: ["comment", "sources"],
 }
 
-export async function collectReviewContext(work, api) {
+export async function collectReviewContext(work: ReviewWork, api: ReviewApi) {
   // Work IDs are not necessarily song IDs. Never silently look up a different
   // song by treating the evaluation ID as a track ID.
-  const song = work.song || work.songInfo || work.music || {}
+  const song: Song = work.song || work.songInfo || work.music || {}
   const id = song.id || work.resourceId || work.songId || work.musicId
   let detail = song
-  const warnings = []
+  const warnings: string[] = []
   let lyrics = text(work.lyricContent, 12000)
   if (id && /^\d+$/.test(String(id))) {
     const responses = await Promise.allSettled([
@@ -43,11 +99,11 @@ export async function collectReviewContext(work, api) {
     album: text(detail.al?.name || detail.album?.name, 300),
     introduction: text(work.description || work.desc || detail.description),
     style: text(work.style, 300), tags: names(work.tags || detail.tags), biography, lyrics, warnings,
-    url: id ? `https://music.163.com/song?id=${encodeURIComponent(id)}` : "",
+    url: id ? `https://music.163.com/song?id=${encodeURIComponent(String(id))}` : "",
   }
 }
 
-export function reviewPrompt(context, maxChars) {
+export function reviewPrompt(context: ReviewContext, maxChars: number) {
   const targetMax = Math.min(80, maxChars)
   const targetMin = Math.min(40, targetMax)
   return `为网易云音乐合伙人的这首具体歌曲写一段中文评价。必须先联网搜索核对歌曲名与作者，防止同名作品混淆。\n`
@@ -57,9 +113,9 @@ export function reviewPrompt(context, maxChars) {
     + `歌曲资料：${JSON.stringify(context)}`
 }
 
-export function validateReview(value, maxChars) {
+export function validateReview(value: ReviewOutput | null | undefined, maxChars: number) {
   const comment = typeof value?.comment === "string" ? value.comment.trim() : ""
-  const sources = Array.isArray(value?.sources) ? [...new Set(value.sources)].filter(url => {
+  const sources = Array.isArray(value?.sources) ? [...new Set(value.sources)].filter((url): url is string => {
     try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) && !parsed.username && !parsed.password } catch { return false }
   }).slice(0, 10) : []
   if (!comment) throw new Error("歌曲资料不足，AI 未生成可发布的乐评")
@@ -70,9 +126,15 @@ export function validateReview(value, maxChars) {
 }
 
 export class PartnerReviewService {
-  constructor({ fetch = globalThis.fetch, spawnProcess = spawn } = {}) { this.fetch = fetch; this.spawn = spawnProcess }
+  private readonly fetch: NonNullable<ReviewServiceOptions["fetch"]>
+  private readonly spawn: NonNullable<ReviewServiceOptions["spawnProcess"]>
 
-  async generate(context, config = {}, signal) {
+  constructor({ fetch = globalThis.fetch, spawnProcess = spawn }: ReviewServiceOptions = {}) {
+    this.fetch = fetch
+    this.spawn = spawnProcess
+  }
+
+  async generate(context: ReviewContext, config: ReviewConfig = {}, signal?: AbortSignal) {
     signal?.throwIfAborted()
     const maxChars = config.max_chars ?? 140
     const prompt = reviewPrompt(context, maxChars)
@@ -81,7 +143,7 @@ export class PartnerReviewService {
     return validateReview(result, maxChars)
   }
 
-  async responses(prompt, config, signal) {
+  async responses(prompt: string, config: ReviewConfig, signal?: AbortSignal): Promise<ReviewOutput> {
     if (!config.api_key || !config.model) throw new Error("乐评 Responses API 需要配置密钥和模型")
     const url = new URL(config.api_url || "https://api.openai.com/v1/responses")
     const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
@@ -99,11 +161,11 @@ export class PartnerReviewService {
       })
     } catch { signal?.throwIfAborted(); throw new Error("乐评 Responses API 连接失败或超时") }
     if (!response.ok) throw new Error(`乐评 Responses API 请求失败（HTTP ${response.status}）`)
-    let data
+    let data: { status?: string; output?: ResponseOutput[] }
     try { data = await response.json() } catch { throw new Error("乐评 API 返回无效 JSON") }
     if (data.status !== "completed" || !data.output?.some(item => item.type === "web_search_call" && item.status === "completed")) throw new Error("乐评 API 未完成联网核对，未发布评论")
     const output = data.output.filter(item => item.type === "message").flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join("")
-    let parsed
+    let parsed: ReviewOutput
     try { parsed = JSON.parse(output) } catch { throw new Error("乐评 API 未返回结构化评价") }
     const searchedUrls = new Set()
     for (const item of data.output) {
@@ -122,7 +184,7 @@ export class PartnerReviewService {
     return parsed
   }
 
-  async codex(prompt, config, signal) {
+  async codex(prompt: string, config: ReviewConfig, signal?: AbortSignal): Promise<ReviewOutput> {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lotus-review-"))
     try {
       const output = path.join(dir, "review.json"), schemaFile = path.join(dir, "schema.json")
@@ -132,11 +194,18 @@ export class PartnerReviewService {
         "--output-schema", schemaFile, "--output-last-message", output]
       if (config.model) args.push("--model", config.model)
       args.push("-")
-      const searched = await new Promise((resolve, reject) => {
-        let child, timer, killTimer, buffer = "", didSearch = false, settled = false, bytes = 0
-        const kill = signal => { try { process.kill(-child.pid, signal) } catch { child?.kill(signal) } }
+      const searched = await new Promise<boolean>((resolve, reject) => {
+        let child: ChildProcessWithoutNullStreams
+        let timer: ReturnType<typeof setTimeout>, killTimer: ReturnType<typeof setTimeout> | undefined
+        let buffer = "", didSearch = false, settled = false, bytes = 0
+        const kill = (signal: NodeJS.Signals) => {
+          try {
+            if (child.pid === undefined) throw new Error("Codex CLI 进程未启动")
+            process.kill(-child.pid, signal)
+          } catch { child?.kill(signal) }
+        }
         const abort = () => fail("乐评生成已取消")
-        const fail = message => {
+        const fail = (message: string) => {
           if (settled) return
           settled = true
           clearTimeout(timer)
@@ -157,7 +226,7 @@ export class PartnerReviewService {
           bytes += chunk.length
           if (bytes > 4 * 1024 * 1024) { fail("Codex 乐评输出过大"); return }
           buffer += chunk.toString()
-          const lines = buffer.split("\n"); buffer = lines.pop()
+          const lines = buffer.split("\n"); buffer = lines.pop() ?? ""
           for (const line of lines) { try { const event = JSON.parse(line); if (event.type === "item.completed" && event.item?.type === "web_search") didSearch = true } catch {} }
         })
         // Drain diagnostic output, but never persist credentials or raw errors.

@@ -4,10 +4,10 @@ import { PermissionService } from "../../core/permissions/service.js"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.js"
 import { formatLocalDateTime } from "../../core/time.js"
 import { safeMediaName } from "../media/files.js"
-import { TuneWeaveService } from "../tuneweave/service.js"
-import { readPartnerLog, partnerLogNodes } from "./partner-log.js"
-import { NeteasePartnerTask } from "./partner-task.js"
-import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare } from "./service.js"
+import { TuneWeaveService } from "../tuneweave/service.ts"
+import { readPartnerLog, partnerLogNodes } from "./partner-log.ts"
+import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
+import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicTrack, type MusicConfig } from "./service.ts"
 
 const aliases: Readonly<Record<string, string>> = {
   网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq",
@@ -27,23 +27,19 @@ const searchNotes: Readonly<Record<string, string>> = {
 
 type Global = Awaited<ReturnType<typeof loadGlobalConfig>>
 type Context = MessageFallbackContext
-type Track = { readonly ref: string; readonly name: string; readonly platform: string; readonly id: string;
-  readonly artists?: readonly { readonly name: string }[] }
 type Prepared = Awaited<ReturnType<MusicService["prepare"]>>
 type Menu = { readonly name: string; readonly platform: string }
 type ScanType = { readonly name: string; readonly type: string }
 type SessionBase = { readonly api: MusicService; expires: number }
 type SearchSession = SessionBase & { readonly stage: "search"; readonly platform: string; readonly keyword: string;
-  readonly timeoutMs: number; page: number; tracks?: readonly Track[]; loading?: boolean }
+  readonly timeoutMs: number; page: number; tracks?: readonly MusicTrack[]; loading?: boolean }
 type Scan = { readonly api: MusicService; readonly platform: string; readonly partner?: true; readonly timeoutMs?: number; readonly pollMs?: number }
 type ScanSession = SessionBase & Scan & { readonly stage: "polling"; readonly controller: AbortController }
 type Session = SearchSession | ScanSession |
   (SessionBase & { readonly stage: "platform"; readonly platforms: readonly Menu[] }) |
   (SessionBase & { readonly stage: "type"; readonly platform: string; readonly types: readonly ScanType[] })
-type Report = { readonly accounts: readonly { readonly nickname: string; readonly success: number; readonly fail: number }[];
-  readonly trigger?: string; readonly time: string }
 type PartnerJob = { readonly controller: AbortController;
-  promise?: Promise<Report | { readonly skipped: boolean; readonly reason: string }> }
+  promise?: ReturnType<NeteasePartnerTask["execute"]> }
 interface Services {
   readonly signal?: AbortSignal
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
@@ -75,14 +71,14 @@ function apiOrigin(address: unknown) {
 
 async function openMusic() {
   const config = await loadGlobalConfig()
-  const music = config.music as { enable?: boolean; default_platform?: string; session_timeout_ms?: number }
+  const music = config.music as Partial<MusicConfig>
   const tools = config.tools as { bin_dir?: string }
   if (music.enable === false) throw new Error("点歌功能已关闭")
   return { api: new MusicService({ tuneweaveConfig: config.tuneweave, config: music, toolsPath: tools.bin_dir }),
     defaultPlatform: music.default_platform || "netease", timeoutMs: music.session_timeout_ms || 120000 }
 }
 
-async function renderPartnerReport(title: string, report: Report, userId?: number) {
+async function renderPartnerReport(title: string, report: PartnerReport, userId?: number) {
   const items = report.accounts.map(account => ({
     label: account.nickname,
     value: `成功 ${account.success} · 失败 ${account.fail}`,
@@ -138,7 +134,7 @@ export function createMusicCommands({ signal, mediaRuntime }: Services) {
       await before?.()
       active.throwIfAborted()
       const task = new NeteasePartnerTask({ tuneweaveConfig: config.tuneweave })
-      job.promise = task.execute(config.netease_partner as Record<string, unknown>, trigger, { signal: active, once })
+      job.promise = task.execute(config.netease_partner as PartnerConfig, trigger, { signal: active, once })
       return await job.promise
     } finally {
       if (partnerJob === job) partnerJob = undefined
@@ -178,7 +174,7 @@ export function createMusicCommands({ signal, mediaRuntime }: Services) {
     throw new Error("语音发送失败。")
   }
 
-  async function sendTrackInfo(context: Context, track: Track, media: Prepared) {
+  async function sendTrackInfo(context: Context, track: MusicTrack, media: Prepared) {
     moduleSignal.throwIfAborted()
     const share = musicShare(track, media.stream)
     if (share && context.sendMusicCard) {
@@ -193,7 +189,7 @@ export function createMusicCommands({ signal, mediaRuntime }: Services) {
     const fallback = `《${track.name}》 · ${artists}`
     const image = await renderStatusCard({ title: track.name, subtitle: artists,
       message: `完整音频 · ${Math.round(media.duration)} 秒`,
-      items: [{ label: "实际音源", value: musicNames[media.stream.resolved_platform] || media.stream.resolved_platform || musicNames[track.platform] }],
+      items: [{ label: "实际音源", value: musicNames[media.stream.resolved_platform ?? ""] || media.stream.resolved_platform || musicNames[track.platform] }],
     }).catch(() => undefined)
     await imageReply(context, image, fallback)
   }
@@ -203,7 +199,7 @@ export function createMusicCommands({ signal, mediaRuntime }: Services) {
     try {
       const search = await session.api.search(session.platform, session.keyword, session.page)
       if (sessions.get(key) !== session || moduleSignal.aborted) return
-      const tracks: readonly Track[] = search.tracks
+      const tracks: readonly MusicTrack[] = search.tracks
       session.tracks = tracks
       session.expires = Date.now() + session.timeoutMs
       const message = tracks.length ?
@@ -377,7 +373,7 @@ export function createMusicCommands({ signal, mediaRuntime }: Services) {
       const old = sessions.get(key)
       if (old) drop(key, old)
       const api = new MusicService({ tuneweaveConfig: config.tuneweave })
-      const partner = config.netease_partner as { login_timeout_ms?: number; login_poll_ms?: number }
+      const partner = config.netease_partner as PartnerConfig
       try {
         await scan(context, key, { api, platform: "netease", partner: true,
           timeoutMs: loginTime(partner.login_timeout_ms, musicLoginTimeout("netease")),

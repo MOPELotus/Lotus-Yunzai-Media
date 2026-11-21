@@ -5,11 +5,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
 import YAML from "yaml"
-import { NeteasePartnerAccounts } from "../services/music/partner-account.js"
-import { NeteasePartnerTask } from "../services/music/partner-task.js"
-import { PartnerReviewService } from "../services/music/partner-review.js"
-import { partnerLogNodes, readPartnerLog } from "../services/music/partner-log.js"
-import { createPartnerSchedule, partnerCron } from "../services/music/partner-schedule.js"
+import { NeteasePartnerAccounts } from "../services/music/partner-account.ts"
+import { NeteasePartnerTask } from "../services/music/partner-task.ts"
+import { PartnerReviewService } from "../services/music/partner-review.ts"
+import { partnerLogNodes, readPartnerLog } from "../services/music/partner-log.ts"
+import { createPartnerSchedule, partnerCron } from "../services/music/partner-schedule.ts"
 
 test("合伙人先核验旧账号，沿用任务顺序、账号偏好和未确认评分记录", async () => {
   const dir = await mkdtemp(join(tmpdir(),"lotus-partner-task-"))

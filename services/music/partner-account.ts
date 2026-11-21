@@ -5,17 +5,31 @@ import YAML from "yaml"
 import { resolveData } from "../../core/path.js"
 import { formatLocalIso } from "../../core/time.js"
 
-const accountWrites = new Map()
+export interface PartnerAccount {
+  uid?: string | number
+  nickname?: string
+  qq?: string | number
+  extraCount?: string | number
+  comment?: boolean
+  tuneweave_account?: string
+  cookie?: string
+  updated_at?: string
+}
 
-async function readAccounts(file) {
+const accountWrites = new Map<string, Promise<PartnerAccount>>()
+
+async function readAccounts(file: string): Promise<PartnerAccount[]> {
   try {
     const data = YAML.parse(await fs.readFile(file, "utf8")) || {}
     return Array.isArray(data.accounts) ? data.accounts : []
-  } catch (error) { if (error.code === "ENOENT") return []; throw error }
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error }
 }
 
 // The account files used by the old NetEase partner command are shared with music login.
 export class NeteasePartnerAccounts {
+  readonly accountsFile: string
+  now: () => Date
+
   constructor(accountsFile = resolveData("netease", "accounts.yaml")) {
     this.accountsFile = accountsFile
     this.now = () => new Date()
@@ -27,7 +41,7 @@ export class NeteasePartnerAccounts {
     return readAccounts(file)
   }
 
-  saveAccount(account, { signal, onlyIfLegacy = false } = {}) {
+  saveAccount(account: PartnerAccount, { signal, onlyIfLegacy = false }: { signal?: AbortSignal; onlyIfLegacy?: boolean } = {}) {
     const file = path.resolve(this.accountsFile)
     const task = (accountWrites.get(file) || Promise.resolve()).catch(() => {}).then(async () => {
       signal?.throwIfAborted()

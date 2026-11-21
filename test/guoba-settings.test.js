@@ -102,6 +102,41 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
   }
 })
 
+test("媒体面板仅校验明确编辑项，保留旧直播冷却与未编辑平台", async () => {
+  const data = await mkdtemp(join(tmpdir(), "lotus-media-edited-fields-"))
+  try {
+    const bilibili = join(data, "yuki-plugin/config/bilibili")
+    const weibo = join(data, "yuki-plugin/config/weibo")
+    await Promise.all([bilibili, weibo].map(path => mkdir(path, { recursive: true })))
+    const oldBilibili = "# 旧直播配置\r\nliveAtAllCD: 30 # 原冷却\r\nparseVideoLink: 1\r\n"
+    const oldWeibo = "# 旧微博配置\r\npushMsgMode: 0\r\n"
+    const primaryBilibili = join(bilibili, "config.yaml"), primaryWeibo = join(weibo, "config.yaml")
+    const overrideBilibili = join(bilibili, "config.guoba.support.yaml"), overrideWeibo = join(weibo, "config.guoba.support.yaml")
+    await writeFile(primaryBilibili, oldBilibili)
+    await writeFile(primaryWeibo, oldWeibo)
+    const { configInfo: form } = supportGuoba(data)
+    const expanded = { "bilibili.liveAtAllCD": 30, "weibo.pushMsgMode": 1 }
+    expect((await form.getConfigData()).bilibili.liveAtAllCD).toBe(30)
+
+    expect(await form.setConfigData(expanded, { Result, changedFields: ["weibo.pushMsgMode"] })).toEqual({ ok: true })
+    expect((await form.getConfigData()).weibo.pushMsgMode).toBe(1)
+    expect(YAML.parse(await readFile(overrideWeibo, "utf8"))).toEqual({ pushMsgMode: 1 })
+    expect(existsSync(overrideBilibili)).toBe(false)
+    expect(await form.setConfigData(expanded, { Result, changedFields: ["bilibili.liveAtAllCD"] })).toEqual({ ok: false, status: 422 })
+    expect(await form.setConfigData(expanded, { Result })).toEqual({ ok: false, status: 422 })
+    expect(existsSync(overrideBilibili)).toBe(false)
+
+    expect(await form.setConfigData({ "bilibili.liveAtAllCD": 30, "bilibili.parseVideoLink": 0 }, {
+      Result, changedFields: ["bilibili.parseVideoLink"],
+    })).toEqual({ ok: true })
+    expect(YAML.parse(await readFile(overrideBilibili, "utf8"))).toEqual({ liveAtAllCD: 30, parseVideoLink: 0 })
+    expect(await readFile(primaryBilibili, "utf8")).toBe(oldBilibili)
+    expect(await readFile(primaryWeibo, "utf8")).toBe(oldWeibo)
+  } finally {
+    await rm(data, { force: true, recursive: true })
+  }
+})
+
 test("B站和微博图片布局沿用原开关与截图高度", async () => {
   const data = await mkdtemp(join(tmpdir(),"lotus-subscription-layout-"))
   try {

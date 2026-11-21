@@ -94,13 +94,14 @@ export function supportGuoba(directory = dataPath) {
         }))
         return Object.fromEntries(entries)
       },
-      async setConfigData(values, { Result }) {
+      async setConfigData(values, { Result, changedFields }) {
+        const edited = Array.isArray(changedFields) ? new Set(changedFields) : undefined
         const changes = new Map()
         for (const { id, label, fields } of platforms) {
           const selected = []
           for (const field of fields) {
             const name = `${id}.${field.key}`
-            if (!Object.hasOwn(values, name)) continue
+            if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
             const value = submittedValue(field, values[name])
             if (value === undefined) {
               return Result.error(`请填写有效的${label}动态推送设置。`, 422)

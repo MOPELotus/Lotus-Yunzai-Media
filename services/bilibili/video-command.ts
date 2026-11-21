@@ -178,7 +178,8 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) 
       if (signal?.aborted) return
       const config = await loadGlobalConfig()
       const permissions = new PermissionService({ permissions: config.permissions })
-      if (!permissions.explain(context, "bilibili.download").ok) throw new Error("你没有使用 B站下载的权限。")
+      const subject = context.canManagePackages ? { ...context, isMaster: true } : context
+      if (!permissions.explain(subject, "bilibili.download").ok) throw new Error("你没有使用 B站下载的权限。")
       const bilibili = config.bilibili as BiliConfig
       const settings = { ...bilibili, ...bilibili.download }
       const download = normalizeDownloadConfig(settings)
@@ -186,7 +187,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) 
       const installed = await Promise.all(["ffmpeg", "ffprobe"].map(name => resolveCommandPath(name, download.tools_path)))
       if (signal?.aborted) return
       // Requests with working local tools do not wait for remote version checks.
-      if (context.canManagePackages && permissions.explain(context, "tools.install").ok && installed.some(file => !file)) {
+      if (context.canManagePackages && permissions.explain(subject, "tools.install").ok && installed.some(file => !file)) {
         const tools = await new ToolInstallerService({ config: config.tools }).ensureAll()
         if (!tools.ok) {
           const failures = tools.items?.filter(item => !item.ok).map(item => `${item.name}:${item.reason}`).join(" / ")

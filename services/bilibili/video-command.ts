@@ -4,13 +4,13 @@ import { loadGlobalConfig } from "../../core/config/global.js"
 import { dataPath } from "../../core/path.js"
 import { PermissionService } from "../../core/permissions/service.js"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.js"
-import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../media/files.js"
-import { buildMediaMessageText, isMediaCommandText } from "../media/message.js"
+import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../media/files.ts"
+import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
 import { createSubscriptionConfig } from "../subscriptions/config.js"
 import { ToolInstallerService } from "../tools/installer.js"
 import {
   BilibiliService, formatBilibiliPreviewText, formatNumber, normalizeDownloadConfig, resolveCommandPath,
-} from "./service.js"
+} from "./service.ts"
 
 const featureNames = ["[media] B 站解析"] as const
 const searchWindow = 120_000
@@ -197,26 +197,26 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) 
       if (signal?.aborted) return
       result = await service.download(target, settings, {
         signal,
-        onEvent: (event: { message?: string }) => {
-          if (event.message) console.debug("[media] B 站下载：" + event.message)
+        onEvent: event => {
+          console.debug("[media] B 站下载：" + event.message)
         },
       })
       if (signal?.aborted) return
-      if (!result.ok || !("files" in result)) {
-        if ("reason" in result && result.reason === "live_download_unsupported" && result.info) {
+      if (!result.ok) {
+        if (result.reason === "live_download_unsupported") {
           return renderInfo(context, service, result.info, undefined, false)
         }
         throw new Error(mediaFailureMessage(result))
       }
-      for (const file of result.files || []) {
+      for (const file of result.files) {
         if (signal?.aborted) return
         await sendMediaFile({ ...context, reply: (...args: Parameters<MessageFallbackContext["reply"]>) => reply(context, ...args) },
-          file, { ...download, file_name: "fileNames" in result ? result.fileNames?.[file] : undefined })
+          file, { ...download, file_name: result.fileNames[file] })
       }
     } catch (error) {
       await reportError(context, title, error)
     } finally {
-      if (result && "taskDir" in result && result.taskDir) {
+      if (result?.ok) {
         await service.releaseTask(result).catch(error => {
           console.warn("[media] B 站任务清理失败：" + error.message)
         })

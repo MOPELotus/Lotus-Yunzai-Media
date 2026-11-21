@@ -6,7 +6,7 @@ import { PermissionService } from "../../core/permissions/service.js"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.js"
 import { createSubscriptionConfig } from "../subscriptions/config.js"
 import { biliSharedSession } from "../subscriptions/bilibili/shared.js"
-import { BilibiliService } from "./service.js"
+import { BilibiliService } from "./service.ts"
 
 const command = "#B站登录"
 const settings = createSubscriptionConfig(dataPath, lockFile)

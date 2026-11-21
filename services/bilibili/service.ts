@@ -8,10 +8,235 @@ import QRCode from "qrcode"
 import YAML from "yaml"
 import { resolveData, rootPath } from "../../core/path.js"
 import { formatLocalIso } from "../../core/time.js"
-import { TuneWeaveService } from "../tuneweave/service.js"
-import { downloadRanges } from "../media/range-download.js"
-import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/tasks.js"
-import { packMediaFiles, runMediaProcess, mediaLimitFailure, safeMediaName } from "../media/files.js"
+import { TuneWeaveService, type TuneWeaveConfig } from "../tuneweave/service.ts"
+import { downloadRanges } from "../media/range-download.ts"
+import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/tasks.ts"
+import { packMediaFiles, runMediaProcess, mediaLimitFailure, safeMediaName } from "../media/files.ts"
+
+type VideoId = { bvid: string; aid?: string } | { bvid?: string; aid: string }
+type BilibiliTarget = (VideoId & { type: "video" }) | { type: "live"; roomId: string }
+type BilibiliInput = string | BilibiliTarget
+
+interface TuneWeaveVideo {
+  id: string
+  ref: string
+  title?: string
+  description?: string
+  cover_url?: string
+  creators?: { name: string; ref?: string; resource_ref?: string }[]
+  duration_ms?: number
+  published_at?: string
+  play_count?: number
+  extensions?: {
+    bvid?: string
+    aid?: string | number
+    ctime?: number | string
+    category_name?: string
+    category_name_v2?: string
+    copyright?: string
+    like_count?: number
+    coin_count?: number
+    favorite_count?: number
+    danmaku_count?: number
+    comment_count?: number
+    share_count?: number
+    first_cid?: string | number
+  }
+}
+
+interface TuneWeavePart {
+  id: string
+  page: number
+  title?: string
+  duration_ms?: number
+}
+
+interface TuneWeaveTrack {
+  url: string
+  backup_urls?: string[]
+}
+
+interface TuneWeavePlayback {
+  headers?: Record<string, string>
+  video_tracks?: (TuneWeaveTrack & { id: number; codec_id?: number })[]
+  audio_tracks?: (TuneWeaveTrack & { bandwidth: number })[]
+  progressive_segments?: (TuneWeaveTrack & { order: number })[]
+}
+
+interface TuneWeaveQr {
+  transaction_id: string
+  url: string
+  image_data_url?: string
+}
+
+interface TuneWeaveQrResult {
+  state: string
+  profile?: { authenticated?: boolean; platform?: string; account?: string }
+}
+
+interface LiveRoomResponse {
+  code: number
+  message?: string
+  data?: {
+    title?: string
+    user_cover?: string
+    keyframe?: string
+    uname?: string
+    live_status?: number
+    online?: number
+    area_name?: string
+    parent_area_name?: string
+  }
+}
+
+interface BilibiliAccount {
+  cookie?: string
+  tuneweave_account?: string
+  saved_at?: string
+  source?: string
+}
+
+type StoredAccount = { cookie?: string | null; tuneweave_account?: string | null }
+
+interface PreviewStats {
+  view?: number
+  like?: number
+  coin?: number
+  favorite?: number
+  danmaku?: number
+  reply?: number
+  share?: number
+}
+
+interface VideoPreview {
+  title: string
+  owner?: string
+  url?: string
+  bvid?: string
+  ownerId?: string
+  duration: number
+  createdAt?: number | string
+  publishedAt?: string
+  category?: string
+  categoryV2?: string
+  copyright?: string
+  stat?: PreviewStats
+  desc?: string
+  description?: string
+}
+
+interface VideoPage {
+  index: number
+  page: number
+  cid?: string
+  partId?: string
+  part?: string
+  duration?: number
+}
+
+interface VideoInfo extends VideoPreview {
+  type: "video"
+  ref: string
+  url: string
+  cover: string
+  owner: string
+  aid?: string | number
+  cid?: string | number
+  pages: VideoPage[]
+  desc: string
+  description: string
+  stat: PreviewStats & { bandwidth?: number }
+}
+
+interface LiveInfo {
+  type: "live"
+  title: string
+  roomId: string
+  url: string
+  playerUrl: string
+  cover: string
+  owner: string
+  liveStatus: string
+  online: number
+  desc: string
+}
+
+export interface BilibiliSearchResult {
+  title: string
+  ref: string
+  bvid: string
+  author: string
+  play?: number
+  duration: number
+  url: string
+}
+
+type MultiPagePolicy = "zip" | "all" | "first"
+
+export interface BilibiliDownloadConfig {
+  enable: boolean
+  concurrency: number
+  tools_path: string
+  resolution: number
+  duration_limit_seconds: number
+  video_size_limit_mb: number
+  max_estimated_size_mb: number
+  multi_page_policy: MultiPagePolicy
+  timeout_ms: number
+}
+
+type DownloadConfigInput = Partial<Record<keyof BilibiliDownloadConfig, unknown>> & { download?: DownloadConfigInput }
+
+interface DownloadPlan {
+  ok: true
+  info: VideoInfo
+  pages: VideoPage[]
+  policy: MultiPagePolicy
+  downloader: "tuneweave-js"
+  estimatedSizeMb: number
+}
+
+type DownloadFailure =
+  | { ok: false; reason: "live_download_unsupported"; info: LiveInfo }
+  | { ok: false; reason: "duration_limit"; info: VideoInfo; limitSeconds: number }
+  | { ok: false; reason: "estimated_size_limit"; info: VideoInfo; estimatedSizeMb: number; limitMb: number }
+
+interface DownloadSuccess extends DownloadPlan {
+  taskDir: string
+  taskId: string
+  files: string[]
+  fileNames: Record<string, string>
+}
+
+interface DownloadEvent {
+  type: "download-start" | "download-part"
+  message: string
+}
+
+interface DownloadHooks {
+  signal?: AbortSignal
+  onEvent?: (event: DownloadEvent) => void | Promise<void>
+}
+
+interface BilibiliOptions {
+  fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>
+  tuneweave?: Pick<TuneWeaveService, "config" | "request">
+  tuneweaveConfig?: Partial<TuneWeaveConfig>
+  tuneAccount?: string
+  searchLimit?: number | string
+  now?: () => Date
+  accountFile?: string
+  legacyAccountFiles?: readonly string[]
+  tasksDir?: string
+  spawn?: typeof spawn
+}
+
+interface QrOptions {
+  qrcodeKey?: string
+  timeoutMs?: number
+  pollMs?: number
+  signal?: AbortSignal
+}
 
 const BILI_SHORT_HOSTS = new Set(["b23.tv", "bili2233.cn"])
 const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "live.bilibili.com", ...BILI_SHORT_HOSTS])
@@ -28,7 +253,18 @@ const COMMON_HEADERS = Object.freeze({
 
 
 export class BilibiliService {
-  constructor(options = {}) {
+  readonly fetch: NonNullable<BilibiliOptions["fetch"]>
+  readonly tuneweave: Pick<TuneWeaveService, "config" | "request">
+  tuneAccount: string
+  readonly searchLimit: number
+  readonly now: () => Date
+  readonly accountFile: string
+  readonly legacyAccountFiles: readonly string[]
+  readonly tasksDir: string
+  readonly spawn: typeof spawn
+  private pendingAlias?: string
+
+  constructor(options: BilibiliOptions = {}) {
     this.fetch = options.fetch || globalThis.fetch
     this.tuneweave = options.tuneweave || new TuneWeaveService({ config: options.tuneweaveConfig, fetch: this.fetch })
     this.tuneAccount = options.tuneAccount || ""
@@ -55,11 +291,11 @@ export class BilibiliService {
     const clean = raw.replace(/\\\//g, "/")
     const match = clean.match(/https?:\/\/(?:www\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)
     const bare = bareB23InText.exec(clean)
-    if (bare && (!match || bare.index < match.index)) return "https://b23.tv/" + bare[1]
+    if (bare && (!match || bare.index < (match.index ?? 0))) return "https://b23.tv/" + bare[1]
     return match?.[0] || ""
   }
 
-  async resolveTarget(input = "") {
+  async resolveTarget(input = ""): Promise<BilibiliTarget> {
     const text = String(input || "").trim()
     if (!text) throw new Error("empty bilibili target")
     if (/^BV[1-9A-Za-z]{10}$/i.test(text)) return { type: "video", bvid: text }
@@ -70,7 +306,7 @@ export class BilibiliService {
     const url = await this.resolveShortLink(parsed)
     const destination = url.href
     const live = destination.match(/live\.bilibili\.com\/(\d+)/i)
-    if (live) return { type: "live", roomId: live[1] }
+    if (live?.[1]) return { type: "live", roomId: live[1] }
     const bvid = url.pathname.match(/BV[1-9A-Za-z]{10}/i)?.[0]
     if (bvid) return { type: "video", bvid }
     const aid = url.pathname.match(/av(\d+)/i)?.[1]
@@ -78,7 +314,7 @@ export class BilibiliService {
     throw new Error("unsupported bilibili target")
   }
 
-  async resolveShortLink(url) {
+  async resolveShortLink(url: URL): Promise<URL> {
     const signal = AbortSignal.timeout(15000)
     for (let hops = 0; hops <= 5; hops++) {
       if (!BILI_SHORT_HOSTS.has(url.hostname)) return url
@@ -92,52 +328,82 @@ export class BilibiliService {
     throw new Error("B 站短链接未跳转至可识别的地址")
   }
 
-  async getInfo(input) {
+  async getInfo(input: BilibiliInput): Promise<VideoInfo | LiveInfo> {
     const target = typeof input === "string" ? await this.resolveTarget(input) : input
     if (target.type === "live") return this.getLiveInfo(target.roomId)
     return this.getVideoInfo(target)
   }
 
-  async tuneRequest(route, params = {}) {
+  async tuneRequest<Data>(route: string, params: Record<string, string> = {}): Promise<Data> {
     const stored = this.tuneAccount ? null : await this.loadAccount()
     this.tuneAccount ||= stored?.tuneweave_account || ""
     const query = new URLSearchParams({ ...params, ...(this.tuneAccount ? { account: this.tuneAccount } : {}) })
-    return this.tuneweave.request(route + (query.size ? "?" + query : ""))
+    return this.tuneweave.request<Data>(route + (query.size ? "?" + query : ""))
   }
 
-  async getVideoInfo(target) {
+  async getVideoInfo(target: VideoId): Promise<VideoInfo> {
     const ref = target.bvid ? `bilibili:bvid:${target.bvid}` : `bilibili:aid:${target.aid}`
-    const detail = await this.tuneRequest(`/v1/videos/${encodeURIComponent(ref)}`, { kind: "video" })
+    const route = `/v1/videos/${encodeURIComponent(ref)}`
+    const detail = await this.tuneRequest<{ video?: TuneWeaveVideo }>(route, { kind: "video" })
     const data = detail?.video
     if (!data?.ref) throw new Error("TuneWeave 视频详情不完整")
-    const ext = data.extensions || {}, pages = []
+    const ext = data.extensions || {}
+    const pages: TuneWeavePart[] = []
     const bvid = ext.bvid || target.bvid
     if (bvid && !/^BV[1-9A-Za-z]{10}$/i.test(bvid)) throw new Error("TuneWeave 视频编号无效")
     for (let offset = 0; offset < 10000; offset += 100) {
-      const part = await this.tuneRequest(`/v1/videos/${encodeURIComponent(ref)}/parts`, { kind: "video", limit: "100", offset: String(offset) })
+      const part = await this.tuneRequest<TuneWeavePart[]>(route + "/parts", { kind: "video", limit: "100", offset: String(offset) })
       pages.push(...part)
       if (part.length < 100) break
       if (offset === 9900) throw new Error("视频分P数量超过限制")
     }
     const description = stripHtml(data.description)
     const ownerRef = data.creators?.[0]?.ref ?? data.creators?.[0]?.resource_ref
-    return { type: /** @type {"video"} */ ("video"), ref: data.ref, title: stripHtml(data.title), bvid: ext.bvid || target.bvid, aid: ext.aid || target.aid,
-      url: `https://www.bilibili.com/video/${ext.bvid || target.bvid || "av" + target.aid}`,
-      cover: normalizeBiliImage(data.cover_url || ""), owner: data.creators?.map(c => c.name).join(" / ") || "",
+    return {
+      type: "video",
+      ref: data.ref,
+      title: stripHtml(data.title),
+      bvid,
+      aid: ext.aid || target.aid,
+      url: `https://www.bilibili.com/video/${bvid || "av" + target.aid}`,
+      cover: normalizeBiliImage(data.cover_url || ""),
+      owner: data.creators?.map(c => c.name).join(" / ") || "",
       ownerId: typeof ownerRef === "string" ? /^bilibili:user:([1-9]\d*)$/u.exec(ownerRef)?.[1] : undefined,
       duration: Number(data.duration_ms || 0) / 1000,
-      createdAt: ext.ctime, publishedAt: data.published_at, category: ext.category_name, categoryV2: ext.category_name_v2, copyright: ext.copyright,
-      stat: { view: data.play_count, like: ext.like_count, coin: ext.coin_count, favorite: ext.favorite_count, danmaku: ext.danmaku_count, reply: ext.comment_count, share: ext.share_count },
-      cid: ext.first_cid, pages: pages.map((p, i) => ({ index: i + 1, cid: p.id.replace(/^cid:/, ""), partId: p.id, page: p.page, part: stripHtml(p.title), duration: Number(p.duration_ms || 0) / 1000 })),
-      desc: description.slice(0, 180), description }
+      createdAt: ext.ctime,
+      publishedAt: data.published_at,
+      category: ext.category_name,
+      categoryV2: ext.category_name_v2,
+      copyright: ext.copyright,
+      stat: {
+        view: data.play_count,
+        like: ext.like_count,
+        coin: ext.coin_count,
+        favorite: ext.favorite_count,
+        danmaku: ext.danmaku_count,
+        reply: ext.comment_count,
+        share: ext.share_count,
+      },
+      cid: ext.first_cid,
+      pages: pages.map((part, i) => ({
+        index: i + 1,
+        cid: part.id.replace(/^cid:/, ""),
+        partId: part.id,
+        page: part.page,
+        part: stripHtml(part.title),
+        duration: Number(part.duration_ms || 0) / 1000,
+      })),
+      desc: description.slice(0, 180),
+      description,
+    }
   }
 
-  async getLiveInfo(roomId) {
+  async getLiveInfo(roomId: string | number): Promise<LiveInfo> {
     const json = await this.requestJson(`${LIVE_INFO_API}?room_id=${encodeURIComponent(roomId)}`)
     if (json.code !== 0) throw new Error(json.message || `B站直播接口错误 ${json.code}`)
     const data = json.data || {}
     return {
-      type: /** @type {"live"} */ ("live"),
+      type: "live",
       title: stripHtml(data.title || `直播间 ${roomId}`),
       roomId: String(roomId),
       url: `https://live.bilibili.com/${roomId}`,
@@ -150,13 +416,20 @@ export class BilibiliService {
     }
   }
 
-  /** @returns {Promise<Array<{title: string, ref: string, bvid: string, author: string, play?: number, duration: number, url: string}>>} */
-  async search(keyword, { page = 1, limit = this.searchLimit } = {}) {
-    const items = await this.tuneRequest("/v1/search", { platform: "bilibili", type: "video", q: keyword, limit: String(limit), offset: String((page - 1) * limit) })
-    return items.filter(item => item.type === "video").map(({ data }) => ({ title: stripHtml(data.title), ref: data.ref, bvid: data.extensions?.bvid || data.id.replace(/^bvid:/, ""), author: data.creators?.map(c => c.name).join(" / ") || "", play: data.play_count, duration: Number(data.duration_ms || 0) / 1000, url: `https://www.bilibili.com/video/${data.extensions?.bvid || data.id.replace(/^bvid:/, "")}` }))
+  async search(keyword: string, { page = 1, limit = this.searchLimit } = {}): Promise<BilibiliSearchResult[]> {
+    const items = await this.tuneRequest<{ type: string; data: TuneWeaveVideo }[]>("/v1/search", {
+      platform: "bilibili", type: "video", q: keyword, limit: String(limit), offset: String((page - 1) * limit),
+    })
+    return items.filter(item => item.type === "video").map(({ data }) => {
+      const bvid = data.extensions?.bvid || data.id.replace(/^bvid:/, "")
+      return {
+        title: stripHtml(data.title), ref: data.ref, bvid, author: data.creators?.map(c => c.name).join(" / ") || "",
+        play: data.play_count, duration: Number(data.duration_ms || 0) / 1000, url: `https://www.bilibili.com/video/${bvid}`,
+      }
+    })
   }
 
-  async buildDownloadPlan(input, config = {}) {
+  async buildDownloadPlan(input: BilibiliInput, config: DownloadConfigInput = {}): Promise<DownloadPlan | DownloadFailure> {
     const info = await this.getInfo(input)
     if (info.type !== "video") {
       return {
@@ -192,7 +465,7 @@ export class BilibiliService {
     }
   }
 
-  async download(input, config = {}, hooks = {}) {
+  async download(input: BilibiliInput, config: DownloadConfigInput = {}, hooks: DownloadHooks = {}): Promise<DownloadSuccess | DownloadFailure> {
     const download = normalizeDownloadConfig(config)
     const plan = await this.buildDownloadPlan(input, download)
     if (!plan.ok) return plan
@@ -216,18 +489,21 @@ export class BilibiliService {
       return { ...plan, ok: true, taskDir: task.dir, taskId: task.id, files, fileNames }
     } catch (error) {
       await releaseMediaTask(this.tasksDir, task.dir).catch(cleanupError => {
-        globalThis.logger?.warn?.(`[media] B 站任务清理失败： ${cleanupError.message}`)
+        const { logger } = globalThis as typeof globalThis & { logger?: { warn?: (message: string) => void } }
+        logger?.warn?.(`[media] B 站任务清理失败： ${cleanupError.message}`)
       })
       throw error
     }
   }
 
-  async downloadWithTuneWeave(plan, download, workDir, hooks = {}) {
+  async downloadWithTuneWeave(plan: DownloadPlan, download: BilibiliDownloadConfig, workDir: string, hooks: DownloadHooks = {}): Promise<string[]> {
     const ffmpeg = await resolveCommandPath("ffmpeg", download.tools_path)
     if (!ffmpeg) throw new Error("未找到 FFmpeg，请先初始化工具环境")
-    const files = [], signal = hooks.signal
+    const files: string[] = []
+    const signal = hooks.signal
+    const processOptions = { cwd: workDir, spawnImpl: this.spawn, timeoutMs: download.timeout_ms, signal }
     for (const page of plan.pages) {
-      const manifest = await this.tuneRequest(`/v1/videos/${encodeURIComponent(plan.info.ref)}/playback`, { kind: "video", part: page.partId || "cid:" + page.cid })
+      const manifest = await this.tuneRequest<TuneWeavePlayback>(`/v1/videos/${encodeURIComponent(plan.info.ref)}/playback`, { kind: "video", part: page.partId || "cid:" + page.cid })
       if (!/^\d+$/.test(String(page.cid)) || !Number.isSafeInteger(page.page) || page.page < 1) {
         throw new Error("TuneWeave 视频分 P 编号无效")
       }
@@ -236,24 +512,27 @@ export class BilibiliService {
       await emitBiliEvent(hooks, { type: "download-part", message: `正在下载 P${page.page}，JS 并发 ${download.concurrency}。` })
       if (manifest.video_tracks?.length) {
         const videos = [...manifest.video_tracks].sort((a, b) => b.id - a.id || Number(a.codec_id !== 7) - Number(b.codec_id !== 7))
-        const video = videos.find(t => t.id <= download.resolution) || videos.at(-1)
+        const video = videos.find(t => t.id <= download.resolution) ?? videos[videos.length - 1]!
         const audio = [...(manifest.audio_tracks || [])].sort((a, b) => b.bandwidth - a.bandwidth)[0]
         const videoFile = path.join(workDir, stem + ".video"), audioFile = path.join(workDir, stem + ".audio")
-        const operations = [downloadRanges([video.url, ...video.backup_urls || []], videoFile, options)]
-        if (audio) operations.push(downloadRanges([audio.url, ...audio.backup_urls || []], audioFile, options))
+        const operations = [downloadRanges([video.url, ...(video.backup_urls || [])], videoFile, options)]
+        if (audio) operations.push(downloadRanges([audio.url, ...(audio.backup_urls || [])], audioFile, options))
         const downloads = await Promise.allSettled(operations)
-        const failure = downloads.find(r => r.status === "rejected"); if (failure) throw failure.reason
-        await runMediaProcess(ffmpeg, ["-nostdin", "-y", "-i", videoFile, ...(audio ? ["-i", audioFile] : []), "-map", "0:v:0", ...(audio ? ["-map", "1:a:0"] : []), "-c", "copy", "-movflags", "+faststart", output], { cwd: workDir, spawnImpl: this.spawn, timeoutMs: download.timeout_ms, signal })
-        await fs.rm(videoFile, { force: true }); await fs.rm(audioFile, { force: true })
+        const failure = downloads.find(r => r.status === "rejected")
+        if (failure) throw failure.reason
+        await runMediaProcess(ffmpeg, ["-nostdin", "-y", "-i", videoFile, ...(audio ? ["-i", audioFile] : []), "-map", "0:v:0", ...(audio ? ["-map", "1:a:0"] : []), "-c", "copy", "-movflags", "+faststart", output], processOptions)
+        await fs.rm(videoFile, { force: true })
+        await fs.rm(audioFile, { force: true })
       } else if (manifest.progressive_segments?.length) {
         const segments = [...manifest.progressive_segments].sort((a, b) => a.order - b.order), paths = []
         for (const segment of segments) {
           const file = path.join(workDir, stem + "-segment-" + segment.order)
-          await downloadRanges([segment.url, ...segment.backup_urls || []], file, options); paths.push(file)
+          await downloadRanges([segment.url, ...(segment.backup_urls || [])], file, options)
+          paths.push(file)
         }
         const list = path.join(workDir, stem + ".concat")
         await fs.writeFile(list, paths.map(file => "file '" + path.basename(file) + "'").join("\n"))
-        await runMediaProcess(ffmpeg, ["-nostdin", "-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", output], { cwd: workDir, spawnImpl: this.spawn, timeoutMs: download.timeout_ms, signal })
+        await runMediaProcess(ffmpeg, ["-nostdin", "-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", output], processOptions)
         await Promise.all([...paths, list].map(file => fs.rm(file, { force: true })))
       } else throw new Error("TuneWeave 未返回可下载视频流")
       if (!(await fs.stat(output)).size) throw new Error("合流结果为空")
@@ -266,13 +545,13 @@ export class BilibiliService {
     return recoverMediaTasks(this.tasksDir)
   }
 
-  async releaseTask(result) {
-    return releaseMediaTask(this.tasksDir, result?.taskDir)
+  async releaseTask(result?: Pick<DownloadSuccess, "taskDir">) {
+    return releaseMediaTask(this.tasksDir, result?.taskDir ?? "")
   }
 
-  async createQrLogin({ signal } = {}) {
+  async createQrLogin({ signal }: { signal?: AbortSignal } = {}) {
     this.pendingAlias = "lotus-bilibili"
-    const qr = await this.tuneweave.request("/v1/auth/qr", {
+    const qr = await this.tuneweave.request<TuneWeaveQr>("/v1/auth/qr", {
       method: "POST", body: { platform: "bilibili", account: this.pendingAlias, credential_mode: "server" },
       signal, redirect: "error",
     })
@@ -280,13 +559,12 @@ export class BilibiliService {
     return { url: qr.url, qrcodeKey: qr.transaction_id, qrDataUrl: qr.image_data_url || await QRCode.toDataURL(qr.url) }
   }
 
-  /** @param {{qrcodeKey?: string, timeoutMs?: number, pollMs?: number, signal?: AbortSignal}} [options] */
-  async waitQrLogin({ qrcodeKey, timeoutMs = 180000, pollMs = 3000, signal } = {}) {
+  async waitQrLogin({ qrcodeKey, timeoutMs = 180000, pollMs = 3000, signal }: QrOptions = {}) {
     if (!qrcodeKey) throw new Error("B站二维码事务缺失")
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       signal?.throwIfAborted()
-      const result = await this.tuneweave.request(`/v1/auth/qr/${encodeURIComponent(qrcodeKey)}`, { signal, redirect: "error" })
+      const result = await this.tuneweave.request<TuneWeaveQrResult>(`/v1/auth/qr/${encodeURIComponent(qrcodeKey)}`, { signal, redirect: "error" })
       if (result.state === "confirmed") {
         const alias = this.pendingAlias || "lotus-bilibili"
         const profile = result.profile
@@ -295,7 +573,7 @@ export class BilibiliService {
         const account = { tuneweave_account: alias, saved_at: formatLocalIso(this.now()), source: "tuneweave" }
         await this.saveAccount(account, { signal })
         this.tuneAccount = account.tuneweave_account
-        return { ok: true, account }
+        return { ok: true as const, account }
       }
       if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("B站二维码已过期或需要附加验证，请重新登录")
       await delay(pollMs, undefined, { signal })
@@ -324,7 +602,7 @@ export class BilibiliService {
     return first ?? null
   }
 
-  async saveAccount(account = {}, { signal } = {}) {
+  async saveAccount(account: BilibiliAccount = {}, { signal }: { signal?: AbortSignal } = {}) {
     if (!account.cookie && !account.tuneweave_account) throw new Error("B站账号登录信息为空")
     signal?.throwIfAborted()
     await fs.mkdir(path.dirname(this.accountFile), { recursive: true, mode: 0o700 })
@@ -351,27 +629,28 @@ export class BilibiliService {
     return this.accountFile
   }
 
-  async requestJson(url) {
+  async requestJson(url: string): Promise<LiveRoomResponse> {
     if (typeof this.fetch !== "function") throw new Error("fetch is unavailable")
     const headers = { ...COMMON_HEADERS }
     const response = await this.fetch(url, { headers, redirect: "error", signal: AbortSignal.timeout(15000) })
     const text = await response.text()
-    const json = text ? JSON.parse(text) : null
+    const json = text ? JSON.parse(text) as LiveRoomResponse : null
     if (!response.ok) throw new Error(`B站请求失败 HTTP ${response.status}`)
+    if (!json) throw new Error("B站直播接口返回无效响应")
     return json
   }
 }
 
-function configuredAccount(data) {
+function configuredAccount(data?: StoredAccount) {
   return data?.cookie || data?.tuneweave_account ? data : null
 }
 
-function sameAccount(left, right) {
+function sameAccount(left: StoredAccount, right: StoredAccount) {
   if (left.tuneweave_account || right.tuneweave_account) return left.tuneweave_account === right.tuneweave_account
   return left.cookie === right.cookie
 }
 
-async function readAccountFile(file) {
+async function readAccountFile(file: string): Promise<StoredAccount | undefined> {
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(error => {
     if (error?.code !== "ENOENT") throw error
   })
@@ -379,9 +658,10 @@ async function readAccountFile(file) {
   try {
     const stat = await handle.stat()
     if (!stat.isFile() || stat.size > 64 * 1024) throw new Error("B站账号记录格式无效")
-    const data = YAML.parse(await handle.readFile("utf8")) ?? {}
+    const data: unknown = YAML.parse(await handle.readFile("utf8")) ?? {}
     if (!data || typeof data !== "object" || Array.isArray(data) ||
-        ["cookie", "tuneweave_account"].some(key => data[key] != null && typeof data[key] !== "string")) {
+        ("cookie" in data && data.cookie != null && typeof data.cookie !== "string") ||
+        ("tuneweave_account" in data && data.tuneweave_account != null && typeof data.tuneweave_account !== "string")) {
       throw new Error("B站账号记录格式无效")
     }
     return data
@@ -399,7 +679,9 @@ export function normalizeBiliCookie(value = "") {
   return `SESSDATA=${text}`
 }
 
-export function extractLoginCookie(data = {}, headers = null) {
+type CookieHeaders = Partial<Pick<Headers, "getSetCookie" | "get">>
+
+export function extractLoginCookie(data: { url?: string } = {}, headers: CookieHeaders | null = null) {
   const fromHeader = readSetCookie(headers)
   if (fromHeader) return fromHeader
 
@@ -415,7 +697,7 @@ export function extractLoginCookie(data = {}, headers = null) {
   return pairs.join("; ")
 }
 
-export function buildBilibiliItems(info) {
+export function buildBilibiliItems(info: LiveInfo | (Omit<VideoInfo, "pages"> & { pages?: VideoPage[] | number })) {
   if (info.type === "live") {
     return [
       { label: "类型", value: "直播" },
@@ -441,12 +723,12 @@ const previewTime = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 })
 
-function formatPreviewTime(value) {
+function formatPreviewTime(value: string | number | undefined) {
   const date = new Date(typeof value === "number" && value > 0 ? value * 1000 : typeof value === "string" ? value : NaN)
   if (Number.isFinite(date.getTime())) return previewTime.format(date).replace(/^(\d+)\/(\d+)\/(\d+)/u, "$1年$2月$3日")
 }
 
-export function formatBilibiliPreviewText(info) {
+export function formatBilibiliPreviewText(info: VideoPreview) {
   const category = info.categoryV2 && info.category && info.categoryV2 !== info.category
     ? `${info.categoryV2} (${info.category})` : info.categoryV2 || info.category
   const seconds = Math.floor(info.duration)
@@ -455,9 +737,9 @@ export function formatBilibiliPreviewText(info) {
   const copyright = info.copyright === "original" ? "原创" : info.copyright === "repost" ? "转载" : undefined
   const characters = Array.from(info.description || info.desc || "")
   const description = characters.length > 2000 ? characters.slice(0, 2000).join("") + "..." : characters.join("")
-  const statistics = groups => groups.map(([key,label]) => {
+  const statistics = (groups: [keyof PreviewStats, string][]) => groups.map(([key, label]) => {
     const value = info.stat?.[key]
-    return Number.isSafeInteger(value) && value >= 0 ? formatNumber(value) + label : ""
+    return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? formatNumber(value) + label : ""
   }).filter(Boolean).join(" • ")
   const fields = [
     ["bvid", info.bvid], ["分区", category], ["投稿", formatPreviewTime(info.createdAt)], ["发布", formatPreviewTime(info.publishedAt)],
@@ -470,21 +752,22 @@ export function formatBilibiliPreviewText(info) {
   ].filter(Boolean).join("\n")
 }
 
-export function formatNumber(value) {
+export function formatNumber(value?: string | number) {
   const number = Number(value || 0)
   if (number >= 10000) return `${(number / 10000).toFixed(1)}万`
   return String(number)
 }
 
-export function formatDuration(seconds) {
+export function formatDuration(seconds?: string | number) {
   const value = Number(seconds || 0)
   const minutes = Math.floor(value / 60)
   const rest = String(value % 60).padStart(2, "0")
   return `${minutes}:${rest}`
 }
 
-export function normalizeDownloadConfig(config = {}) {
+export function normalizeDownloadConfig(config: DownloadConfigInput = {}): BilibiliDownloadConfig {
   const source = config.download || config
+  const policy = source.multi_page_policy
   return {
     enable: source.enable !== false,
     concurrency: Math.max(1, Math.min(16, Math.floor(Number(source.concurrency) || 4))),
@@ -493,12 +776,12 @@ export function normalizeDownloadConfig(config = {}) {
     duration_limit_seconds: Number(source.duration_limit_seconds || 3600),
     video_size_limit_mb: Number(source.video_size_limit_mb || 100),
     max_estimated_size_mb: Number(source.max_estimated_size_mb || 0),
-    multi_page_policy: ["zip", "all", "first"].includes(source.multi_page_policy) ? source.multi_page_policy : "zip",
+    multi_page_policy: policy === "all" || policy === "first" ? policy : "zip",
     timeout_ms: Number(source.timeout_ms || 600000),
   }
 }
 
-export function buildToolProcessEnv(pathDirs = [], baseEnv = process.env) {
+export function buildToolProcessEnv(pathDirs: readonly string[] = [], baseEnv = process.env) {
   const env = { ...baseEnv }
   const pathKey = Object.prototype.hasOwnProperty.call(env, "Path") ? "Path" : "PATH"
   const existingPath = env[pathKey] || ""
@@ -510,7 +793,7 @@ export function buildToolProcessEnv(pathDirs = [], baseEnv = process.env) {
   return env
 }
 
-export async function resolveCommandPath(command, toolsPath = "") {
+export async function resolveCommandPath(command: string, toolsPath = "") {
   const exe = process.platform === "win32" && !/\.exe$/i.test(command) ? `${command}.exe` : command
   if (toolsPath) {
     const candidate = path.join(resolveToolsPath(toolsPath), exe)
@@ -526,16 +809,16 @@ export async function resolveCommandPath(command, toolsPath = "") {
   return first || ""
 }
 
-export function selectPages(pages = [], policy = "zip") {
+export function selectPages(pages: VideoPage[] = [], policy: MultiPagePolicy = "zip"): VideoPage[] {
   const list = Array.isArray(pages) && pages.length ? pages : [{ index: 1, page: 1 }]
-  return policy === "first" ? [list[0]] : list
+  return policy === "first" ? [list[0]!] : list
 }
 
 export function safeFileName(value = "bilibili") {
   return safeMediaName(value || "bilibili")
 }
 
-function parseBiliUrl(input) {
+function parseBiliUrl(input: string | URL) {
   const url = URL.parse(input)
   if (!url || !["https:", "http:"].includes(url.protocol) || !BILI_HOSTS.has(url.hostname) ||
       url.username || url.password || url.port) return
@@ -543,7 +826,7 @@ function parseBiliUrl(input) {
   return url
 }
 
-function extractFromJsonCard(raw) {
+function extractFromJsonCard(raw: string) {
   const trimmed = String(raw || "").trim()
   const start = trimmed.indexOf("{")
   const end = trimmed.lastIndexOf("}")
@@ -553,18 +836,18 @@ function extractFromJsonCard(raw) {
     .replace(/&#91;/g, "[")
     .replace(/&#93;/g, "]")
     .replace(/&amp;/g, "&")
-  let card
+  let card: unknown
   try {
     card = JSON.parse(jsonText)
   } catch {
     return undefined
   }
-  const candidates = []
+  const candidates: string[] = []
   collectUrls(card, candidates)
   return candidates.find(value => parseBiliUrl(value)) || null
 }
 
-function collectUrls(value, out) {
+function collectUrls(value: unknown, out: string[]) {
   if (!value || typeof value !== "object") return
   for (const [key, child] of Object.entries(value)) {
     if (["preview", "icon"].includes(key)) continue
@@ -584,13 +867,13 @@ function normalizeBiliImage(value = "") {
   return withProtocol.replace(/@[^/?#]+(?=$|[?#])/i, "")
 }
 
-async function emitBiliEvent(hooks = {}, event = {}) {
+async function emitBiliEvent(hooks: DownloadHooks, event: DownloadEvent) {
   if (typeof hooks.onEvent === "function") {
     await hooks.onEvent(event)
   }
 }
 
-function estimateVideoSizeMb(info = {}) {
+function estimateVideoSizeMb(info: VideoInfo) {
   const bandwidth = Number(info.stat?.bandwidth || 0)
   if (!bandwidth || !info.duration) return 0
   return Math.round((bandwidth * info.duration) / 8 / 1024 / 1024)
@@ -606,8 +889,26 @@ function resolveToolsPath(value = "") {
 }
 
 
-function runSpawn(command, args = [], options = {}) {
-  return new Promise((resolve, reject) => {
+interface SpawnOptions {
+  spawnImpl?: typeof spawn
+  cwd?: string
+  pathDirs?: string[]
+  env?: NodeJS.ProcessEnv
+  timeoutMs?: number
+  rejectOnNonZero?: boolean
+}
+
+interface SpawnResult {
+  ok: boolean
+  stdout: string
+  stderr: string
+  code?: number | null
+  timedOut?: boolean
+  error?: Error
+}
+
+function runSpawn(command: string, args: string[] = [], options: SpawnOptions = {}) {
+  return new Promise<SpawnResult>((resolve, reject) => {
     const spawnImpl = options.spawnImpl || spawn
     const child = spawnImpl(command, args, {
       cwd: options.cwd,
@@ -643,7 +944,7 @@ function runSpawn(command, args = [], options = {}) {
   })
 }
 
-async function exists(file) {
+async function exists(file: string) {
   try {
     await fs.access(file)
     return true
@@ -653,7 +954,7 @@ async function exists(file) {
 }
 
 
-function readSetCookie(headers) {
+function readSetCookie(headers: CookieHeaders | null) {
   if (!headers) return ""
   const values = typeof headers.getSetCookie === "function"
     ? headers.getSetCookie()
@@ -661,7 +962,7 @@ function readSetCookie(headers) {
   const raw = values.length ? values.join("; ") : headers.get?.("set-cookie") || ""
   if (!raw) return ""
   const skip = new Set(["path", "expires", "max-age", "domain", "httponly", "secure", "samesite"])
-  const pairs = new Map()
+  const pairs = new Map<string, string>()
   for (const part of raw.split(/,(?=\s*[^;,=]+=[^;,]+)/)) {
     for (const item of part.split(";")) {
       const [key, ...rest] = item.trim().split("=")
@@ -672,6 +973,6 @@ function readSetCookie(headers) {
   return [...pairs.entries()].map(([key, value]) => `${key}=${value}`).join("; ")
 }
 
-function livePlayerUrl(roomId) {
+function livePlayerUrl(roomId: string | number) {
   return `https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=${encodeURIComponent(String(roomId || ""))}`
 }

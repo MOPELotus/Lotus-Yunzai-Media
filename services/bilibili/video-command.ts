@@ -27,17 +27,24 @@ const tukuPickCommand = /^#看(?:b|哔)站视频([\s\S]*)$/iu
 const watchCommand = /^#看视频([\s\S]*)$/u
 const downloadCommand = /^#b站(?:下载|下视频)\s+([\s\S]+)$/iu
 const quotedLinkCommand = /^#?(?:解析|解)$/u
+const quotedCoverCommand = /^#?(?:下载封面|封面下载|获取封面|封面)$/u
+const quotedDescriptionCommand = /^#?简介$/u
+const quotedVideoCommand = /^#?(?:下载视频|视频下载|获取视频)$/u
+const quotedImagesCommand = /^#?(?:获取图片|下载图片|图片)$/u
+const previewWindow = 30 * 60_000
+const maxPreviewEntries = 512
 const subscriptionSettings = createSubscriptionConfig(dataPath, lockFile)
 
 type SearchResults = Awaited<ReturnType<BilibiliService["search"]>>
 type BiliInfo = Awaited<ReturnType<BilibiliService["getInfo"]>>
+type QuotedAction = "preview" | "cover" | "description" | "video" | "images"
 type BiliConfig = { search_limit?: number; download?: Record<string, unknown> }
 type VideoAction =
   | { kind: "search"; keyword: string; tuku: boolean }
   | { kind: "page"; next: boolean }
   | { kind: "pick"; index: number; tuku: boolean }
   | { kind: "watch"; keyword: string }
-  | { kind: "quote" }
+  | { kind: "quote"; action: QuotedAction }
   | { kind: "download" | "link"; target: string }
 
 interface SearchSession {
@@ -71,11 +78,17 @@ function videoAction(message: string, context: MessageFallbackContext): VideoAct
   if (watch) return { kind: "watch", keyword: watch[1]!.trim() }
   const download = downloadCommand.exec(message)
   if (download) return { kind: "download", target: download[1]!.trim() }
-  if (context.message_type === "terminal" || isMediaCommandText(message)) return
-  if (quotedLinkCommand.test(message)) {
-    if (!context.isDelegated && context.reply_id !== undefined && context.lookupReply) return { kind: "quote" }
+  const quotedAction = quotedLinkCommand.test(message) ? "preview"
+    : quotedCoverCommand.test(message) ? "cover"
+    : quotedDescriptionCommand.test(message) ? "description"
+    : quotedVideoCommand.test(message) ? "video"
+    : quotedImagesCommand.test(message) ? "images" : undefined
+  if (quotedAction) {
+    if (context.message_type !== "terminal" && !context.isDelegated && context.reply_id !== undefined &&
+        context.lookupReply) return { kind: "quote", action: quotedAction }
     return
   }
+  if (context.message_type === "terminal" || isMediaCommandText(message)) return
   const target = buildMediaMessageText({ ...context, msg: message })
   if (link.test(target)) return { kind: "link", target }
 }
@@ -84,8 +97,40 @@ function sessionKey(context: MessageFallbackContext) {
   return [context.self_id, context.message_type, context.group_id, context.user_id].join(":")
 }
 
+function quoteScope(context: MessageFallbackContext) {
+  const recipient = context.message_type === "group" ? context.group_id : context.user_id
+  if (!context.self_id || !recipient || context.message_type === "terminal") return
+  return [context.adapter ?? "onebot", context.self_id, context.message_type, recipient].join(":")
+}
+
+async function readOriginal(url: string, byteLimit: number, signal: AbortSignal, transport: BilibiliService["fetch"]) {
+  const image = URL.parse(url)
+  if (!image || image.protocol !== "https:" || image.username || image.password || image.port ||
+      !["hdslb.com", "biliimg.com"].some(domain => image.hostname === domain || image.hostname.endsWith("." + domain))) return
+  try {
+    const response = await transport(image.href, {
+      credentials: "omit", redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
+    })
+    if (!response.ok || !response.body || response.redirected ||
+        !/^image\/(?:jpeg|png|webp|gif)(?:;|$)/iu.test(response.headers.get("content-type") ?? "") ||
+        Number(response.headers.get("content-length")) > byteLimit) {
+      await response.body?.cancel()
+      return
+    }
+    const pieces = []
+    let size = 0
+    for await (const piece of response.body) {
+      size += piece.byteLength
+      if (size > byteLimit) return
+      pieces.push(piece)
+    }
+    if (size && !signal.aborted) return Buffer.concat(pieces, size)
+  } catch { return }
+}
+
 export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, settings = subscriptionSettings.settings }: Services) {
   const sessions = new Map<string, SearchSession>()
+  const previews = new Map<string, { target: string; expires: number }>()
   const running = new Set<string>()
   let recovery: Promise<unknown> | undefined
   const cancelRecovery = mediaRuntime?.whenReady(() => {
@@ -99,9 +144,32 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     return signal?.aborted ? false : context.reply(...args)
   }
 
-  async function imageReply(context: MessageFallbackContext, image: Uint8Array | undefined, fallback: string) {
+  async function imageReply(context: MessageFallbackContext, image: Uint8Array | undefined, fallback: string,
+    options?: Parameters<MessageFallbackContext["reply"]>[2]) {
     if (signal?.aborted) return
-    if (!image || !await reply(context, { type: "image", file: image })) await reply(context, fallback)
+    if (!image || !await reply(context, { type: "image", file: image }, undefined, options)) await reply(context, fallback)
+  }
+
+  function previewReceipt(context: MessageFallbackContext, target: string) {
+    const scope = quoteScope(context)
+    if (!scope || !URL.parse(target)) return
+    return { onDelivered(messageId: number) {
+      if (signal?.aborted || !Number.isSafeInteger(messageId)) return
+      if (previews.size >= maxPreviewEntries) previews.delete(previews.keys().next().value!)
+      previews.set(scope + ":" + messageId, { target, expires: Date.now() + previewWindow })
+    } }
+  }
+
+  async function sendOriginals(context: MessageFallbackContext, sources: readonly string[], transport: BilibiliService["fetch"]) {
+    const active = signal ?? new AbortController().signal
+    const limit = Math.min(context.inlineImageByteLimit ?? Infinity, 8 * 1024 ** 2)
+    let sent = 0
+    for (const url of [...new Set(sources)].slice(0, 9)) {
+      if (active.aborted) return []
+      const bytes = await readOriginal(url, limit, active, transport)
+      if (bytes && await reply(context, { type: "image", file: bytes })) sent++
+    }
+    return sent ? [] : "[media] 没有可以发送的 B 站原图。"
   }
 
   async function reportError(context: MessageFallbackContext, title: string, cause: unknown) {
@@ -172,8 +240,9 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       if (info.type !== "video") throw error
       console.warn("[media] B 站视频图卡生成失败：" + error.message)
     })
-    if (!image && info.type === "video") await reply(context, formatBilibiliPreviewText(info))
-    else await imageReply(context, image || undefined, "[media] B站解析完成。")
+    const receipt = info.type === "video" ? previewReceipt(context, info.url) : undefined
+    if (!image && info.type === "video") await reply(context, formatBilibiliPreviewText(info), undefined, receipt)
+    else await imageReply(context, image || undefined, "[media] B站解析完成。", receipt)
     if (signal?.aborted) return
     if (info.type === "live" && info.playerUrl) {
       await reply(context, "[media] 独立播放器：" + info.playerUrl)
@@ -280,8 +349,16 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
           if (!options.parseVideoLink || signal?.aborted) return
           const source = await context.lookupReply?.().catch(() => undefined)
           const card = source?.message[0]
-          if ((card?.type !== "json" && card?.type !== "light_app") || signal?.aborted) return
-          target = quotedBiliCardLink(card.data) || ""
+          if (!source || signal?.aborted) return
+          if (card?.type === "json" || card?.type === "light_app") {
+            target = quotedBiliCardLink(card.data) || ""
+          } else {
+            const scope = quoteScope(context)
+            const priorKey = scope && scope + ":" + context.reply_id
+            const preview = priorKey && source.user_id === context.self_id && previews.get(priorKey)
+            if (!preview || preview.expires <= Date.now() || action.action === "preview") return
+            target = preview.target
+          }
         } else {
           target = service.extractTarget(action.target) || ""
         }
@@ -297,16 +374,34 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
             const provider = createBiliProvider({ fetch })
             const post = await provider.fetchPost(id, signal)
             if (!post) return "[media] 这条 B 站动态不可用。"
+            if (action.kind === "quote" && action.action === "images") {
+              return sendOriginals(context, [...post.images, ...(post.forwarded?.images ?? [])], service.fetch)
+            }
+            if (action.kind === "quote" && action.action !== "preview") return
             const messages = await makeDynamicMessages(provider, post, options,
               { signal, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
-            for (const message of messages) await reply(context, message)
+            for (const message of messages) await reply(context, message, undefined, previewReceipt(context, resolved.href))
             return []
           }
           if (action.kind === "quote" && (!resolved || !isBiliVideoPage(resolved))) return
           informationUrl = resolved?.href
         }
       }
-      if (!signal?.aborted) await renderInfo(context, service, await service.getInfo(informationUrl ?? target), target, action.kind !== "quote")
+      if (signal?.aborted) return
+      if (action.kind === "quote" && action.action === "video") {
+        if (!informationUrl || !isBiliVideoPage(new URL(informationUrl))) return
+        await runDownload(context, service, informationUrl, "B站下载")
+        return []
+      }
+      const info = await service.getInfo(informationUrl ?? target)
+      if (signal?.aborted) return
+      if (action.kind === "quote" && action.action !== "preview") {
+        if (info.type !== "video") return
+        if (action.action === "cover") return sendOriginals(context, info.cover ? [info.cover] : [], service.fetch)
+        if (action.action === "description") return info.description.trim().slice(0, 3000) || "这条 B 站视频没有简介。"
+        return
+      }
+      await renderInfo(context, service, info, target, action.kind !== "quote")
     } catch (error) {
       await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
     }
@@ -320,6 +415,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     async dispose() {
       cancelRecovery?.()
       sessions.clear()
+      previews.clear()
       await recovery
     },
   }

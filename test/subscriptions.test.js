@@ -34,6 +34,101 @@ function raw(type=draw,fields={}) {
     modules:{module_author:{mid:uid,pub_ts:seen,name:"试验发布者"},module_dynamic:fields} }
 }
 
+test("引用已确认送达的同群 B 站动态可取原图，图片字节独立验限", async () => {
+  const image = "https://i0.hdslb.com/bfs/new_dyn/example.png"
+  const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7LQMcAAAAASUVORK5CYII=", "base64")
+  const requests = []
+  const deliveries = []
+  const controller = new AbortController()
+  const api = createBilibiliVideoCommands({ signal: controller.signal,
+    settings: async () => settingsFor({ parseVideoLink: true, pushMsgMode: 0, pushPicCountLimit: 0 }),
+    async fetch(input, options) {
+      requests.push(String(input))
+      expect(options.credentials).toBe("omit")
+      if (String(input) === image) {
+        expect(options.redirect).toBe("error")
+        expect(options.headers).toBeUndefined()
+        return new Response(original, { headers: { "Content-Type": "image/png" } })
+      }
+      return Response.json({ code: 0, data: { item: raw(draw, {
+        desc: { text: "被引用的动态原图" },
+        major: { draw: { items: [{ src: image }] } },
+      }) } })
+    },
+  })
+  const context = {
+    message_type: "group", self_id: 99, user_id: 42, group_id: 77,
+    reply: async (message, _, options) => {
+      deliveries.push(message)
+      await options?.onDelivered?.(10)
+      return true
+    },
+  }
+  const source = { user_id: 99, message: [{ type: "image" }] }
+  const quoted = { ...context, reply_id: 10, lookupReply: async () => source }
+  try {
+    expect(await api.fallback("https://t.bilibili.com/12234455", context)).toEqual([])
+    const checked = requests.length
+    expect(await api.fallback("获取图片", { ...quoted, group_id: 78 })).toBeUndefined()
+    expect(await api.fallback("获取图片", { ...quoted, adapter: "milky" })).toBeUndefined()
+    expect(await api.fallback("获取图片", { ...quoted, reply_id: 11 })).toBeUndefined()
+    expect(await api.fallback("获取图片", { ...quoted, lookupReply: async () => ({ ...source, user_id: 43 }) })).toBeUndefined()
+    expect(requests).toHaveLength(checked)
+    expect(await api.fallback("获取图片", quoted)).toEqual([])
+    expect(deliveries.at(-1)).toEqual({ type: "image", file: original })
+    expect(await api.fallback("画像", quoted)).toBeUndefined()
+    expect(await api.fallback("下载图片", { ...quoted, inlineImageByteLimit: 16 })).toContain("没有可以发送")
+    expect(deliveries).toHaveLength(2)
+  } finally {
+    await api.dispose()
+  }
+})
+
+test("B 站分享卡可单独取视频封面与简介，且遵守解析开关", async () => {
+  const bvid = "BV1dAxE6VErW"
+  const image = "https://i0.hdslb.com/bfs/archive/quoted.png"
+  const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7LQMcAAAAASUVORK5CYII=", "base64")
+  const requests = []
+  const deliveries = []
+  let enabled = true
+  const api = createBilibiliVideoCommands({
+    settings: async () => settingsFor({ parseVideoLink: enabled }),
+    async fetch(input, options) {
+      const url = new URL(input)
+      requests.push(url.href)
+      if (url.href === image) {
+        expect(options.credentials).toBe("omit")
+        return new Response(original, { headers: { "Content-Type": "image/png" } })
+      }
+      if (url.pathname.endsWith("/parts")) return Response.json({ ok: true, data: [] })
+      expect(url.pathname).toBe("/v1/videos/bilibili%3Abvid%3A" + bvid)
+      return Response.json({ ok: true, data: { video: {
+        ref: "bilibili:bvid:" + bvid, title: "旧封面入口", description: "<p>正文简介</p>", cover_url: image,
+        extensions: { bvid },
+      } } })
+    },
+  })
+  const context = {
+    message_type: "private", self_id: 99, user_id: 42, reply_id: 12,
+    lookupReply: async () => ({ user_id: 42, message: [
+      { type: "json", data: { meta: { news: { jumpUrl: "https://www.bilibili.com/video/" + bvid } } } },
+    ] }),
+    reply: async data => { deliveries.push(data); return true },
+  }
+  try {
+    expect(await api.fallback("获取封面", context)).toEqual([])
+    expect(deliveries).toEqual([{ type: "image", file: original }])
+    expect(await api.fallback("简介", context)).toBe("正文简介")
+    expect(requests.filter(url => url === image)).toHaveLength(1)
+    const checked = requests.length
+    enabled = false
+    expect(await api.fallback("获取封面", context)).toBeUndefined()
+    expect(requests).toHaveLength(checked)
+  } finally {
+    await api.dispose()
+  }
+})
+
 test("B站动态链接从媒体入口识别直链、分享卡和短链，复用转发原帖正文", async () => {
   const post = { ...raw("DYNAMIC_TYPE_FORWARD", { desc: { text: "转发正文" } }), id_str: "12234456",
     orig: raw("DYNAMIC_TYPE_WORD", { desc: { text: "原帖正文" } }) }

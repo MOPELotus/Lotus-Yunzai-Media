@@ -1,5 +1,6 @@
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { isDeepStrictEqual } from "node:util"
 import YAML, { type Document, type Node } from "yaml"
 import type { LockSubscriptionFile, SubscriptionPlatform } from "./types.ts"
 
@@ -14,6 +15,11 @@ export interface SubscriptionRoute extends SubscriptionDestination {
   name: string
   types: string[]
 }
+
+export type EditableSubscriptionRoute = Omit<SubscriptionRoute, "bot" | "name">
+
+export class SubscriptionRouteConflict extends Error {}
+export class SubscriptionRouteUnauthorized extends Error {}
 
 type RouteOperation = "add" | "remove"
 type Mapping = Record<string, unknown>
@@ -48,7 +54,7 @@ async function read(path: string) {
   catch (error) { if (!missingFile(error)) throw error }
 }
 
-async function writeDocument(path: string, document: Document, signal?: AbortSignal) {
+async function writeDocument(path: string, document: Document, signal?: AbortSignal, authorize?: () => boolean) {
   let mode = 0o600
   try {
     const current = await lstat(path)
@@ -67,6 +73,7 @@ async function writeDocument(path: string, document: Document, signal?: AbortSig
       await file.close()
     }
     signal?.throwIfAborted()
+    if (authorize && !authorize()) throw new SubscriptionRouteUnauthorized()
     await rename(temporary, path)
   } finally {
     await rm(temporary, { force: true })
@@ -193,6 +200,36 @@ export function routesFrom(value: Mapping): SubscriptionRoute[] {
   return routes
 }
 
+export const subscriptionRouteKey = ({ kind, chat, uid }: EditableSubscriptionRoute) => kind + ":" + chat + ":" + uid
+
+export function ownerRoutes(routes: readonly SubscriptionRoute[], bot: string): EditableSubscriptionRoute[] {
+  return routes.filter(route => route.bot === bot)
+    .map(({ kind, chat, uid, types }) => ({ kind, chat, uid, types }))
+    .sort((left, right) => subscriptionRouteKey(left).localeCompare(subscriptionRouteKey(right)))
+}
+
+function editOwnerRoute(document: Document, bot: string, route: EditableSubscriptionRoute, remove: boolean) {
+  const data = map(document.toJS() ?? {}, "订阅配置")
+  const current = data[route.kind]
+  const destinations = current === undefined ? {} : { ...map(current, route.kind) }
+  const existing = destinations[route.chat] ?? []
+  if (!isList(existing)) throw new SubscriptionRouteConflict()
+  const entries = [...existing]
+  const index = entries.findIndex(item => isMapping(item) && numericId(item.bot_id) === bot && numericId(item.uid) === route.uid)
+  const previous = entries[index]
+  const updated = remove ? undefined : {
+    ...(isMapping(previous) ? previous : { bot_id: Number(bot), uid: route.uid, name: route.uid }),
+    type: route.types,
+  }
+  if (updated) {
+    if (index >= 0) entries[index] = updated
+    else entries.push(updated)
+  } else if (index >= 0) entries.splice(index, 1)
+  if (entries.length) destinations[route.chat] = entries
+  else delete destinations[route.chat]
+  editRoute(document, { kind: route.kind, chat: route.chat, bot }, destinations, entries, index, updated)
+}
+
 export function changeTypes<T>(existing: readonly T[], selected: readonly T[], allTypes: readonly T[], operation: RouteOperation): T[] {
   if (operation === "remove" && !selected.length) return []
   const types = new Set(operation === "remove" && !existing.length ? allTypes : existing)
@@ -216,6 +253,38 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
   return {
     async settings(id: SubscriptionPlatform) { return settingsFor((await effective(id,"config")).data) },
     async routes(id: SubscriptionPlatform) { return routesFrom((await effective(id,"push")).data) },
+    async replaceOwnerRoutes(id: SubscriptionPlatform, bot: string, previous: readonly EditableSubscriptionRoute[],
+      next: readonly EditableSubscriptionRoute[], authorize: () => boolean, signal: AbortSignal) {
+      const folder = dirname(file(id, "push"))
+      const assertAuthorized = () => {
+        if (signal.aborted || !authorize()) throw new SubscriptionRouteUnauthorized()
+      }
+      assertAuthorized()
+      await mkdir(folder, { recursive: true, mode: 0o700 })
+      // The chat commands and the browser share the same lock and effective file.
+      const lock = await lockFile(join(folder, ".push-lock.sqlite"), "订阅配置")
+      try {
+        assertAuthorized()
+        const current = await effective(id, "push")
+        const before = ownerRoutes(routesFrom(current.data), bot)
+        if (!isDeepStrictEqual(before, previous)) throw new SubscriptionRouteConflict()
+        if (isDeepStrictEqual(before, next)) return before
+        const old = new Map(before.map(route => [subscriptionRouteKey(route), route]))
+        const updated = new Map(next.map(route => [subscriptionRouteKey(route), route]))
+        const document: Document = YAML.parseDocument(current.raw)
+        if (document.errors.length || (document.contents && !YAML.isMap(document.contents))) throw new SubscriptionRouteConflict()
+        if (!document.contents) document.contents = document.createNode({})
+        for (const [key, route] of old) if (!updated.has(key)) editOwnerRoute(document, bot, route, true)
+        for (const [key, route] of updated) if (!isDeepStrictEqual(old.get(key), route)) editOwnerRoute(document, bot, route, false)
+        const saved = await effective(id, "push")
+        if (saved.path !== current.path || saved.raw !== current.raw) throw new SubscriptionRouteConflict()
+        assertAuthorized()
+        await writeDocument(current.path, document, signal, authorize)
+        return next
+      } finally {
+        lock.close()
+      }
+    },
     async editSettings(id: SubscriptionPlatform, changes: (current: SubscriptionSettings) => Mapping, signal?: AbortSignal) {
       const path = file(id, "config.guoba.support")
       const folder = dirname(path)

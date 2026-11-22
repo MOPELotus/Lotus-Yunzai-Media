@@ -65,7 +65,7 @@ const entrypoint = "https://m.weibo.cn/api/container/getIndex"
 const detailRoot = "https://m.weibo.cn/detail/"
 const maximumPictures = 30
 const emptyMessages = new Set(["这里还没有内容", "这里还没有内容哦", "用户不存在", "该用户不存在"])
-const typeNames = Object.freeze({
+export const weiboTypes = Object.freeze({
   DYNAMIC_TYPE_AV: "视频", DYNAMIC_TYPE_WORD: "图文", DYNAMIC_TYPE_DRAW: "图文",
   DYNAMIC_TYPE_ARTICLE: "文章", DYNAMIC_TYPE_FORWARD: "转发",
 })
@@ -292,7 +292,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
   }
 
   return {
-    id: "weibo", label: "微博", typeNames,
+    id: "weibo", label: "微博", typeNames: weiboTypes,
     async fetchPosts(account, { signal, oldest = 0 } = {}) {
       const uid = decimalId(account)
       if (!uid) throw new Error("微博 UID 无效。")

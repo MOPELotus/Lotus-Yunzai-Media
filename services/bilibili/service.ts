@@ -240,6 +240,7 @@ interface QrOptions {
 
 const BILI_SHORT_HOSTS = new Set(["b23.tv", "bili2233.cn"])
 const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "live.bilibili.com", ...BILI_SHORT_HOSTS])
+const dynamicLinkInText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/(?:t\.bilibili\.com\/|(?:www|m)\.bilibili\.com\/opus\/|m\.bilibili\.com\/dynamic\/)[1-9]\d{0,21}\/?(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
 const LIVE_INFO_API = "https://api.live.bilibili.com/room/v1/Room/get_info"
 const bareB23InText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:\/\/)?b23\.tv\/([a-z0-9]+)(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
 const bareB23Target = /^(?:\/\/)?b23\.tv\/([a-z0-9]+)(?:[?#]\S*)?$/iu
@@ -291,8 +292,11 @@ export class BilibiliService {
     const clean = raw.replace(/\\\//g, "/")
     const match = clean.match(/https?:\/\/(?:www\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)
     const bare = bareB23InText.exec(clean)
-    if (bare && (!match || bare.index < (match.index ?? 0))) return "https://b23.tv/" + bare[1]
-    return match?.[0] || ""
+    const dynamic = dynamicLinkInText.exec(clean)
+    const first = [match, bare, dynamic].filter(candidate => candidate !== null)
+      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))[0]
+    if (first && first === bare) return "https://b23.tv/" + bare[1]
+    return first?.[0] || ""
   }
 
   async resolveTarget(input = ""): Promise<BilibiliTarget> {
@@ -314,11 +318,12 @@ export class BilibiliService {
     throw new Error("unsupported bilibili target")
   }
 
-  async resolveShortLink(url: URL): Promise<URL> {
-    const signal = AbortSignal.timeout(15000)
+  async resolveShortLink(url: URL, active?: AbortSignal): Promise<URL> {
+    const timeout = AbortSignal.timeout(15000)
+    const signal = active ? AbortSignal.any([active, timeout]) : timeout
     for (let hops = 0; hops <= 5; hops++) {
       if (!BILI_SHORT_HOSTS.has(url.hostname)) return url
-      const response = await this.fetch(url, { method: "HEAD", redirect: "manual", headers: COMMON_HEADERS, signal })
+      const response = await this.fetch(url, { method: "HEAD", redirect: "manual", credentials: "omit", headers: COMMON_HEADERS, signal })
       if (response.status < 300 || response.status >= 400) break
       const location = response.headers.get("location")
       const next = location && parseBiliUrl(new URL(location, url))
@@ -820,10 +825,19 @@ export function safeFileName(value = "bilibili") {
 
 function parseBiliUrl(input: string | URL) {
   const url = URL.parse(input)
-  if (!url || !["https:", "http:"].includes(url.protocol) || !BILI_HOSTS.has(url.hostname) ||
+  if (!url || !["https:", "http:"].includes(url.protocol) || (!BILI_HOSTS.has(url.hostname) && !biliDynamicId(url)) ||
       url.username || url.password || url.port) return
   url.protocol = "https:"
   return url
+}
+
+export function biliDynamicId(url: URL) {
+  const { hostname, pathname } = url
+  if (hostname === "t.bilibili.com") return /^\/([1-9]\d{0,21})\/?$/u.exec(pathname)?.[1]
+  if (hostname === "www.bilibili.com" || hostname === "m.bilibili.com") {
+    return /^\/opus\/([1-9]\d{0,21})\/?$/u.exec(pathname)?.[1] ??
+      (hostname === "m.bilibili.com" ? /^\/dynamic\/([1-9]\d{0,21})\/?$/u.exec(pathname)?.[1] : undefined)
+  }
 }
 
 function extractFromJsonCard(raw: string) {

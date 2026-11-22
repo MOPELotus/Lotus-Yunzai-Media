@@ -39,6 +39,7 @@ interface BiliDynamic {
 }
 
 interface BiliPublicData {
+  item?: unknown
   items?: unknown
   card?: {
     mid?: unknown; name?: unknown; sign?: unknown; sex?: unknown; level_info?: { current_level?: unknown }
@@ -181,7 +182,9 @@ export function normalizeBiliDynamic(input: unknown, expectedUid?: string, allow
   }
 }
 
-export function createBiliProvider({ fetch: request = globalThis.fetch, session, shared }: BiliProviderOptions = {}): SubscriptionProvider {
+export function createBiliProvider({ fetch: request = globalThis.fetch, session, shared }: BiliProviderOptions = {}): SubscriptionProvider & {
+  fetchPost(id: string, signal?: AbortSignal): Promise<DynamicPost | undefined>
+} {
   async function get(route: string, query: Record<string, string>, signal?: AbortSignal,
     beforeAnonymous?: (active?: AbortSignal) => Promise<BiliPublicData | undefined>) {
     const url = new URL(route, apiRoot)
@@ -237,6 +240,12 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
 
   return {
     id: "bilibili", label: "B站", typeNames: biliTypes,
+    async fetchPost(id, signal) {
+      if (!accountId(id)) return
+      const data = await get("/x/polymer/web-dynamic/v1/detail", { id, platform: "web", features: "itemOpusStyle,opusBigCover,ugcDelete" }, signal)
+      const post = normalizeBiliDynamic(data?.item)
+      if (post?.id === id) return expand(post, signal)
+    },
     async fetchPosts(uid, {signal,oldest=0} = {}) {
       if (!accountId(uid)) return []
       const data = await get("/x/polymer/web-dynamic/v1/feed/space", {host_mid:uid, offset:""}, signal,

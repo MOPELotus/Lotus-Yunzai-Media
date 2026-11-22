@@ -6,10 +6,12 @@ import { PermissionService } from "../../core/permissions/service.ts"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.ts"
 import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../media/files.ts"
 import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
+import { createBiliProvider } from "../subscriptions/bilibili/index.ts"
 import { createSubscriptionConfig } from "../subscriptions/config.ts"
+import { makeDynamicMessages } from "../subscriptions/render.ts"
 import { ToolInstallerService } from "../tools/installer.ts"
 import {
-  BilibiliService, formatBilibiliPreviewText, formatNumber, normalizeDownloadConfig, resolveCommandPath,
+  BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, normalizeDownloadConfig, resolveCommandPath,
 } from "./service.ts"
 
 const featureNames = ["[media] B 站解析"] as const
@@ -46,6 +48,8 @@ interface SearchSession {
 interface Services {
   readonly signal?: AbortSignal
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
+  readonly fetch?: BilibiliService["fetch"]
+  readonly settings?: typeof subscriptionSettings.settings
 }
 
 function videoAction(message: string, context: MessageFallbackContext): VideoAction | undefined {
@@ -73,7 +77,7 @@ function sessionKey(context: MessageFallbackContext) {
   return [context.self_id, context.message_type, context.group_id, context.user_id].join(":")
 }
 
-export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) {
+export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, settings = subscriptionSettings.settings }: Services) {
   const sessions = new Map<string, SearchSession>()
   const running = new Set<string>()
   let recovery: Promise<unknown> | undefined
@@ -235,7 +239,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) 
       return action.tuku ? "[media] 搜索结果已过期，请发送 #点B站视频 关键词。" : undefined
     }
     const config = await loadGlobalConfig()
-    const service = new BilibiliService({ tuneweaveConfig: config.tuneweave, searchLimit: (config.bilibili as BiliConfig).search_limit })
+    const service = new BilibiliService({ fetch, tuneweaveConfig: config.tuneweave, searchLimit: (config.bilibili as BiliConfig).search_limit })
     switch (action.kind) {
       case "search":
         if (!action.keyword) return "[media] 请输入搜索关键词。"
@@ -250,6 +254,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) 
         return []
     }
     let target: string
+    let informationUrl: string | undefined
     try {
       if (action.kind === "pick") {
         const item = session!.results[action.index - 1]
@@ -264,10 +269,25 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime }: Services) 
       } else {
         target = service.extractTarget(action.target) || ""
         if (!target) return
-        const live = URL.parse(target)?.hostname === "live.bilibili.com"
-        if (!live && !(await subscriptionSettings.settings("bilibili")).parseVideoLink) return
+        const url = URL.parse(target)
+        if (url?.hostname !== "live.bilibili.com") {
+          const options = await settings("bilibili")
+          if (!options.parseVideoLink || signal?.aborted) return
+          const resolved = url && await service.resolveShortLink(url, signal)
+          const id = resolved && biliDynamicId(resolved)
+          if (id) {
+            const provider = createBiliProvider({ fetch })
+            const post = await provider.fetchPost(id, signal)
+            if (!post) return "[media] 这条 B 站动态不可用。"
+            const messages = await makeDynamicMessages(provider, post, options,
+              { signal, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
+            for (const message of messages) await reply(context, message)
+            return []
+          }
+          informationUrl = resolved?.href
+        }
       }
-      if (!signal?.aborted) await renderInfo(context, service, await service.getInfo(target), target)
+      if (!signal?.aborted) await renderInfo(context, service, await service.getInfo(informationUrl ?? target), target)
     } catch (error) {
       await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
     }

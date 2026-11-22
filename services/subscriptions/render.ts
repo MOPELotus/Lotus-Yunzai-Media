@@ -13,6 +13,7 @@ type PageEngine = Awaited<ReturnType<typeof renderMediaNewsPages>>[number]["engi
 export interface DynamicRenderOptions {
   signal?: AbortSignal
   inlineImageByteLimit?: number
+  preview?: boolean
   onRender?: (engine: PageEngine) => void
 }
 
@@ -151,7 +152,7 @@ function textMessages(provider: RenderProvider, post: DynamicPost, settings: Sub
 }
 
 async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings: SubscriptionSettings,
-  { signal, inlineImageByteLimit = Infinity, onRender }: DynamicRenderOptions) {
+  { signal, inlineImageByteLimit = Infinity, preview, onRender }: DynamicRenderOptions) {
   const build = (item: DynamicPost) => Promise.all(mediaFor(provider, item, settings).map(url => picture(url, signal)))
   const avatarUrl = imageLink(provider, post.avatar)
   const [avatar, images, forwarded, qr] = await Promise.all([
@@ -231,7 +232,7 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
       drawMediaNewsImage(ctx, qr, x, footerTop + 18, 114, 114, { radius:4 })
       const caption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
       drawMediaNewsText(ctx, [caption], x + 139, footerTop + 48, contentWidth - 139, 20, mediaNewsColors.gold)
-      drawMediaNewsText(ctx, [`${provider.label}动态订阅`], x + 139, footerTop + 79, contentWidth - 139, 20, mediaNewsColors.muted)
+      drawMediaNewsText(ctx, [`${provider.label}动态${preview ? "" : "订阅"}`], x + 139, footerTop + 79, contentWidth - 139, 20, mediaNewsColors.muted)
     } }
   }, {
     pageHeight: settings.split ? settings.splitHeight : undefined,

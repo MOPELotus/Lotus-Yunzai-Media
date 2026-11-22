@@ -11,6 +11,7 @@ import { createSubscriptionDelivery, receiptKey, useDynamicForward } from "../se
 import { createSubscriptionModule } from "../services/subscriptions/module.ts"
 import { makeDynamicMessages } from "../services/subscriptions/render.ts"
 import { renderSubscriptionHelp } from "../services/subscriptions/help.ts"
+import { createBilibiliVideoCommands } from "../services/bilibili/video-command.ts"
 
 const temp=[]
 async function directory() {
@@ -30,6 +31,69 @@ function raw(type=draw,fields={}) {
   return { id_str:"12234455",type,
     modules:{module_author:{mid:uid,pub_ts:seen,name:"试验发布者"},module_dynamic:fields} }
 }
+
+test("B站动态链接从媒体入口识别直链、分享卡和短链，复用转发原帖正文", async () => {
+  const post = { ...raw("DYNAMIC_TYPE_FORWARD", { desc: { text: "转发正文" } }), id_str: "12234456",
+    orig: raw("DYNAMIC_TYPE_WORD", { desc: { text: "原帖正文" } }) }
+  const requests = []
+  const controller = new AbortController()
+  let enabled = true
+  let result = post
+  const api = createBilibiliVideoCommands({ signal: controller.signal,
+    settings: async () => settingsFor({ parseVideoLink: enabled, pushMsgMode: 0 }),
+    async fetch(input, options) {
+      const url = new URL(input)
+      expect(options.credentials).toBe("omit")
+      expect(new Headers(options.headers).has("cookie")).toBe(false)
+      expect(new Headers(options.headers).has("authorization")).toBe(false)
+      requests.push(url.href)
+      if (url.hostname === "b23.tv") {
+        expect(options.method).toBe("HEAD")
+        expect(options.redirect).toBe("manual")
+        return new Response(null, { status: 302, headers: { location: "https://m.bilibili.com/dynamic/12234456" } })
+      }
+      expect(url.origin + url.pathname).toBe("https://api.bilibili.com/x/polymer/web-dynamic/v1/detail")
+      expect(url.searchParams.get("id")).toBe(post.id_str)
+      expect(url.searchParams.has("from")).toBe(false)
+      expect(options.redirect).toBe("error")
+      return Response.json({ code: 0, data: { item: result } })
+    },
+  })
+  const replies = []
+  async function send(text, message = undefined, message_type = "group") {
+    return api.fallback(text, { normalizedMessage: text, raw_message: text, message, message_type, self_id: 99,
+      group_id: 77, user_id: 42, reply: async data => { replies.push(data); return true } })
+  }
+  try {
+    for (const link of ["分享（https://t.bilibili.com/12234456?from=app）", "https://www.bilibili.com/opus/12234456",
+      "https://m.bilibili.com/opus/12234456", "https://m.bilibili.com/dynamic/12234456", "b23.tv/shared"]) {
+      expect(await send(link)).toEqual([])
+    }
+    expect(await send("[json消息]", [{ type: "json", data: { meta: { news: { jumpUrl: "https://t.bilibili.com/12234456" } } } }])).toEqual([])
+    expect(replies).toHaveLength(6)
+    expect(replies[0].text).toContain("转发正文\n转发链接：https://m.bilibili.com/dynamic/12234456")
+    expect(replies[0].text).toContain("原帖正文\n原帖链接：https://m.bilibili.com/dynamic/12234455")
+    expect(requests.filter(url => url.includes("/detail?")).length).toBe(6)
+
+    const checked = requests.length
+    expect(await send("https://t.bilibili.com.other.invalid/12234456")).toBeUndefined()
+    expect(await send("https://other.invalid/?r=https://t.bilibili.com/12234456")).toBeUndefined()
+    expect(await send("https://t.bilibili.com/12234456/extra")).toBeUndefined()
+    expect(await send("https://t.bilibili.com/12234456", undefined, "terminal")).toBeUndefined()
+    enabled = false
+    expect(await send("https://t.bilibili.com/12234456")).toBeUndefined()
+    expect(requests).toHaveLength(checked)
+
+    enabled = true
+    result = { ...post, id_str: "12234457" }
+    expect(await send("https://t.bilibili.com/12234456")).toContain("动态不可用")
+    controller.abort()
+    expect(await send("https://t.bilibili.com/12234456")).toBeUndefined()
+    expect(replies).toHaveLength(6)
+  } finally {
+    await api.dispose()
+  }
+})
 
 test("B 站旧图文标题进入推送，Opus 保留自己的标题",async()=>{
   const provider=createBiliProvider()

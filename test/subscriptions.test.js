@@ -12,6 +12,8 @@ import { createSubscriptionModule } from "../services/subscriptions/module.ts"
 import { makeDynamicMessages } from "../services/subscriptions/render.ts"
 import { renderSubscriptionHelp } from "../services/subscriptions/help.ts"
 import { createBilibiliVideoCommands } from "../services/bilibili/video-command.ts"
+import { milkyMessage } from "../../../lib/adapters/milky-message.ts"
+import { CommandRegistry } from "../../../lib/commands.ts"
 
 const temp=[]
 async function directory() {
@@ -90,6 +92,97 @@ test("B站动态链接从媒体入口识别直链、分享卡和短链，复用�
     controller.abort()
     expect(await send("https://t.bilibili.com/12234456")).toBeUndefined()
     expect(replies).toHaveLength(6)
+  } finally {
+    await api.dispose()
+  }
+})
+
+test("引用会话中的 QQ 卡片可明确解析动态，拒绝跨会话、站外及引用文字", async () => {
+  const api = createBilibiliVideoCommands({
+    settings: async () => settingsFor({ parseVideoLink: enabled, pushMsgMode: 0 }),
+    async fetch(input, options) {
+      const url = new URL(input)
+      requests.push(url.href)
+      if (url.hostname === "b23.tv") {
+        expect(options.method).toBe("HEAD")
+        expect(url.search).toBe("")
+        const location = url.pathname === "/valid" ? "https://m.bilibili.com/opus/12234455" : "https://elsewhere.invalid/12234455"
+        return new Response(null, { status: 302, headers: { location } })
+      }
+      expect(url.origin + url.pathname).toBe("https://api.bilibili.com/x/polymer/web-dynamic/v1/detail")
+      expect(url.searchParams.get("id")).toBe("12234455")
+      return Response.json({ code: 0, data: { item: raw("DYNAMIC_TYPE_WORD", { desc: { text: "被引用的动态" } }) } })
+    },
+  })
+  const registry = new CommandRegistry()
+  registry.registerModule({ name: "@lotus-yunzai/media", commands: {}, fallback: api.fallback, fallbackFeatures: api.features })
+  const requests = []
+  const replies = []
+  const lookups = []
+  let enabled = true
+  let source
+  function card(link, field = "detail_1") {
+    const body = { meta: { [field]: { [field === "news" ? "jumpUrl" : "qqdocurl"]: link } } }
+    return { type: "light_app", data: { data: JSON.stringify(body) } }
+  }
+  async function send(text, { quote = true, messageScene = "group", allowed = true, delegated = false } = {}) {
+    const peer = messageScene === "group" ? 77 : 42
+    const event = milkyMessage({ event_type: "message_receive", self_id: 99, data: {
+      message_scene: messageScene, peer_id: peer, sender_id: 42, message_seq: 5,
+      segments: [...(quote ? [{ type: "reply", data: { message_seq: 4 } }] : []), { type: "text", data: { text } }],
+    } }, 99, async (action, params) => {
+      if (action === "get_message") {
+        lookups.push(params)
+        return { message: source && { message_scene: messageScene, peer_id: peer, message_seq: 4, sender_id: 43, ...source } }
+      }
+      replies.push([action, params])
+    })
+    return registry.dispatchFallback({ ...event, isDelegated: delegated },
+      names => allowed || !names.includes("[media] B 站解析"), () => false)
+  }
+  try {
+    source = { segments: [card("https://t.bilibili.com/12234455?share_uid=42")] }
+    expect(await send("解析")).toEqual([])
+    source = { segments: [card("https://b23.tv/valid?share_uid=42", "news")] }
+    expect(await send("#解", { messageScene: "friend" })).toBeUndefined()
+    source.sender_id = 42
+    expect(await send("#解", { messageScene: "friend" })).toEqual([])
+    expect(lookups).toEqual([
+      { message_scene: "group", peer_id: 77, message_seq: 4 },
+      { message_scene: "friend", peer_id: 42, message_seq: 4 },
+      { message_scene: "friend", peer_id: 42, message_seq: 4 },
+    ])
+    expect(replies.map(([name, params]) => [name, params.group_id ?? params.user_id])).toEqual([
+      ["send_group_message", 77], ["send_private_message", 42],
+    ])
+    expect(JSON.stringify(replies)).toContain("被引用的动态")
+    expect(requests).toHaveLength(3)
+
+    source.peer_id = 78
+    expect(await send("解")).toBeUndefined()
+    source = { segments: [{ type: "text", data: { text: "https://t.bilibili.com/12234455" } }] }
+    expect(await send("解析")).toBeUndefined()
+    source = { segments: [card("https://wrong.invalid/?url=https://t.bilibili.com/12234455")] }
+    expect(await send("解析")).toBeUndefined()
+    expect(requests).toHaveLength(3)
+
+    source = { segments: [card("https://t.bilibili.com/12234455")] }
+    const queried = lookups.length
+    expect(await send("解析说明")).toBeUndefined()
+    expect(await send("解析", { quote: false })).toBeUndefined()
+    expect(await send("解析", { allowed: false })).toBeUndefined()
+    expect(await send("解析", { delegated: true })).toBeUndefined()
+    enabled = false
+    expect(await send("解析")).toBeUndefined()
+    expect(lookups).toHaveLength(queried)
+    expect(requests).toHaveLength(3)
+    expect(replies).toHaveLength(2)
+
+    enabled = true
+    source = { segments: [card("https://b23.tv/invalid")] }
+    expect(await send("解析")).toBeUndefined()
+    expect(requests.slice(3)).toEqual(["https://b23.tv/invalid"])
+    expect(replies).toHaveLength(2)
   } finally {
     await api.dispose()
   }

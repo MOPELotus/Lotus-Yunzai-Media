@@ -840,6 +840,40 @@ export function biliDynamicId(url: URL) {
   }
 }
 
+export function isBiliVideoPage(url: URL) {
+  return (url.hostname === "www.bilibili.com" || url.hostname === "bilibili.com") &&
+    /^\/video\/(?:BV[1-9A-Za-z]{10}|av[1-9]\d*)\/?$/iu.test(url.pathname)
+}
+
+function cardProperty(value: unknown, name: string): unknown {
+  if (value && typeof value === "object" && Object.hasOwn(value, name)) {
+    return (value as Record<string, unknown>)[name]
+  }
+}
+
+export function quotedBiliCardLink(raw: unknown) {
+  let card = cardProperty(raw, "data") ?? raw
+  if (typeof card === "string") {
+    if (card.length > 32_768) return
+    try {
+      card = JSON.parse(card)
+    } catch {
+      return
+    }
+  }
+  const meta = cardProperty(card, "meta")
+  const candidates = [cardProperty(cardProperty(meta, "detail_1"), "qqdocurl"), cardProperty(cardProperty(meta, "news"), "jumpUrl")]
+  for (const value of candidates) {
+    if (typeof value !== "string" || value.length > 4096) continue
+    const url = parseBiliUrl(value)
+    if (!url || (!isBiliVideoPage(url) && !biliDynamicId(url) &&
+        !(BILI_SHORT_HOSTS.has(url.hostname) && /^\/[a-z0-9]+\/?$/iu.test(url.pathname)))) continue
+    url.search = ""
+    url.hash = ""
+    return url.href
+  }
+}
+
 function extractFromJsonCard(raw: string) {
   const trimmed = String(raw || "").trim()
   const start = trimmed.indexOf("{")

@@ -11,7 +11,8 @@ import { createSubscriptionConfig } from "../subscriptions/config.ts"
 import { makeDynamicMessages } from "../subscriptions/render.ts"
 import { ToolInstallerService } from "../tools/installer.ts"
 import {
-  BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, normalizeDownloadConfig, resolveCommandPath,
+  BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, isBiliVideoPage, normalizeDownloadConfig,
+  quotedBiliCardLink, resolveCommandPath,
 } from "./service.ts"
 
 const featureNames = ["[media] B 站解析"] as const
@@ -25,6 +26,7 @@ const pickCommand = /^#看(\d+)$/u
 const tukuPickCommand = /^#看(?:b|哔)站视频([\s\S]*)$/iu
 const watchCommand = /^#看视频([\s\S]*)$/u
 const downloadCommand = /^#b站(?:下载|下视频)\s+([\s\S]+)$/iu
+const quotedLinkCommand = /^#?(?:解析|解)$/u
 const subscriptionSettings = createSubscriptionConfig(dataPath, lockFile)
 
 type SearchResults = Awaited<ReturnType<BilibiliService["search"]>>
@@ -35,6 +37,7 @@ type VideoAction =
   | { kind: "page"; next: boolean }
   | { kind: "pick"; index: number; tuku: boolean }
   | { kind: "watch"; keyword: string }
+  | { kind: "quote" }
   | { kind: "download" | "link"; target: string }
 
 interface SearchSession {
@@ -69,6 +72,10 @@ function videoAction(message: string, context: MessageFallbackContext): VideoAct
   const download = downloadCommand.exec(message)
   if (download) return { kind: "download", target: download[1]!.trim() }
   if (context.message_type === "terminal" || isMediaCommandText(message)) return
+  if (quotedLinkCommand.test(message)) {
+    if (!context.isDelegated && context.reply_id !== undefined && context.lookupReply) return { kind: "quote" }
+    return
+  }
   const target = buildMediaMessageText({ ...context, msg: message })
   if (link.test(target)) return { kind: "link", target }
 }
@@ -267,13 +274,24 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         if (!first) throw new Error("未搜索到相关视频")
         target = first.url
       } else {
-        target = service.extractTarget(action.target) || ""
+        let options: Awaited<ReturnType<typeof settings>> | undefined
+        if (action.kind === "quote") {
+          options = await settings("bilibili")
+          if (!options.parseVideoLink || signal?.aborted) return
+          const source = await context.lookupReply?.().catch(() => undefined)
+          const card = source?.message[0]
+          if ((card?.type !== "json" && card?.type !== "light_app") || signal?.aborted) return
+          target = quotedBiliCardLink(card.data) || ""
+        } else {
+          target = service.extractTarget(action.target) || ""
+        }
         if (!target) return
         const url = URL.parse(target)
         if (url?.hostname !== "live.bilibili.com") {
-          const options = await settings("bilibili")
+          options ??= await settings("bilibili")
           if (!options.parseVideoLink || signal?.aborted) return
-          const resolved = url && await service.resolveShortLink(url, signal)
+          const destination = url && service.resolveShortLink(url, signal)
+          const resolved = await (action.kind === "quote" ? destination?.catch(() => undefined) : destination)
           const id = resolved && biliDynamicId(resolved)
           if (id) {
             const provider = createBiliProvider({ fetch })
@@ -284,10 +302,11 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
             for (const message of messages) await reply(context, message)
             return []
           }
+          if (action.kind === "quote" && (!resolved || !isBiliVideoPage(resolved))) return
           informationUrl = resolved?.href
         }
       }
-      if (!signal?.aborted) await renderInfo(context, service, await service.getInfo(informationUrl ?? target), target)
+      if (!signal?.aborted) await renderInfo(context, service, await service.getInfo(informationUrl ?? target), target, action.kind !== "quote")
     } catch (error) {
       await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
     }

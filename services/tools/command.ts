@@ -6,7 +6,7 @@ import { TuneWeaveService } from "../tuneweave/service.ts"
 import { ToolInstallerService } from "./installer.ts"
 
 function matches(message: string) {
-  return message === "#初始化环境" || message === "#初始化工具环境"
+  return message === "#初始化环境" || message === "#初始化工具环境" || message === "#初始化签到环境"
 }
 
 export function createMediaEnvironment({ signal }: { readonly signal?: AbortSignal }) {

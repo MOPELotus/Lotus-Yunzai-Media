@@ -104,6 +104,68 @@ test("空合伙人档案保存说明，未连接平台", async () => {
   } finally { await rm(dir,{recursive:true,force:true}) }
 })
 
+test("每日二十首按账号计入已确认和待核回执，主分与分项独立抽取并留乐评来源", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lotus-partner-daily-limit-"))
+  const stateFile = join(dir, "state.yaml")
+  const receipts = Array.from({ length:17 }, (_, index) => ["42:" + (index + 100), "confirmed"])
+  receipts.push(["42:18", "pending"], ["43:20", "confirmed"])
+  await writeFile(stateFile, YAML.stringify({ evaluation_date:"2026-11-20", evaluation_receipts:receipts }))
+
+  const note = "把没写完的话留到结尾，我喜欢这样给前面那次告别留出了一点余地。"
+  const sources = ["https://music.example/song"]
+  const scores = [3, 4, 2]
+  const submissions = []
+  let dailyReads = 0
+  let reviews = 0
+  const task = new NeteasePartnerTask({
+    accounts:{ loadAccounts:async () => [{ uid:"42", nickname:"合成账号", tuneweave_account:"fixture", comment:true }] },
+    stateFile, logDir:dir, now:() => new Date(2026, 10, 20, 12),
+    scorer:() => scores.shift(),
+    reviewer:{ async generate(context, config) {
+      reviews++
+      expect(context.title).toBe("本轮可提交")
+      expect(config.mode).toBe("codex")
+      return { comment:note, sources }
+    } },
+    tuneweave:{
+      async requireReady() {},
+      async request(path, options) {
+        if (path.startsWith("/v1/account?")) return { authenticated:true, user_id:"42" }
+        const { uri, data } = options.body
+        if (uri.endsWith("/daily/task/get")) {
+          dailyReads++
+          return { code:200, data:{ id:99, works:[
+            { id:20, name:"本轮可提交", supportExtraEvaTypes:["作词", { dimensionId:"作曲" }] },
+            { id:21, name:"超过本日目标" },
+            { id:19, name:"先前在线提交", completed:true, score:2 },
+            ...(dailyReads === 2 ? [{ id:18, name:"已补确认", completed:true }] : []),
+          ] } }
+        }
+        if (uri.endsWith("/extra/wait/evaluate/work/list")) return { code:200, data:[] }
+        expect(uri).toEndWith("/work/evaluate")
+        submissions.push(data)
+        return { code:200 }
+      },
+    },
+  })
+  try {
+    const config = { delay_ms_max:0, review:{ mode:"codex" } }
+    const report = await task.execute(config)
+    expect(submissions).toHaveLength(1)
+    expect(submissions[0]).toMatchObject({ workId:20, score:3, tags:"3-A-1", comment:note, syncComment:"true" })
+    expect(JSON.parse(submissions[0].extraScore)).toEqual({ 作词:4, 作曲:2 })
+    expect(scores).toHaveLength(0)
+    expect(reviews).toBe(1)
+    expect(report.accounts[0]).toMatchObject({ total:20, success:20, fail:0, skip:19, attempts:2 })
+    expect((await readPartnerLog(dir)).accounts[0].evaluations.find(row => row.workId === "20"))
+      .toMatchObject({ commentPosted:true, review:{ mode:"codex", sources, contextWarnings:[] } })
+
+    expect((await task.execute(config)).accounts[0]).toMatchObject({ total:20, success:20, fail:0, skip:20 })
+    expect(dailyReads).toBe(2)
+    expect(submissions).toHaveLength(1)
+  } finally { await rm(dir, { recursive:true, force:true }) }
+})
+
 test("自动合伙人沿用原日记录，新状态优先，旧日期冲突时不执行", async () => {
   const dir = await mkdtemp(join(tmpdir(),"lotus-partner-old-day-"))
   const stateFile = join(dir,"state.yaml"), old = join(dir,"old.yaml"), other = join(dir,"another-old.yaml")

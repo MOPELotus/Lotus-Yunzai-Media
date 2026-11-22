@@ -63,6 +63,7 @@ type EvaluationPayload = {
   source: "mp-music-partner"
   extraResource?: "true"
 }
+type ReviewRecord = { mode: string } & ({ sources: string[]; contextWarnings: string[] } | { error: string })
 type Evaluation = {
   workId: string
   name: string
@@ -72,6 +73,7 @@ type Evaluation = {
   extraScore?: Record<string, number | null>
   comment?: string
   commentPosted?: boolean
+  review?: ReviewRecord
   attempt: number
 }
 type AccountSummary = {
@@ -259,12 +261,20 @@ export class NeteasePartnerTask {
     const uid = String(account?.uid || "")
     const nickname = typeof account?.nickname === "string" ? account.nickname.slice(0,100).toWellFormed() : "网易云账号"
     const summary: AccountSummary = { uid, nickname, total:goal, success:0, skip:0, fail:goal, attempts:0, details:[], evaluations:[], results:[] }
-    const completed = new Map<string, Evaluation>(), unknown = new Set<string>(), payloads = new Map<string, EvaluationPayload>()
+    const completed = new Map<string, Evaluation>(), unknown = new Set<string>()
+    const payloads = new Map<string, { payload: EvaluationPayload; review?: ReviewRecord }>()
+    const confirmed = new Set<string>(), pending = new Set<string>()
+    const receiptPrefix = uid + ":"
+    for (const [receipt, status] of journal) {
+      if (!receipt.startsWith(receiptPrefix)) continue
+      const id = receipt.slice(receiptPrefix.length)
+      if (workId.test(id)) (status === "confirmed" ? confirmed : pending).add(id)
+    }
     const comments = Array.isArray(config.comments) && config.comments.length ? config.comments : ["打卡支持"]
     const pool = [...new Set(comments.filter(value => typeof value === "string").map(value => value.trim()).filter(Boolean))]
     let available = [...pool]
 
-    for (let attempt = 1; attempt <= 2 && completed.size < goal; attempt++) {
+    for (let attempt = 1; attempt <= 2 && confirmed.size < goal; attempt++) {
       signal?.throwIfAborted()
       summary.attempts = attempt
       if (attempt > 1) await this.sleep(delayFor(config), signal)
@@ -298,37 +308,48 @@ export class NeteasePartnerTask {
       }
       if (!works.length) summary.details.push("没有待评作品。")
 
-      const seen = new Set()
+      const candidates = new Map<string, { item: WorkItem; work: Work; rawId: string | number }>()
       for (const item of works) {
-        signal?.throwIfAborted()
-        if (completed.size >= goal) break
         const work = item?.work || item
         const rawId = work?.id
         if (typeof rawId !== "string" && (typeof rawId !== "number" || !Number.isSafeInteger(rawId))) continue
         const id = String(rawId)
-        if (!workId.test(id) || completed.has(id) || seen.has(id)) continue
-        seen.add(id)
+        if (!workId.test(id)) continue
+        const previous = candidates.get(id)
+        if (!previous || (!previous.item.completed && item.completed)) candidates.set(id, { item, work, rawId })
+      }
+      // Count all completed rows and local receipts before spending this run's remaining slots.
+      for (const [id, { item }] of candidates) {
+        if (!item.completed || confirmed.has(id)) continue
+        signal?.throwIfAborted()
+        await checkpoint(receiptPrefix + id, "confirmed")
+        confirmed.add(id)
+        pending.delete(id)
+      }
+      for (const [id, { item, work, rawId }] of candidates) {
+        signal?.throwIfAborted()
+        if (completed.has(id)) continue
         const name = typeof work.name === "string" ? work.name.slice(0,160).toWellFormed() : id
         const dimensions = dimensionsFor(item, work)
-        const receipt = uid + ":" + id
-        if (item.completed || journal.get(receipt) === "confirmed") {
+        const receipt = receiptPrefix + id
+        if (confirmed.has(id)) {
           const record: Evaluation = { workId:id, name, dimensions, status:"already_completed", score:item.score ?? null,
             extraScore:Object.fromEntries(dimensions.map(key => [key,item.extraScore?.[key] ?? null])), comment:item.comment || "", attempt }
           completed.set(id, record)
           summary.evaluations.push(record)
-          summary.skip++
-          if (journal.get(receipt) !== "confirmed") await checkpoint(receipt, "confirmed")
           continue
         }
-        if (journal.has(receipt)) {
+        if (pending.has(id)) {
           if (!unknown.has(id)) summary.evaluations.push({ workId:id, name, dimensions, attempt, status:"unknown" })
           unknown.add(id)
           continue
         }
 
-        let payload = payloads.get(id)
-        if (!payload) {
+        if (confirmed.size + pending.size >= goal) continue
+        let prepared = payloads.get(id)
+        if (!prepared) {
           let comment = ""
+          let reviewRecord: ReviewRecord | undefined
           const score = this.scorer()
           const extraScore = Object.fromEntries(dimensions.map(key => [key,this.scorer()]))
           if (account.comment !== false) {
@@ -336,11 +357,15 @@ export class NeteasePartnerTask {
             const max = bounded(review.max_chars,140,20,500)
             if (review.mode === "responses" || review.mode === "codex") {
               try {
-                const result = await this.reviewer.generate(await collectReviewContext(work, query), { ...review, max_chars:max }, signal)
+                const context = await collectReviewContext(work, query)
+                const result = await this.reviewer.generate(context, { ...review, max_chars:max }, signal)
                 comment = result.comment
+                reviewRecord = { mode:review.mode, sources:result.sources, contextWarnings:context.warnings }
               } catch {
                 signal?.throwIfAborted()
-                summary.details.push("乐评未核实，本首仅提交评分。")
+                const error = "乐评未核实，本首仅提交评分。"
+                reviewRecord = { mode:review.mode, error }
+                summary.details.push(error)
               }
             } else if (!review.mode || review.mode === "fixed") {
               if (!available.length) available = [...pool]
@@ -348,11 +373,13 @@ export class NeteasePartnerTask {
               if (picked.length <= max) comment = picked
             }
           }
-          payload = { taskId:daily.data?.id, workId:rawId, score, tags:`${score}-A-1`, customTags:"[]", comment, syncYunCircle:"true",
+          const payload: EvaluationPayload = { taskId:daily.data?.id, workId:rawId, score, tags:`${score}-A-1`, customTags:"[]", comment, syncYunCircle:"true",
             syncComment:comment ? "true" : "false", extraScore:JSON.stringify(extraScore), source:"mp-music-partner",
             ...(item.isExtra ? { extraResource:"true" } : {}) }
-          payloads.set(id, payload)
+          prepared = { payload, review:reviewRecord }
+          payloads.set(id, prepared)
         }
+        const { payload, review } = prepared
         await this.sleep(delayFor(config), signal)
         signal?.throwIfAborted()
         await checkpoint(receipt, "pending")
@@ -360,8 +387,9 @@ export class NeteasePartnerTask {
           await checkpoint(receipt)
           signal.throwIfAborted()
         }
+        pending.add(id)
         const record: Evaluation = { workId:id, name, score:payload.score, extraScore:JSON.parse(payload.extraScore), dimensions,
-          comment:payload.comment, commentPosted:false, attempt, status:"unknown" }
+          comment:payload.comment, commentPosted:false, ...(review && { review }), attempt, status:"unknown" }
         let outcome: EvaluationResult | undefined
         try { outcome = await query<EvaluationResult>(routes.evaluate, payload) }
         catch (error) {
@@ -370,11 +398,14 @@ export class NeteasePartnerTask {
         }
         if (outcome?.code === 200) {
           await checkpoint(receipt, "confirmed")
+          pending.delete(id)
+          confirmed.add(id)
           record.status = "success"
           record.commentPosted = Boolean(payload.comment)
           completed.set(id, record)
         } else if (outcome?.code === 405) {
           await checkpoint(receipt)
+          pending.delete(id)
           record.status = "failed"
         } else {
           unknown.add(id)
@@ -386,8 +417,9 @@ export class NeteasePartnerTask {
         }
       }
     }
-    summary.success = completed.size
-    summary.fail = goal - completed.size
+    summary.success = Math.min(confirmed.size, goal)
+    summary.skip = summary.success - [...completed.values()].filter(record => record.status === "success").length
+    summary.fail = goal - summary.success
     summary.results = [...completed.values()]
     return summary
   }

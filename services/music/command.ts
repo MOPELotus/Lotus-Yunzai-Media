@@ -1,4 +1,5 @@
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
+import { enablePartnerAfterLogin } from "../../../../lib/panel-partner.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.ts"
@@ -46,16 +47,21 @@ interface Services {
 }
 
 const musicNames: Readonly<Record<string, string>> = MUSIC_PLATFORMS
+const root = new URL("../../../../", import.meta.url)
 const scanTypes: Readonly<Record<string, readonly ScanType[]>> = MUSIC_QR_TYPES
 const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请稍后重试。"
 const loginTime = (value: number | undefined, fallback: number) =>
   value !== undefined && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : fallback
 
-function ownerPermission(context: Context, config: Global) {
+function configFields(value: unknown): Readonly<Record<string, unknown>> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function ownerPermission(context: Context, config: { readonly permissions?: unknown }) {
   if (context.canManagePackages !== true || context.isDelegated) return false
-  const { scopes, ...permissions } = config.permissions
+  const { scopes, ...permissions } = configFields(config.permissions)
   return new PermissionService({ permissions: { ...permissions, scopes: {
-    "netease.partner": { policy: "master_only" }, ...scopes,
+    "netease.partner": { policy: "master_only" }, ...configFields(scopes),
   } } }).can({ ...context, isMaster: true }, "netease.partner")
 }
 
@@ -249,7 +255,13 @@ export function createMusicCommands({ signal, mediaRuntime }: Services) {
       await api.waitLogin(login, { signal: active, timeoutMs, pollMs: session.pollMs })
       if (active.aborted) return
       if (session.partner) {
-        const done = "网易云合伙人账号已登录。"
+        let done = "网易云合伙人账号已登录，定时任务已启用。"
+        try {
+          await enablePartnerAfterLogin(root, active, config => ownerPermission(context, config))
+        } catch {
+          if (active.aborted) return
+          done = "网易云合伙人账号已登录，定时任务启用未确认。请检查合伙人配置或重试登录。"
+        }
         const image = await renderStatusCard({ title: "合伙人登录", subtitle: "音乐合伙人", message: done }).catch(() => undefined)
         if (!active.aborted) await imageReply(context, image, done)
       } else await reply(context, musicNames[platform] + "公共音乐账号已登录。")

@@ -7,6 +7,8 @@ import YAML from "yaml"
 import { lockFile } from "../../../lib/file-lock.ts"
 import { panelMediaSubscriptionSettings } from "../services/subscriptions/panel.ts"
 import { createSubscriptionConfig } from "../services/subscriptions/config.ts"
+import { createBiliProvider } from "../services/subscriptions/bilibili/index.ts"
+import { createWeiboProvider } from "../services/subscriptions/weibo/index.ts"
 
 const url = "http://example.test/panel/api/settings/native/bilibili-subscriptions"
 const read = new Request(url)
@@ -34,15 +36,26 @@ async function fixture(run) {
     friends: async () => [{ user_id: 42 }, { user_id: 43 }],
   }
   let panelActive = true
+  const lookups = []
+  const respond = {
+    bilibili: uid => Response.json({ code: 0, data: { card: { mid: uid, name: `B站作者 ${uid}` } } }),
+    weibo: uid => Response.json({ ok: 1, data: { userInfo: { idstr: uid, screen_name: `微博作者 ${uid}` } } }),
+  }
   const create = (platform) => {
+    const bilibili = platform === "bilibili"
+    const provider = (bilibili ? createBiliProvider : createWeiboProvider)({ fetch: async (endpoint, { signal }) => {
+      const uid = endpoint.searchParams.get(bilibili ? "mid" : "value")
+      lookups.push({ platform, endpoint: endpoint.pathname, uid })
+      return respond[platform](uid, signal)
+    } })
     const handler = panelMediaSubscriptionSettings(pathToFileURL(work + "/"), platform, request =>
-      request.headers.has("Authorization") ? undefined : gateway)
+      request.headers.has("Authorization") ? undefined : gateway, provider)
     return request => handler(request, () => panelActive)
   }
   const config = createSubscriptionConfig(data, lockFile)
   try {
     await run({
-      base, override, original, gateway, signal, send: create("bilibili"), sendWeibo: create("weibo"), config,
+      base, override, original, gateway, signal, send: create("bilibili"), sendWeibo: create("weibo"), config, lookups, respond,
       settingsLock: join(settings, ".push-lock.sqlite"),
       closePanel: () => { panelActive = false },
     })
@@ -52,14 +65,14 @@ async function fixture(run) {
 }
 
 test("媒体面板只列当前机器人订阅，保留其他机器人的 YAML、同 UID 与个人附加字段", async () => {
-  await fixture(async ({ base, override, original, send, config }) => {
+  await fixture(async ({ base, override, original, send, config, lookups }) => {
     const response = await send(read.clone())
     expect(response.status).toBe(200)
     const { values, fields } = await response.json()
     expect(values).toEqual({ routes: [group("77", "12"), privateRoute("43", "15")] })
     expect(fields[0]).toMatchObject({ key: "routes", type: "json" })
     const next = [
-      group("77", "12", ["DYNAMIC_TYPE_AV"]), group("78", "16"), privateRoute("42", "27"), privateRoute("43", "15"),
+      group("77", "12", ["DYNAMIC_TYPE_AV"]), group("78", "16"), privateRoute("42", "16"), privateRoute("43", "15"),
     ]
     expect(await (await send(put(values, next))).json()).toMatchObject({ values: { routes: next } })
     const saved = await readFile(override, "utf8")
@@ -69,13 +82,14 @@ test("媒体面板只列当前机器人订阅，保留其他机器人的 YAML、
       { bot_id: 88, uid: 12, name: "别的机器人", type: [] },
     ])
     expect(await readFile(base, "utf8")).toBe(original)
-    expect(await config.routes("bilibili")).toContainEqual({ ...group("78", "16"), bot: "99", name: "16" })
-    expect(await config.routes("bilibili")).toContainEqual({ ...privateRoute("42", "27"), bot: "99", name: "27" })
+    expect(await config.routes("bilibili")).toContainEqual({ ...group("78", "16"), bot: "99", name: "B站作者 16" })
+    expect(await config.routes("bilibili")).toContainEqual({ ...privateRoute("42", "16"), bot: "99", name: "B站作者 16" })
     const { values: updated } = await (await send(read.clone())).json()
     expect((await send(put(updated, next.slice(1)))).status).toBe(200)
     expect(YAML.parse(await readFile(override, "utf8")).group["77"]).toEqual([
       { bot_id: 88, uid: 12, name: "别的机器人", type: [] },
     ])
+    expect(lookups).toEqual([{ platform: "bilibili", endpoint: "/x/web-interface/card", uid: "16" }])
   })
 })
 
@@ -111,14 +125,39 @@ test("浏览器和聊天更新用同一配置，保留相邻机器人并拒绝�
 })
 
 test("微博订阅使用自己的目标文件，并拒绝 B 站直播类别", async () => {
-  await fixture(async ({ sendWeibo, config }) => {
+  await fixture(async ({ sendWeibo, config, lookups }) => {
     const { values } = await (await sendWeibo(read.clone())).json()
     expect(values.routes).toEqual([])
     expect((await sendWeibo(put(values, [group("78", "15", ["DYNAMIC_TYPE_LIVE_RCMD"])]))).status).toBe(400)
     const next = group("78", "15", ["DYNAMIC_TYPE_ARTICLE"])
     expect((await sendWeibo(put(values, [next]))).status).toBe(200)
-    expect(await config.routes("weibo")).toEqual([{ ...next, bot: "99", name: "15" }])
+    expect(await config.routes("weibo")).toEqual([{ ...next, bot: "99", name: "微博作者 15" }])
     expect((await config.routes("bilibili")).length).toBe(3)
+    expect(lookups).toEqual([{ platform: "weibo", endpoint: "/api/container/getIndex", uid: "15" }])
+  })
+})
+
+test("媒体面板拒绝不存在的作者、资料不匹配和风控，保持整次变更原子性", async () => {
+  await fixture(async ({ send, sendWeibo, respond, override, original, config }) => {
+    const { values } = await (await send(read.clone())).json()
+    const realResponse = respond.bilibili
+    const next = [...values.routes, group("78", "20"), group("78", "21")]
+    respond.bilibili = uid => uid === "21" ? Response.json({ code: -404 }) : realResponse(uid)
+    const missing = await send(put(values, next))
+    expect(missing.status).toBe(400)
+    expect(await missing.json()).toEqual({ message: "未找到 UID 21 的公开资料。" })
+    respond.bilibili = uid => uid === "21" ? Response.json({ code: -352 }) : realResponse(uid)
+    const denied = await send(put(values, next))
+    expect(denied.status).toBe(503)
+    expect(await denied.json()).toEqual({ message: "暂时无法核验 UID 21 的账号，请稍后重试。" })
+    expect(await readFile(override, "utf8")).toBe(original)
+
+    respond.weibo = () => Response.json({ ok: 0, msg: "用户不存在" })
+    const missingWeibo = await sendWeibo(put({ routes: [] }, [group("78", "20")]))
+    expect(missingWeibo.status).toBe(400)
+    respond.weibo = () => Response.json({ ok: 1, data: { userInfo: { idstr: "21", screen_name: "另一个账号" } } })
+    expect((await sendWeibo(put({ routes: [] }, [group("78", "20")]))).status).toBe(503)
+    expect(await config.routes("weibo")).toEqual([])
   })
 })
 
@@ -152,6 +191,19 @@ test("媒体面板排队等写入锁时会话被撤销，释放锁后仍拒绝�
       held.close()
     }
     expect((await pending).status).toBe(403)
+    expect(await readFile(override, "utf8")).toBe(original)
+  })
+})
+
+test("媒体面板核验新增作者期间撤销登录，晚到的作者资料不能写入", async () => {
+  await fixture(async ({ send, respond, closePanel, override, original }) => {
+    const { values } = await (await send(read.clone())).json()
+    const realResponse = respond.bilibili
+    respond.bilibili = uid => {
+      closePanel()
+      return realResponse(uid)
+    }
+    expect((await send(put(values, [...values.routes, group("78", "20")]))).status).toBe(403)
     expect(await readFile(override, "utf8")).toBe(original)
   })
 })

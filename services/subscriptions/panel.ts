@@ -3,16 +3,18 @@ import { isDeepStrictEqual } from "node:util"
 import { lockFile } from "../../../../lib/file-lock.ts"
 import { parseFriendList, type OwnerContactListSession } from "../../../../lib/owner-contact-list.ts"
 import { readPanelJson } from "../../../../lib/panel.ts"
-import { biliTypes } from "./bilibili/index.ts"
+import { biliTypes, createBiliProvider } from "./bilibili/index.ts"
 import {
   createSubscriptionConfig, numericId, ownerRoutes, subscriptionRouteKey, SubscriptionRouteConflict, SubscriptionRouteUnauthorized,
   type EditableSubscriptionRoute,
 } from "./config.ts"
-import { weiboTypes } from "./weibo/index.ts"
-import type { SubscriptionPlatform } from "./types.ts"
+import { subscriptionSession } from "./session.ts"
+import { createWeiboProvider, weiboTypes } from "./weibo/index.ts"
+import type { SubscriptionPlatform, SubscriptionProvider, SubscriptionRedis } from "./types.ts"
 
 const platforms = { bilibili: biliTypes, weibo: weiboTypes }
 const maxRoutes = 500
+const unavailable = (message: string) => Response.json({ message }, { status: 503 })
 
 function object(value: unknown): Record<string, unknown> | undefined {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as Record<string, unknown>
@@ -40,8 +42,11 @@ function snapshot(value: unknown): EditableSubscriptionRoute[] | undefined {
 }
 
 export function panelMediaSubscriptionSettings(root: URL, platform: SubscriptionPlatform,
-  contactSession: (request: Request) => OwnerContactListSession | undefined) {
-  const config = createSubscriptionConfig(fileURLToPath(new URL("data/", root)), lockFile)
+  contactSession: (request: Request) => OwnerContactListSession | undefined, providerOptions?: Pick<SubscriptionProvider, "profile">) {
+  const directory = fileURLToPath(new URL("data/", root))
+  const config = createSubscriptionConfig(directory, lockFile)
+  const session = subscriptionSession(platform, directory, () => (globalThis as { redis?: SubscriptionRedis }).redis)
+  const provider = providerOptions ?? (platform === "bilibili" ? createBiliProvider({ session }) : createWeiboProvider({ session }))
   const labels = platforms[platform]
   const fields = [{
     key: "routes", label: "当前机器人的订阅名单", type: "json",
@@ -88,12 +93,26 @@ export function panelMediaSubscriptionSettings(root: URL, platform: Subscription
         verifyFriends ? gateway.friends(signal).then(parseFriendList).catch(() => undefined) : [],
       ])
       if (!authorized()) return new Response(null, { status: 403 })
-      if (!groups || !friends || signal.aborted) return new Response(null, { status: 503 })
+      if (!groups || !friends || signal.aborted) return unavailable("暂时无法核对机器人的群和好友，请稍后重试。")
       const allowed = { group: new Set(groups.map(({ id }) => String(id))), private: new Set(friends.map(({ id }) => String(id))) }
       if (changed.some(route => !allowed[route.kind].has(route.chat))) {
         return Response.json({ message: "修改的目标须是当前机器人所在的群或已添加的好友。" }, { status: 403 })
       }
-      return output(await config.replaceOwnerRoutes(platform, bot, previous, next, authorized, signal))
+      const added = new Set(changed.filter(route => !old.has(subscriptionRouteKey(route))).map(route => route.uid))
+      const names = new Map<string, string>()
+      for (const uid of added) {
+        const result = await provider.profile(uid, { signal }).then(profile => ({ profile })).catch(() => undefined)
+        if (!authorized()) return new Response(null, { status: 403 })
+        if (!result || signal.aborted || result.profile?.verificationFailure) {
+          return unavailable(`暂时无法核验 UID ${uid} 的账号，请稍后重试。`)
+        }
+        const { profile } = result
+        if (!profile || profile.uid !== uid || !profile.name.trim()) {
+          return Response.json({ message: `未找到 UID ${uid} 的公开资料。` }, { status: 400 })
+        }
+        names.set(uid, profile.name)
+      }
+      return output(await config.replaceOwnerRoutes(platform, bot, previous, next, names, authorized, signal))
     } catch (error) {
       const status = error instanceof SubscriptionRouteConflict ? 409 : error instanceof SubscriptionRouteUnauthorized ? 403 : 500
       return new Response(null, { status })

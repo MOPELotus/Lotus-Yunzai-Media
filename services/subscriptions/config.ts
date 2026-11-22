@@ -208,7 +208,8 @@ export function ownerRoutes(routes: readonly SubscriptionRoute[], bot: string): 
     .sort((left, right) => subscriptionRouteKey(left).localeCompare(subscriptionRouteKey(right)))
 }
 
-function editOwnerRoute(document: Document, bot: string, route: EditableSubscriptionRoute, remove: boolean) {
+function editOwnerRoute(document: Document, bot: string, route: EditableSubscriptionRoute, remove: boolean,
+  names: ReadonlyMap<string, string>) {
   const data = map(document.toJS() ?? {}, "订阅配置")
   const current = data[route.kind]
   const destinations = current === undefined ? {} : { ...map(current, route.kind) }
@@ -217,8 +218,10 @@ function editOwnerRoute(document: Document, bot: string, route: EditableSubscrip
   const entries = [...existing]
   const index = entries.findIndex(item => isMapping(item) && numericId(item.bot_id) === bot && numericId(item.uid) === route.uid)
   const previous = entries[index]
+  const name = names.get(route.uid)
+  if (!remove && !isMapping(previous) && !name) throw new SubscriptionRouteConflict()
   const updated = remove ? undefined : {
-    ...(isMapping(previous) ? previous : { bot_id: Number(bot), uid: route.uid, name: route.uid }),
+    ...(isMapping(previous) ? previous : { bot_id: Number(bot), uid: route.uid, name }),
     type: route.types,
   }
   if (updated) {
@@ -254,7 +257,7 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
     async settings(id: SubscriptionPlatform) { return settingsFor((await effective(id,"config")).data) },
     async routes(id: SubscriptionPlatform) { return routesFrom((await effective(id,"push")).data) },
     async replaceOwnerRoutes(id: SubscriptionPlatform, bot: string, previous: readonly EditableSubscriptionRoute[],
-      next: readonly EditableSubscriptionRoute[], authorize: () => boolean, signal: AbortSignal) {
+      next: readonly EditableSubscriptionRoute[], names: ReadonlyMap<string, string>, authorize: () => boolean, signal: AbortSignal) {
       const folder = dirname(file(id, "push"))
       const assertAuthorized = () => {
         if (signal.aborted || !authorize()) throw new SubscriptionRouteUnauthorized()
@@ -274,8 +277,8 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
         const document: Document = YAML.parseDocument(current.raw)
         if (document.errors.length || (document.contents && !YAML.isMap(document.contents))) throw new SubscriptionRouteConflict()
         if (!document.contents) document.contents = document.createNode({})
-        for (const [key, route] of old) if (!updated.has(key)) editOwnerRoute(document, bot, route, true)
-        for (const [key, route] of updated) if (!isDeepStrictEqual(old.get(key), route)) editOwnerRoute(document, bot, route, false)
+        for (const [key, route] of old) if (!updated.has(key)) editOwnerRoute(document, bot, route, true, names)
+        for (const [key, route] of updated) if (!isDeepStrictEqual(old.get(key), route)) editOwnerRoute(document, bot, route, false, names)
         const saved = await effective(id, "push")
         if (saved.path !== current.path || saved.raw !== current.raw) throw new SubscriptionRouteConflict()
         assertAuthorized()

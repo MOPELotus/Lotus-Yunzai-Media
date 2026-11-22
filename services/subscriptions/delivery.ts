@@ -18,6 +18,7 @@ interface DeliveryOptions {
   signal?: AbortSignal
   now?: () => number
   render?: typeof makeDynamicMessages
+  wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>
 }
 
 interface Candidate {
@@ -120,7 +121,8 @@ function destinationKey(route: SubscriptionRoute) {
   return [route.kind,route.chat,route.bot].join(":")
 }
 
-export function createSubscriptionDelivery({providers,config,groups,notifications,getRedis,signal,now=Date.now,render=makeDynamicMessages}: DeliveryOptions) {
+export function createSubscriptionDelivery({providers,config,groups,notifications,getRedis,signal,now=Date.now,render=makeDynamicMessages,
+  wait = (milliseconds, signal) => pause(milliseconds, undefined, { signal })}: DeliveryOptions) {
   const controller = new AbortController()
   const active = signal ? AbortSignal.any([signal,controller.signal]) : controller.signal
   const runs = new Map<SubscriptionPlatform, Promise<Report>>()
@@ -182,10 +184,10 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  async function sendSeparately(send: Send, item: Candidate): Promise<CheckinNotifyDelivery> {
+  async function sendSeparately(send: Send, item: Candidate, stillAllowed: () => Promise<boolean>): Promise<CheckinNotifyDelivery> {
     let sent = 0
     for (const payload of item.payloads) {
-      if (active.aborted) return sent ? "unknown" : "rejected"
+      if (active.aborted || !await stillAllowed() || active.aborted) return sent ? "unknown" : "rejected"
       try {
         const state = await send(payload)
         if (state !== "confirmed") return state === "rejected" && !sent ? "rejected" : "unknown"
@@ -214,14 +216,16 @@ export function createSubscriptionDelivery({providers,config,groups,notification
   }
 
   async function dispatchTarget(provider: SubscriptionProvider, redis: SubscriptionRedis, sender: Sender,
-    entries: readonly Candidate[], settings: SubscriptionSettings, report: Report) {
+    entries: readonly Candidate[], settings: SubscriptionSettings, report: Report,
+    currentEntries: <T extends Candidate>(items: readonly T[]) => Promise<T[]>, pace: () => Promise<void>, markSent: () => void) {
     const first = entries[0]
     if (!first) return
     const route = first.route
     let liveNoticeAttempted = false
-    async function liveNotice(claimed: readonly Claim[]) {
+    async function liveNotice(claimed: readonly Claim[], stillAllowed: () => Promise<boolean>) {
       if (liveNoticeAttempted || active.aborted || provider.id !== "bilibili" || route.kind !== "group" || !settings.liveAtAll ||
-          !settings.liveGroups.has(route.chat) || !claimed.some(item => item.post.type === "DYNAMIC_TYPE_LIVE_RCMD")) return
+          !settings.liveGroups.has(route.chat) || !claimed.some(item => item.post.type === "DYNAMIC_TYPE_LIVE_RCMD") ||
+          !await stillAllowed()) return
       liveNoticeAttempted = true
       try { await notifyLiveAtAll(redis, route, sender, settings) }
       catch { /* The dynamic itself is still deliverable. */ }
@@ -230,11 +234,14 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     async function sendItems(items: readonly Candidate[]) {
       for (const item of items) {
         if (active.aborted) break
+        await pace()
+        const permitted = () => currentEntries([item]).then(items => items.length > 0)
+        if (!await permitted()) { report.skipped++; continue }
         const claimed = await claim(redis, [item], report)
         const entry = claimed[0]
         if (!entry) continue
-        await liveNotice(claimed)
-        const state = await sendSeparately(sender.send, entry)
+        await liveNotice(claimed, permitted)
+        const state = await sendSeparately(message => { markSent(); return sender.send(message) }, entry, permitted)
         await finish(redis, claimed, state)
         report[state]++
       }
@@ -246,20 +253,31 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
 
     for (let index = 0; index < entries.length && !active.aborted; index += maxForwardPosts) {
-      const batch = await claim(redis, entries.slice(index, index + maxForwardPosts), report)
+      await pace()
+      const next = entries.slice(index, index + maxForwardPosts)
+      const permitted = await currentEntries(next)
+      report.skipped += next.length - permitted.length
+      if (!permitted.length) continue
+      const claimed = await claim(redis, permitted, report)
+      await liveNotice(claimed, async () => (await currentEntries(claimed)).some(item => item.post.type === "DYNAMIC_TYPE_LIVE_RCMD"))
+      const batch = await currentEntries(claimed)
+      const cancelled = claimed.filter(item => !batch.includes(item))
+      if (cancelled.length) {
+        await finish(redis, cancelled, "rejected")
+        report.skipped += cancelled.length
+      }
       if (!batch.length) continue
       if (entries.length <= maxForwardPosts && batch.length !== entries.length && !useDynamicForward(batch, settings)) {
         await finish(redis, batch, "rejected")
         await sendItems(batch)
         continue
       }
-      await liveNotice(batch)
       if (active.aborted) {
         await finish(redis, batch, "rejected")
         break
       }
       let status: CheckinNotifyDelivery
-      try { status = await sender.forward(["有新的"+provider.label+"动态了~", ...batch.map(item => postNode(item.payloads))]) }
+      try { markSent(); status = await sender.forward(["有新的"+provider.label+"动态了~", ...batch.map(item => postNode(item.payloads))]) }
       catch { status = "unknown" }
       if (status === "rejected") {
         await finish(redis, batch, "rejected")
@@ -272,11 +290,13 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  async function poll(provider: SubscriptionProvider) {
+  async function poll(provider: SubscriptionProvider, automatic: boolean) {
     const report = result()
     const redis = getRedis()
     if (!redis || active.aborted) return report
-    const [settings,routes] = await Promise.all([config.settings(provider.id),config.routes(provider.id)])
+    const settings = await config.settings(provider.id)
+    if (active.aborted || (automatic && !settings.enable)) return report
+    const routes = await config.routes(provider.id)
     const current = notifications?.() ?? []
     const groupChecks = new Map<string, Promise<Set<number>>>()
     const destinations = new Map<string, SubscriptionRoute[]>()
@@ -288,14 +308,27 @@ export function createSubscriptionDelivery({providers,config,groups,notification
       list.push(route)
     }
     const wall = Math.floor(now()/1000)
+    async function delay(minimum: number, maximum: number) {
+      if (maximum <= 0 || active.aborted) return
+      const min = Math.min(minimum, maximum)
+      try { await wait(min + Math.floor(Math.random() * (maximum - min + 1)), active) }
+      catch (error) { if (!active.aborted) throw error }
+    }
+    let pacedDelivery = false
+    async function pace() {
+      if (provider.id !== "weibo" || !pacedDelivery) return
+      pacedDelivery = false
+      await delay(1000, settings.delay ? 2000 : 0)
+    }
+    function markSent() { if (provider.id === "weibo") pacedDelivery = true }
     let requested = false
     async function postsFor(uid: string): Promise<readonly DynamicPost[]> {
       const cached = postsByUid.get(uid)
       if (cached) return cached
       if (requested && settings.delay > 0) {
-        const min = Math.min(settings.delay,2000)
-        await pause(min + Math.floor(Math.random()*(settings.delay-min+1)),undefined,{signal:active})
+        await delay(provider.id === "weibo" ? 1000 : 2000, settings.delay)
       }
+      if (active.aborted) return []
       requested = true
       let posts: readonly DynamicPost[]
       try { posts = await provider.fetchPosts(uid,{signal:active,oldest:wall-settings.horizon}) }
@@ -337,11 +370,24 @@ export function createSubscriptionDelivery({providers,config,groups,notification
           }
         }
         if (!candidates.size || active.aborted) continue
-        const currentRoutes = (await config.routes(provider.id)).filter(route=>destinationKey(route)===target)
-        const entries = [...candidates.values()]
-          .filter(({ post }) => currentRoutes.some(route => route.uid === post.uid && (!route.types.length || route.types.includes(post.type))))
-          .sort((a, b) => a.post.createdAt - b.post.createdAt)
-        await dispatchTarget(provider,redis,sender,entries,settings,report)
+        const entries = [...candidates.values()].sort((a, b) => a.post.createdAt - b.post.createdAt)
+        const currentEntries = async <T extends Candidate>(items: readonly T[]): Promise<T[]> => {
+          if (active.aborted || !items.length) return []
+          try {
+            const [latest, configured] = await Promise.all([config.settings(provider.id),config.routes(provider.id)])
+            if (active.aborted || (automatic && !latest.enable)) return []
+            const current = configured.filter(route => destinationKey(route) === target)
+            const timestamp = Math.floor(now() / 1000)
+            return items.filter(({ post }) => current.some(route => allowedPost(post, route, latest, timestamp)))
+          } catch (error) {
+            if (!active.aborted) {
+              report.failed++
+              console.warn("[media] 订阅 · " + provider.label + "推送前复核失败：" + errorText(error))
+            }
+            return []
+          }
+        }
+        await dispatchTarget(provider,redis,sender,entries,settings,report,currentEntries,pace,markSent)
       } catch (error) {
         if (!active.aborted) {
           report.failed++
@@ -358,10 +404,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
   function run(id: SubscriptionPlatform, automatic = false) {
     const provider = providers[id]
     if (!provider || active.aborted || runs.has(id)) return
-    const task = (async () => {
-      if (automatic && !(await config.settings(id)).enable) return result()
-      return poll(provider)
-    })().finally(() => runs.delete(id))
+    const task = poll(provider, automatic).finally(() => runs.delete(id))
     runs.set(id,task)
     return task
   }

@@ -814,6 +814,98 @@ function mockReceipts(kv) {
   }
 }
 
+for (const change of ["移除订阅", "关闭自动推送"]) {
+  test(`同一轮${change}后停止下一条动态，不重发已确认的动态`, async () => {
+    const kv = new Map(), sent = []
+    const first = Promise.withResolvers(), release = Promise.withResolvers()
+    let routes = [route], enabled = true
+    const provider = { id: "weibo", label: "微博", fetchPosts: async () => ["801", "802"].map((id, i) => ({
+      id, uid, type: draw, createdAt: seen - 2 + i, content: "动态正文",
+    })) }
+    const delivery = createSubscriptionDelivery({ providers: { weibo: provider },
+      config: { settings: async () => settingsFor({ getDataRandomDelay: 0, pushTaskLog: 0, pushStatus: enabled }), routes: async () => routes },
+      notifications: () => [{ botId: 99, isGroupMember: async () => true, async sendGroup(_group, message) {
+        sent.push(message)
+        first.resolve()
+        await release.promise
+        return "confirmed"
+      } }], getRedis: () => mockReceipts(kv), now: () => seen * 1000, render: async (_, post) => [post.id],
+    })
+    try {
+      const running = delivery.run("weibo", true)
+      await first.promise
+      if (change === "移除订阅") routes = []
+      else enabled = false
+      release.resolve()
+      expect(await running).toMatchObject({ confirmed: 1, skipped: 1, failed: 0 })
+      expect(sent).toEqual(["801"])
+      expect(kv.get(receiptKey("weibo", route, { id: "801" }))).toBe("1")
+      expect(kv.has(receiptKey("weibo", route, { id: "802" }))).toBe(false)
+      routes = [route]
+      expect(await delivery.run("weibo")).toMatchObject({ confirmed: 1, skipped: 1 })
+      expect(sent).toEqual(["801", "802"])
+    } finally { release.resolve(); await delivery.dispose() }
+  })
+}
+
+test("合并转发领取后撤销一条订阅，只发送仍获准的节点并释放撤销项占位", async () => {
+  const kv = new Map(), sent = []
+  const store = mockReceipts(kv), claim = store.eval
+  const second = { ...route, uid: "372" }
+  let routes = [route, second]
+  store.eval = async (script, options) => {
+    const result = await claim(script, options)
+    if (script.includes("EXISTS") && options.keys.length === 4) routes = [route]
+    return result
+  }
+  const provider = { id: "weibo", label: "微博", fetchPosts: async account => [
+    { id: account, uid: account, type: draw, createdAt: seen - 2, content: "动态正文" },
+  ] }
+  const delivery = createSubscriptionDelivery({ providers: { weibo: provider },
+    config: { settings: async () => settingsFor({ getDataRandomDelay: 0, pushTaskLog: 0, maxTextLengthForSingleMsg: 0 }),
+      routes: async () => routes },
+    notifications: () => [{ botId: 99, isGroupMember: async () => true,
+      async sendForward(_target, nodes) { sent.push(nodes); return "confirmed" } }],
+    getRedis: () => store, now: () => seen * 1000, render: async (_, post) => [post.id],
+  })
+  try {
+    expect(await delivery.run("weibo")).toMatchObject({ confirmed: 1, skipped: 1, failed: 0 })
+    expect(sent).toEqual([["有新的微博动态了~", [uid]]])
+    expect(kv.get(receiptKey("weibo", route, { id: uid }))).toBe("1")
+    expect(kv.has(receiptKey("weibo", second, { id: second.uid }))).toBe(false)
+  } finally { await delivery.dispose() }
+})
+
+test("微博分别为账号查询与动态发送留间隔，零值关闭两段等待", async () => {
+  const calls = []
+  const second = { ...route, uid: "372" }
+  let configuredDelay
+  const provider = { id: "weibo", label: "微博", fetchPosts: async account => {
+    calls.push(["fetch", account])
+    return [{ id: account, uid: account, type: draw, createdAt: seen - 2, content: "动态正文" }]
+  } }
+  const delivery = createSubscriptionDelivery({ providers: { weibo: provider },
+    config: { settings: async () => settingsFor({ getDataRandomDelay: configuredDelay, pushTaskLog: 0 }, "weibo"),
+      routes: async () => [route, second] },
+    notifications: () => [{ botId: 99, isGroupMember: async () => true, async sendGroup(_group, message) {
+      calls.push(["send", message]); return "confirmed"
+    } }], getRedis: () => mockReceipts(new Map()), now: () => seen * 1000, render: async (_, post) => [post.id],
+    async wait(delay, signal) { expect(signal.aborted).toBe(false); calls.push(["wait", delay]) },
+  })
+  try {
+    expect((await delivery.run("weibo")).confirmed).toBe(2)
+    expect(calls.map(([name]) => name)).toEqual(["fetch", "wait", "fetch", "send", "wait", "send"])
+    expect(calls[1][1]).toBeGreaterThanOrEqual(1_000)
+    expect(calls[1][1]).toBeLessThanOrEqual(4_000)
+    expect(calls[4][1]).toBeGreaterThanOrEqual(1_000)
+    expect(calls[4][1]).toBeLessThanOrEqual(2_000)
+    configuredDelay = 0
+    calls.length = 0
+    expect((await delivery.run("weibo")).confirmed).toBe(2)
+    expect(calls.map(([name]) => name)).toEqual(["fetch", "fetch", "send", "send"])
+  } finally { await delivery.dispose() }
+})
+
 test("B站直播全员提醒沿用旧群冷却和失败开关，提醒失败不影响动态",async()=>{
   const kv=new Map(), calls=[]
   const group88={...route,chat:"88"}, friend={...route,chat:"42",kind:"private"}

@@ -147,12 +147,12 @@ function words(value: unknown): string[] {
   return isList(value) ? value.filter(word => typeof word === "string").map(word => word.trim()).filter(Boolean) : []
 }
 
-export function settingsFor(value: Mapping) {
+export function settingsFor(value: Mapping, platform?: SubscriptionPlatform) {
   return {
     enable:flag(value.pushStatus,true),
     cron:typeof value.checkDynamicCD === "string" && value.checkDynamicCD.trim() || "*/23 * * * *",
     horizon:number(value.dynamicTimeRange,7200,1,259200),
-    delay:number(value.getDataRandomDelay,8000,0,60000),
+    delay:number(value.getDataRandomDelay,platform === "weibo" ? 4000 : 8000,0,60000),
     forwards:flag(value.pushTransmit,true),
     picture:flag(value.pushMsgMode,true),
     pictureLimit:number(value.pushPicCountLimit,9,0,12),
@@ -254,7 +254,7 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
     return { path, ...(await read(path) ?? { raw: "", data: {} }) }
   }
   return {
-    async settings(id: SubscriptionPlatform) { return settingsFor((await effective(id,"config")).data) },
+    async settings(id: SubscriptionPlatform) { return settingsFor((await effective(id,"config")).data, id) },
     async routes(id: SubscriptionPlatform) { return routesFrom((await effective(id,"push")).data) },
     async replaceOwnerRoutes(id: SubscriptionPlatform, bot: string, previous: readonly EditableSubscriptionRoute[],
       next: readonly EditableSubscriptionRoute[], names: ReadonlyMap<string, string>, authorize: () => boolean, signal: AbortSignal) {
@@ -296,7 +296,7 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
       try {
         signal?.throwIfAborted()
         const { raw, data } = await effective(id, "config")
-        const entries = Object.entries(changes(settingsFor(data)))
+        const entries = Object.entries(changes(settingsFor(data, id)))
         if (!entries.length) return
 
         const document: Document = YAML.parseDocument(raw)

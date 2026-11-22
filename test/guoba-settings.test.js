@@ -18,10 +18,12 @@ const Result = {
 const defaults = {
   pushMsgMode: 1, mergeTextPic: 1, forwardSendDynamic: 1, maxPicsForSingleMsg: 2, maxTextLengthForSingleMsg: 300,
   pushStatus: 1, checkDynamicCD: "*/23 * * * *",
-  pushTransmit: 1, dynamicTimeRange: 7200, banWords: [],
-  isSplit: 1, boxGrid: 1,
+  pushTransmit: 1, dynamicTimeRange: 7200, getDataRandomDelay: 8000, whiteWordslist: [], banWords: [],
+  pushPicCountLimit: 9, pushContentLenLimit: 1000, pushContentLineLimit: 100,
+  isSplit: 1, splitHeight: 8000, noSplitHeight: 7500, boxGrid: 1, pushTaskLog: 1,
 }
-const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllCD: 1800, parseVideoLink: 1 }
+const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAtAllCD: 1800,
+  liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1 }
 
 test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主配置优先", async () => {
   const root = await mkdtemp(join(tmpdir(), "lotus-media-global-config-"))
@@ -271,7 +273,7 @@ test("B站视频解析开关保留旧文件覆盖和即时读取", async () => {
   }
 })
 
-test("B站直播提醒面板按原范围保存并保留旧群名单和失败提示", async () => {
+test("B站直播提醒面板读写群名单和失败提示，长群号保留字符串", async () => {
   const data = await mkdtemp(join(tmpdir(),"lotus-bili-live-notice-"))
   try {
     const path = join(data,"yuki-plugin/config/bilibili")
@@ -280,11 +282,16 @@ test("B站直播提醒面板按原范围保存并保留旧群名单和失败提�
     const original = "# 旧群名单\nliveAtAllGroupList: [77, '88']\nliveAtAllErrMsg: false\n"
     await writeFile(base,original)
     const {configInfo:form} = supportGuoba(data)
-    expect((await form.getConfigData()).bilibili).toMatchObject({liveAtAll:0,liveAtAllCD:1800})
-    expect(form.schemas.filter(field => /\.liveAtAll(?:CD)?$/u.test(field.field)).map(field=>field.field)).toEqual([
-      "bilibili.liveAtAll","bilibili.liveAtAllCD",
-    ])
-    expect(await form.setConfigData({"bilibili.liveAtAll":1,"bilibili.liveAtAllCD":59},{Result})).toEqual({ok:false,status:422})
+    expect((await form.getConfigData()).bilibili).toMatchObject({
+      liveAtAll: 0, liveAtAllGroupList: ["77", "88"], liveAtAllCD: 1800, liveAtAllErrMsg: 0,
+    })
+    expect(form.schemas.find(field => field.field === "bilibili.liveAtAllGroupList")).toMatchObject({
+      component: "Select", componentProps: { mode: "tags" },
+    })
+    for (const bad of [{ "bilibili.liveAtAllCD": 59 }, { "bilibili.liveAtAllGroupList": ["01"] },
+      { "bilibili.liveAtAllGroupList": [77] }, { "bilibili.liveAtAllErrMsg": "any text" }]) {
+      expect(await form.setConfigData({ "bilibili.liveAtAll": 1, ...bad }, { Result })).toEqual({ ok: false, status: 422 })
+    }
     expect(existsSync(override)).toBe(false)
     expect(await form.setConfigData({"bilibili.liveAtAll":1,"bilibili.liveAtAllCD":90},{Result})).toEqual({ok:true})
     const config = createSubscriptionConfig(data,lockFile)
@@ -292,8 +299,20 @@ test("B站直播提醒面板按原范围保存并保留旧群名单和失败提�
       liveCooldown:90,liveFailureNotice:false})
     expect(await readFile(base,"utf8")).toBe(original)
     expect(await readFile(override,"utf8")).toContain("# 旧群名单")
-    expect(await form.setConfigData({"bilibili.liveAtAll":0},{Result})).toEqual({ok:true})
-    expect((await form.getConfigData()).bilibili).toMatchObject({liveAtAll:0,liveAtAllCD:90})
+    const targets = ["99", "90071992547409933"]
+    expect(await form.setConfigData({
+      "bilibili.liveAtAllGroupList": [" 99 ", ...targets], "bilibili.liveAtAllErrMsg": 1,
+      "bilibili.sharedBiliLogin": 0,
+    }, { Result })).toEqual({ ok: true })
+    expect(await config.settings("bilibili")).toMatchObject({
+      liveGroups: new Set(targets), liveFailureNotice: true, sharedBiliLogin: false,
+    })
+    expect(YAML.parse(await readFile(override, "utf8"))).toMatchObject({
+      liveAtAllGroupList: targets, liveAtAllErrMsg: 1, sharedBiliLogin: 0,
+    })
+    expect(await form.setConfigData({ "bilibili.liveAtAllGroupList": [] }, { Result })).toEqual({ ok: true })
+    expect((await config.settings("bilibili")).liveGroups.size).toBe(0)
+    expect(await readFile(base, "utf8")).toBe(original)
   } finally {
     await rm(data,{force:true,recursive:true})
   }
@@ -320,6 +339,18 @@ test("恢复两平台旧推送过滤设置并保存为原 YAML 类型", async ()
     expect(YAML.parse(await readFile(path, "utf8"))).toEqual({ banWords: ["文字", "[字面]"] })
     expect(await form.setConfigData({ "bilibili.banWords": [] }, { Result })).toEqual({ ok: true })
     expect(YAML.parse(await readFile(path, "utf8"))).toEqual({ banWords: [] })
+    expect(await form.setConfigData({
+      "weibo.getDataRandomDelay": 3210, "weibo.whiteWordslist": [" 原神 "], "weibo.pushPicCountLimit": 3,
+      "weibo.pushContentLenLimit": 700, "weibo.pushContentLineLimit": 12, "weibo.splitHeight": 1600,
+      "weibo.noSplitHeight": 1400, "weibo.pushTaskLog": 0,
+    }, { Result })).toEqual({ ok: true })
+    expect(await config.settings("weibo")).toMatchObject({
+      delay: 3210, whitelist: ["原神"], pictureLimit: 3, contentLimit: 700, lineLimit: 12,
+      splitHeight: 1600, noSplitHeight: 1400, log: false,
+    })
+    expect(await config.settings("bilibili")).toMatchObject({
+      delay: 8000, whitelist: [], pictureLimit: 9, contentLimit: 1000, log: true,
+    })
   } finally {
     await rm(data, { force: true, recursive: true })
   }

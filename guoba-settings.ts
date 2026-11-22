@@ -1,7 +1,7 @@
 import { Job } from "node-schedule"
 import { lockFile } from "../../lib/file-lock.ts"
 import { dataPath } from "./core/path.ts"
-import { createSubscriptionConfig, type SubscriptionSettings } from "./services/subscriptions/config.ts"
+import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 
 import type { SubscriptionPlatform } from "./services/subscriptions/types.ts"
 
@@ -10,7 +10,7 @@ interface SettingsField {
   readonly setting: keyof SubscriptionSettings
   readonly label: string
   readonly options?: readonly string[]
-  readonly tags?: boolean
+  readonly tags?: true | "groupIds"
   readonly component?: "EasyCron"
   readonly min?: number
   readonly max?: number
@@ -40,35 +40,60 @@ const sharedFields: readonly SettingsField[] = [
     help: "关闭后，此平台的所有订阅都跳过转发动态。" },
   { key: "dynamicTimeRange", setting: "horizon", label: "动态时间范围（秒）", min: 1, max: 259_200,
     help: "只推送此时间范围内发布的动态。" },
+  { key: "getDataRandomDelay", setting: "delay", label: "抓取间隔上限（毫秒）", max: 60_000,
+    help: "同一轮获取多个账号的动态时随机等待。设为 0 可关闭等待。" },
+  { key: "whiteWordslist", setting: "whitelist", label: "白名单关键词", tags: true,
+    help: "填入关键词后，只推送命中至少一个关键词的动态。" },
   { key: "banWords", setting: "blacklist", label: "屏蔽关键词", tags: true,
     help: "每行一个关键词。正文或标题包含关键词时跳过推送。" },
+  { key: "pushPicCountLimit", setting: "pictureLimit", label: "单条动态配图上限", max: 12 },
+  { key: "pushContentLenLimit", setting: "contentLimit", label: "正文字符上限", max: 8000,
+    help: "设为 0 时隐藏正文。" },
+  { key: "pushContentLineLimit", setting: "lineLimit", label: "正文行数上限", max: 500,
+    help: "设为 0 时隐藏正文。" },
   { key: "isSplit", setting: "split", label: "分片截图模式", options: ["单张图卡", "分片截图"],
     help: "仅在图片模式下生效。开启后，较长的动态可分成多张图卡。" },
+  { key: "splitHeight", setting: "splitHeight", label: "分片高度（像素）", min: 700, max: 20_000,
+    help: "仅在分片截图模式下生效。" },
+  { key: "noSplitHeight", setting: "noSplitHeight", label: "单张图卡正文高度（像素）", min: 700, max: 20_000,
+    help: "仅在单张图卡模式下生效。" },
   { key: "boxGrid", setting: "grid", label: "九宫格样式", options: ["逐图排列", "宫格排列"],
     help: "仅在图片模式下生效。多张图片可放在同一行。" },
+  { key: "pushTaskLog", setting: "log", label: "记录推送结果汇总", options: ["关闭", "开启"],
+    help: "记录已确认、未确认和异常的发送数量。" },
 ]
 const platforms: readonly { id: SubscriptionPlatform; label: string; fields: readonly SettingsField[] }[] = [
   { id: "bilibili", label: "B站", fields: [
     ...sharedFields,
     { key: "liveAtAll", setting: "liveAtAll", label: "直播动态@全体成员", options: ["关闭", "开启"],
-      help: "仅在 liveAtAllGroupList 指定的群生效，机器人需有全员提醒权限。" },
+      help: "仅在下方指定的群生效，机器人需有全员提醒权限。" },
+    { key: "liveAtAllGroupList", setting: "liveGroups", label: "直播提醒群号", tags: "groupIds",
+      help: "每项输入一个群号。留空时不会提醒全体成员。" },
     { key: "liveAtAllCD", setting: "liveCooldown", label: "@全体成员冷却时间（秒）", min: 60, max: 86_400,
       help: "每个群单独计算冷却时间，默认为 1800 秒。" },
+    { key: "liveAtAllErrMsg", setting: "liveFailureNotice", label: "@全体成员失败时提示", options: ["关闭", "开启"],
+      help: "网关明确拒绝提醒时给出提示，直播动态仍会发送。" },
     { key: "parseVideoLink", setting: "parseVideoLink", label: "视频链接解析", options: ["关闭", "开启"],
       help: "控制聊天中的视频链接、视频编号和短链自动解析。搜看和下载指令仍可使用。" },
+    { key: "sharedBiliLogin", setting: "sharedBiliLogin", label: "视频与动态共用 B 站登录", options: ["关闭", "开启"],
+      help: "开启后，动态可使用 TuneWeave 中已登录且支持动态读取的 B 站会话。" },
   ] },
   { id: "weibo", label: "微博", fields: sharedFields },
 ]
 
 function fieldValue(field: SettingsField, settings: SubscriptionSettings) {
   const value = settings[field.setting]
+  if (value instanceof Set) return [...value]
   return field.component === "EasyCron" || field.tags ? value : Number(value)
 }
 
 function submittedValue(field: SettingsField, value: unknown): FieldInput | undefined {
   if (field.tags) {
     if (!Array.isArray(value) || !value.every(word => typeof word === "string")) return
-    return value.map(word => word.trim()).filter(Boolean)
+    const tags = value.map(word => word.trim()).filter(Boolean)
+    if (field.tags !== "groupIds") return tags
+    if (tags.every(numericId)) return [...new Set(tags)]
+    return
   }
   if (field.component === "EasyCron") {
     if (typeof value !== "string" || value.length > 128) return

@@ -1,14 +1,14 @@
 import { loadImage, type CanvasRenderingContext2D, type Image } from "skia-canvas"
 import QRCode from "qrcode"
 import { ImageSizeLimitError } from "@lotus-yunzai/skia"
-import { drawInfoText, infoCardColors, measureInfoText, renderInfoCardPages, type InfoCardOptions } from "@lotus-yunzai/skia/info-card"
+import { drawMediaNewsImage, drawMediaNewsText, mediaNewsColors, renderMediaNewsPages, type RenderOptions } from "../../core/render/source-cards.ts"
 
 import type { MessageReply } from "../../../../lib/messages.ts"
 import type { SubscriptionSettings } from "./config.ts"
 import type { DynamicPost, SubscriptionProvider } from "./types.ts"
 
 type RenderProvider = Pick<SubscriptionProvider, "id" | "label" | "typeNames">
-type PageEngine = Awaited<ReturnType<typeof renderInfoCardPages>>[number]["engine"]
+type PageEngine = Awaited<ReturnType<typeof renderMediaNewsPages>>[number]["engine"]
 
 export interface DynamicRenderOptions {
   signal?: AbortSignal
@@ -22,12 +22,11 @@ interface DrawBlock {
   draw: (ctx: CanvasRenderingContext2D, y: number) => void
 }
 
-export function subscriptionRenderMode(): NonNullable<InfoCardOptions["mode"]> {
+export function subscriptionRenderMode(): NonNullable<RenderOptions["mode"]> {
   const mode = process.env.LOTUS_SKIA_MODE
   return mode === "gpu" || mode === "cpu" ? mode : "auto"
 }
 
-const width = 828
 const time = new Intl.DateTimeFormat("zh-CN",{
   timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",
 })
@@ -42,9 +41,7 @@ function imageLink(provider: RenderProvider, value: unknown) {
   return url.href
 }
 
-function picture(url: string, signal: AbortSignal | undefined, encoded: true): Promise<Buffer | undefined>
-function picture(url: string, signal?: AbortSignal): Promise<Image | undefined>
-async function picture(url: string, signal?: AbortSignal, encoded = false): Promise<Buffer | Image | undefined> {
+async function picture(url: string, signal?: AbortSignal): Promise<Image | undefined> {
   try {
     const timeout = AbortSignal.timeout(12000)
     const response = await fetch(url,{redirect:"error",credentials:"omit",signal:signal?AbortSignal.any([signal,timeout]):timeout})
@@ -64,7 +61,7 @@ async function picture(url: string, signal?: AbortSignal, encoded = false): Prom
     const buffer = Buffer.concat(parts, bytes)
     const image = await loadImage(buffer)
     if (image.width > 14000 || image.height > 14000) return
-    return encoded ? buffer : image
+    return image
   } catch { return }
 }
 
@@ -153,23 +150,12 @@ function textMessages(provider: RenderProvider, post: DynamicPost, settings: Sub
   return media.length ? (settings.merge ? [[message,...media]] : [message,...media]) : [message]
 }
 
-function drawPicture(ctx: CanvasRenderingContext2D, img: Image, x: number, y: number, w: number, h: number, r: number, cover = false) {
-  ctx.save()
-  ctx.beginPath()
-  ctx.roundRect(x,y,w,h,r)
-  ctx.clip()
-  const ratio = (cover?Math.max:Math.min)(w/img.width,h/img.height)
-  const dw=ratio*img.width,dh=ratio*img.height
-  ctx.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh)
-  ctx.restore()
-}
-
 async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings: SubscriptionSettings,
   { signal, inlineImageByteLimit = Infinity, onRender }: DynamicRenderOptions) {
   const build = (item: DynamicPost) => Promise.all(mediaFor(provider, item, settings).map(url => picture(url, signal)))
   const avatarUrl = imageLink(provider, post.avatar)
   const [avatar, images, forwarded, qr] = await Promise.all([
-    avatarUrl ? picture(avatarUrl, signal, true) : undefined,
+    avatarUrl ? picture(avatarUrl, signal) : undefined,
     build(post),
     post.forwarded ? build(post.forwarded) : [],
     QRCode.toBuffer(post.url, { width: 144, margin: 1 }).then(loadImage),
@@ -177,10 +163,12 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
   signal?.throwIfAborted()
 
   const label = `${provider.label} · ${category(provider, post)}`
-  const metadata = [post.title && label, time.format(post.createdAt * 1000)].filter(Boolean).join(" · ")
-  const render = (scale: 2 | 4) => renderInfoCardPages({ title: post.title || label, eyebrow: post.author, metadata, icon: avatar, width }, layout => {
-    const x = layout.x + 10
-    const contentWidth = layout.width - 20
+  const metadata = time.format(post.createdAt * 1000)
+  const render = (scale: 2 | 4) => renderMediaNewsPages({
+    owner: post.author, title: post.title || label, byline: post.title ? label : "", metadata, avatar,
+  }, layout => {
+    const x = layout.x
+    const contentWidth = layout.width
     const bodyTop = layout.y
     const blocks: DrawBlock[] = []
     let cursor = bodyTop
@@ -190,10 +178,10 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
       cursor += height + gap
     }
 
-    function appendText(value: string, size: number, gap: number, color: string = infoCardColors.text) {
-      const lines = measureInfoText(layout.measure, value, contentWidth, size)
+    function appendText(value: string, size: number, gap: number, color: string = mediaNewsColors.text) {
+      const lines = layout.lines(value, contentWidth, size)
       const leading = Math.ceil(size * 1.53)
-      append(lines.length * leading, gap, (ctx, y) => drawInfoText(ctx, lines, x, y, { size, leading, color }))
+      append(lines.length * leading, gap, (ctx, y) => drawMediaNewsText(ctx, lines, x, y, contentWidth, size, color, { leading }))
     }
 
     function appendImages(list: readonly (Image | undefined)[]) {
@@ -209,7 +197,7 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
           : Math.max(96, Math.min(720, Math.round(cellWidth * first.height / first.width)))
         append(height, 12, (ctx, y) => {
           for (const [column, image] of row.entries()) {
-            drawPicture(ctx, image, x + column * (cellWidth + gap), y, cellWidth, height, 6, row.length > 1)
+            drawMediaNewsImage(ctx, image, x + column * (cellWidth + gap), y, cellWidth, height, { radius:6, cover:row.length > 1 })
           }
         })
       }
@@ -219,8 +207,8 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
     appendImages(images)
     const original = post.forwarded
     if (original) {
-      appendText(`原帖 · ${category(provider, original)} · ${original.author}`, 22, 2, infoCardColors.gold)
-      appendText(published(original), 16, 10, infoCardColors.muted)
+      appendText(`原帖 · ${category(provider, original)} · ${original.author}`, 22, 2, mediaNewsColors.gold)
+      appendText(published(original), 16, 10, mediaNewsColors.muted)
       const content = textBlock(original, clipContent(original.content, settings))
       if (content) appendText(content, 22, 12)
       appendImages(forwarded)
@@ -238,18 +226,18 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
         if (block.bottom > top && block.top < bottom && block.top < footerTop) block.draw(ctx, block.top)
       }
       ctx.restore()
-      ctx.fillStyle = infoCardColors.rule
+      ctx.fillStyle = mediaNewsColors.rule
       ctx.fillRect(x, footerTop + 4, contentWidth, 1)
-      drawPicture(ctx, qr, x, footerTop + 18, 114, 114, 4)
+      drawMediaNewsImage(ctx, qr, x, footerTop + 18, 114, 114, { radius:4 })
       const caption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
-      drawInfoText(ctx, [caption], x + 139, footerTop + 48, { size: 20, color: infoCardColors.gold })
-      drawInfoText(ctx, [`${provider.label}动态订阅`], x + 139, footerTop + 79, { size: 20, color: infoCardColors.muted })
+      drawMediaNewsText(ctx, [caption], x + 139, footerTop + 48, contentWidth - 139, 20, mediaNewsColors.gold)
+      drawMediaNewsText(ctx, [`${provider.label}动态订阅`], x + 139, footerTop + 79, contentWidth - 139, 20, mediaNewsColors.muted)
     } }
   }, {
     pageHeight: settings.split ? settings.splitHeight : undefined,
-    scale,
+    renderScale: scale,
     mode: subscriptionRenderMode(),
-    allowHalfScale: false,
+    signal,
   })
   let pages = await render(4).catch(error => {
     if (!(error instanceof ImageSizeLimitError)) throw error

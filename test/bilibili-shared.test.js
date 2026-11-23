@@ -7,7 +7,8 @@ import { BilibiliService } from "../services/bilibili/service.ts"
 import { createBiliProvider } from "../services/subscriptions/bilibili/index.ts"
 import { biliSubscriptionLogin } from "../services/subscriptions/bilibili/login.ts"
 import { biliSharedSession } from "../services/subscriptions/bilibili/shared.ts"
-import { createSubscriptionConfig } from "../services/subscriptions/config.ts"
+import { createSubscriptionConfig, settingsFor } from "../services/subscriptions/config.ts"
+import { createSubscriptionDelivery } from "../services/subscriptions/delivery.ts"
 import { subscriptionSession } from "../services/subscriptions/session.ts"
 
 const alias = "synthetic-video"
@@ -20,7 +21,7 @@ const rawPost = {
 test("动态先用原会话，失效才共用视频账号，限制响应所属别名与回退", async () => {
   const folder = await mkdtemp(join(tmpdir(), "lotus-bili-shared-"))
   let registered = true
-  let feedError, outputAlias = alias, onFeed, renew = false
+  let feedError, outputAlias = alias, outputUid = "90", onFeed, onRenew, renew = false
   let enabled = true, directExpired = false
   let count = []
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
@@ -31,13 +32,14 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     count.push(u.pathname)
     if (u.pathname === "/v1/capabilities") return Response.json({ ok: true,
       data: [{ platform: "bilibili", registered, capabilities: registered ? ["bilibili_space_feed"] : [] }] })
-    const profile = { ok: true, data: { platform: "bilibili", account: alias, authenticated: true, user_id: "90" },
+    const profile = { ok: true, data: { platform: "bilibili", account: alias, authenticated: true, user_id: outputUid },
       meta: { platform: "bilibili", account: alias } }
     if (u.pathname === "/v1/auth/session/refresh") {
       expect(request.method).toBe("POST")
       expect(await request.json()).toEqual({ platform: "bilibili", account: alias, credential_mode: "server" })
       if (!renew) return Response.json({ ok: false, error: { code: "authentication_required" } }, { status: 401 })
       feedError = undefined
+      await onRenew?.()
       return Response.json(profile)
     }
     expect(u.searchParams.get("account")).toBe(alias)
@@ -45,7 +47,7 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     if (u.pathname === "/v1/auth/session") return Response.json(profile)
     expect(u.pathname).toBe("/v1/bilibili/users/12/dynamics")
     if (feedError) return Response.json({ ok: false, error: { code: feedError } }, { status: 422 })
-    onFeed?.()
+    await onFeed?.()
     return Response.json({ ok: true, data: { items: [rawPost], authenticated: true },
       meta: { platform: "bilibili", account: outputAlias } })
   } })
@@ -53,7 +55,10 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     const service = new BilibiliService({ accountFile: join(folder, "account.yaml"), tuneweaveConfig: {
       api_url: "http://127.0.0.1:" + server.port,
     } })
-    await service.saveAccount({ tuneweave_account: alias, cookie: "SESSDATA=fixture-video-cookie" })
+    const save = (saved_at, user_id) => service.saveAccount({
+      tuneweave_account: alias, cookie: "SESSDATA=fixture-video-cookie; DedeUserID=12", saved_at, user_id,
+    })
+    await save("original", "90")
     const createShared = () => biliSharedSession({ enabled: async () => enabled, createService: async () => service })
     const provider = (shared) => createBiliProvider({ shared, session: subscriptionSession("bilibili", folder, () => null),
       fetch: async (_, { headers }) => {
@@ -65,6 +70,8 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     await mkdir(join(folder, "yuki-plugin"))
     await writeFile(join(folder, "yuki-plugin", "biliCookie.yaml"), '"SESSDATA=fixture-native"')
     const shared = createShared()
+    expect(await shared.fetchPosts("18446744073709551616")).toBeUndefined()
+    expect(count).toEqual([])
     expect((await provider(shared).fetchPosts("12")).map(post => post.id)).toEqual(["117"])
     expect(count).toEqual(["local"])
     directExpired = true
@@ -99,6 +106,57 @@ test("动态先用原会话，失效才共用视频账号，限制响应所属�
     count = []
     expect((await provider(createShared()).fetchPosts("12")).map(post => post.id)).toEqual(["117"])
     expect(count).toEqual(["local", "/v1/capabilities", "/v1/bilibili/users/12/dynamics", "/v1/auth/session/refresh", "/v1/bilibili/users/12/dynamics"])
+    outputUid = "91"
+    feedError = "authentication_required"
+    expect(await createShared().status()).toBe("unknown")
+    count = []
+    await expect(provider(createShared()).fetchPosts("12")).rejects.toThrow("未确认")
+    expect(count).toEqual(["local", "/v1/capabilities", "/v1/bilibili/users/12/dynamics", "/v1/auth/session/refresh"])
+
+    outputUid = "90"
+    onRenew = () => save("re-login during refresh", "90")
+    feedError = "authentication_required"
+    count = []
+    await expect(provider(createShared()).fetchPosts("12")).rejects.toThrow("已变更")
+    expect(count).toEqual(["local", "/v1/capabilities", "/v1/bilibili/users/12/dynamics", "/v1/auth/session/refresh"])
+    onRenew = undefined
+    onFeed = () => save("re-login during read", "90")
+    await expect(provider(createShared()).fetchPosts("12")).rejects.toThrow("已变更")
+    onFeed = undefined
+
+    await save("legacy alias only", undefined)
+    expect((await provider(createShared()).fetchPosts("12")).map(post => post.id)).toEqual(["117"])
+    feedError = "authentication_required"
+    count = []
+    expect(await provider(createShared()).fetchPosts("12")).toEqual([])
+    expect(count).toEqual(["local", "/v1/capabilities", "/v1/bilibili/users/12/dynamics", "public"])
+
+    await save("verified", "90")
+    const sent = []
+    let redisCalls = 0
+    const delivery = createSubscriptionDelivery({
+      providers: { bilibili: provider(createShared()) },
+      config: {
+        settings: async () => settingsFor({ pushTaskLog: 0, forwardSendDynamic: 0 }),
+        routes: async () => [{ kind: "group", chat: "77", bot: "99", uid: "12", name: "合成作者", types: [] }],
+      },
+      groups: {
+        onlineBots: () => [99], listGroups: async () => [{id: 77}],
+        sendGroup: async (bot, group, content) => { sent.push([bot, group, content]); return 123 },
+      },
+      getRedis: () => ({ get: async () => null, eval: async () => ++redisCalls === 1 ? [1] : 1 }),
+      now: () => 1770000001000,
+      render: async (_, post) => [post.content],
+    })
+    try {
+      count = []
+      expect(await delivery.run("bilibili", true)).toMatchObject({ confirmed: 1, failed: 0 })
+      expect(count).toEqual(["local", "/v1/capabilities", "/v1/bilibili/users/12/dynamics", "/v1/auth/session/refresh", "/v1/bilibili/users/12/dynamics"])
+      expect(sent).toEqual([[99, 77, "合成动态"]])
+    } finally {
+      await delivery.dispose()
+    }
+
     registered = false
     count = []
     expect(await provider(createShared()).fetchPosts("12")).toEqual([])

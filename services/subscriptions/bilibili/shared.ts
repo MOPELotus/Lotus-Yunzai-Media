@@ -14,8 +14,14 @@ interface SharedRequestOptions {
   accountSelection?: { platform: string; alias: string }
 }
 
+interface StoredSharedAccount {
+  tuneweave_account?: string | null
+  saved_at?: string
+  user_id?: string
+}
+
 interface SharedAccountService {
-  loadAccount(): Promise<{ tuneweave_account?: string | null } | undefined | null>
+  loadAccount(): Promise<StoredSharedAccount | undefined | null>
   tuneweave: {
     config: { api_url: string }
     request(route: string, options: SharedRequestOptions): Promise<unknown>
@@ -53,9 +59,13 @@ function errorCode(error: unknown) {
     ? error.code : undefined
 }
 
+function validAccountId(id: unknown): id is string {
+  return typeof id === "string" && accountId.test(id) && (id.length < 20 || id <= "18446744073709551615")
+}
+
 function authenticated(profile: SharedAccountProfile | undefined, alias: string) {
   return profile?.platform === platform && profile.account === alias && profile.authenticated === true &&
-    typeof profile.user_id === "string" && accountId.test(profile.user_id)
+    validAccountId(profile.user_id)
 }
 
 export function biliSharedSession({ enabled = async () => true, createService = async () => {
@@ -88,28 +98,31 @@ export function biliSharedSession({ enabled = async () => true, createService = 
     signal?.throwIfAborted()
     if (!await enabled()) return
     let service: SharedAccountService
-    let alias: string | undefined
+    let record: StoredSharedAccount | undefined
     try {
       service = await createService()
-      alias = (await service.loadAccount())?.tuneweave_account ?? undefined
+      record = await service.loadAccount() ?? undefined
     } catch {
       signal?.throwIfAborted()
       return
     }
-    if ((needAccount && !alias) || !await capable(service, signal)) return
-    return { service, alias }
+    if ((needAccount && !record?.tuneweave_account) || !await capable(service, signal)) return
+    return { service, record }
   }
 
-  async function ensureCurrent(service: SharedAccountService, alias: string, signal?: AbortSignal) {
+  async function ensureCurrent(service: SharedAccountService, record: StoredSharedAccount, signal?: AbortSignal) {
     signal?.throwIfAborted()
-    if (!await enabled() || (await service.loadAccount())?.tuneweave_account !== alias) {
+    const current = await enabled() ? await service.loadAccount() : undefined
+    if (!current || current.tuneweave_account !== record.tuneweave_account ||
+        current.saved_at !== record.saved_at || current.user_id !== record.user_id) {
       throw new Error("B 站共享会话配置已变更，请稍后重试。")
     }
     signal?.throwIfAborted()
   }
 
-  async function refresh(service: SharedAccountService, alias: string, signal?: AbortSignal) {
-    await ensureCurrent(service, alias, signal)
+  async function refresh(service: SharedAccountService, record: StoredSharedAccount, alias: string, signal?: AbortSignal) {
+    await ensureCurrent(service, record, signal)
+    if (!validAccountId(record.user_id)) return false
     const endpoint = service.tuneweave.config.api_url
     if (latestRefresh?.endpoint === endpoint && latestRefresh.alias === alias && Date.now() < latestRefresh.until) return false
     latestRefresh = { endpoint, alias, until: Date.now() + 60_000 }
@@ -117,9 +130,10 @@ export function biliSharedSession({ enabled = async () => true, createService = 
       method: "POST", body: { platform, account: alias, credential_mode: "server" },
       signal, redirect: "error", accountSelection: { platform, alias },
     })
-    await ensureCurrent(service, alias, signal)
+    await ensureCurrent(service, record, signal)
     const { data, accountSelected } = response as SharedAccountResponse
-    if (!accountSelected || data?.platform !== platform || data?.account !== alias) {
+    if (!accountSelected || data?.platform !== platform || data?.account !== alias ||
+        data.authenticated === true && data.user_id !== record.user_id) {
       throw new Error("TuneWeave 未确认 B 站共享会话的刷新结果。")
     }
     return authenticated(data, alias)
@@ -130,38 +144,45 @@ export function biliSharedSession({ enabled = async () => true, createService = 
     async status(signal) {
       const selected = await select(signal, false)
       if (!selected) return "unavailable"
-      const { service, alias } = selected
-      if (!alias) return "absent"
+      const { service, record } = selected
+      const alias = record?.tuneweave_account
+      if (!record || !alias) return "absent"
       try {
+        await ensureCurrent(service, record, signal)
         const { data, accountSelected } = await service.tuneweave.request(
           "/v1/auth/session?" + new URLSearchParams({ platform, account: alias }), {
             signal, redirect: "error", accountSelection: { platform, alias },
           }) as SharedAccountResponse
-        signal?.throwIfAborted()
+        await ensureCurrent(service, record, signal)
         if (!accountSelected || data?.platform !== platform || data?.account !== alias) return "unknown"
         if (data.authenticated === false) return "expired"
-        return authenticated(data, alias) ? "active" : "unknown"
+        return authenticated(data, alias) && (!record.user_id || data.user_id === record.user_id) ? "active" : "unknown"
       } catch (error) {
         signal?.throwIfAborted()
         return errorCode(error) === "authentication_required" ? "expired" : "unknown"
       }
     },
     async fetchPosts(uid, signal) {
-      if (!accountId.test(uid)) return
+      if (!validAccountId(uid)) return
       const selected = await select(signal, true)
-      if (!selected?.alias) return
-      const { service, alias } = selected
-      const read = () => service.tuneweave.request(
-        "/v1/bilibili/users/" + uid + "/dynamics?" + new URLSearchParams({ account: alias }), {
-          signal, redirect: "error", accountSelection: { platform, alias },
-        })
+      if (!selected) return
+      const { service, record } = selected
+      const alias = record?.tuneweave_account
+      if (!record || !alias) return
+      const read = async () => {
+        await ensureCurrent(service, record, signal)
+        return service.tuneweave.request(
+          "/v1/bilibili/users/" + uid + "/dynamics?" + new URLSearchParams({ account: alias }), {
+            signal, redirect: "error", accountSelection: { platform, alias },
+          })
+      }
       let response
       try {
         try {
           response = await read()
         } catch (error) {
           if (errorCode(error) !== "authentication_required") throw error
-          if (!await refresh(service, alias, signal)) return
+          if (!await refresh(service, record, alias, signal)) return
           response = await read()
         }
       } catch (error) {
@@ -175,7 +196,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
       if (!accountSelected || data?.authenticated !== true || !Array.isArray(data.items)) {
         throw new Error("TuneWeave 未确认当前 B 站共享会话。")
       }
-      await ensureCurrent(service, alias, signal)
+      await ensureCurrent(service, record, signal)
       return data as SharedAccountProfile & { items: unknown[] }
     },
   }

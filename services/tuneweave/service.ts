@@ -56,6 +56,7 @@ export interface TuneWeaveAccountSelection {
 export interface TuneWeaveRequestOptions {
   method?: string
   body?: unknown
+  audio?: { readonly bytes: Uint8Array; readonly contentType: string }
   credentials?: readonly string[]
   onCredentialUpdates?: (updates: CredentialUpdate[]) => void | Promise<void>
   accountSelection?: TuneWeaveAccountSelection
@@ -67,12 +68,13 @@ interface TuneWeaveResponse<T> {
   ok?: boolean
   data: T
   error?: { code?: string; platform?: string; details?: { upstream_code?: number } }
-  meta?: { platform?: string; account?: string }
+  meta?: { platform?: string; account?: string; pagination?: unknown }
 }
 
 interface SelectedResponse<T> {
   data: T
   accountSelected: boolean
+  pagination?: unknown
 }
 
 interface TuneWeaveCapability {
@@ -170,11 +172,12 @@ export class TuneWeaveService {
   request<T = unknown>(route: string, options: TuneWeaveRequestOptions & { accountSelection: TuneWeaveAccountSelection }): Promise<SelectedResponse<T>>
   request<T = unknown>(route: string, options?: TuneWeaveRequestOptions & { accountSelection?: undefined }): Promise<T>
   request<T = unknown>(route: string, options: TuneWeaveRequestOptions): Promise<T | SelectedResponse<T>>
-  async request<T>(route: string, { method = "GET", body, credentials = [], onCredentialUpdates, accountSelection, signal, redirect }: TuneWeaveRequestOptions = {}) {
+  async request<T>(route: string, { method = "GET", body, audio, credentials = [], onCredentialUpdates, accountSelection, signal, redirect }: TuneWeaveRequestOptions = {}) {
     signal?.throwIfAborted()
     const target = `${this.config.api_url.replace(/\/+$/, "")}${route}`
     const timeout = AbortSignal.timeout(this.config.request_timeout_ms)
-    const headers: Record<string, string> = body === undefined ? {} : { "Content-Type": "application/json" }
+    if (audio && (body !== undefined || credentials.length || method !== "POST" || redirect !== "error")) throw new Error("音频上传请求无效")
+    const headers: Record<string, string> = audio ? { "Content-Type": audio.contentType } : body === undefined ? {} : { "Content-Type": "application/json" }
     const options = {
       method,
       headers,
@@ -182,7 +185,9 @@ export class TuneWeaveService {
       ...(redirect && { redirect }),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     }
-    const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, options))
+    const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, {
+      ...options, ...(audio && { body: Buffer.from(audio.bytes) }),
+    }))
       .catch(() => {
         signal?.throwIfAborted()
         throw Object.assign(new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。"), {
@@ -208,7 +213,7 @@ export class TuneWeaveService {
       const { platform, alias, hasCredential } = accountSelection
       const accountSelected = hasCredential ? updates.some(item => item.platform === platform) :
         Boolean(alias && json.meta?.platform === platform && json.meta.account === alias)
-      return { data: json.data, accountSelected }
+      return { data: json.data, accountSelected, ...(json.meta?.pagination !== undefined && { pagination: json.meta.pagination }) }
     }
     return json.data
   }

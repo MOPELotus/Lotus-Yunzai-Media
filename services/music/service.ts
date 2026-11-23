@@ -26,7 +26,7 @@ export type MusicTrack = {
   readonly duration_ms?: number
 }
 
-interface MusicStream {
+export interface MusicStream {
   url: string
   trial?: boolean
   resolved_platform?: string
@@ -118,15 +118,15 @@ export class MusicService {
     const items = await this.tuneweave.request<Capability[]>("/v1/capabilities")
     return Object.entries(MUSIC_PLATFORMS).map(([platform, name]) => ({ platform, name, capabilities: items.find(i => i.platform === platform && i.registered)?.capabilities || [] })).filter(i => i.capabilities.length)
   }
-  async search(platform: string, keyword: string, page = 1) {
+  async search(platform: string, keyword: string, page = 1,
+    { limit = this.config.search_limit, offset = (page - 1) * this.config.search_limit } = {}) {
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error("请选择有效平台并输入歌曲关键词")
-    const limit = this.config.search_limit
     const accounts = await readMusicAccounts(this.accountsFile)
     const { alias, credential } = accounts[platform] || {}
     // Use the saved identity for search as well as playback, without mixing
     // results from other platforms or losing rotated caller credentials.
     const params = new URLSearchParams({
-      platform, type: "track", q: keyword.trim(), limit: String(limit), offset: String((page - 1) * limit),
+      platform, type: "track", q: keyword.trim(), limit: String(limit), offset: String(offset),
       ...(alias && !credential ? { account: alias } : {}),
     })
     const { data: items, accountSelected } = await this.request<SearchItem[]>(`/v1/search?${params}`, accounts, {
@@ -147,6 +147,10 @@ export class MusicService {
   async prepare(track: MusicTrack, { signal }: { signal?: AbortSignal } = {}) {
     signal?.throwIfAborted()
     const stream = await this.resolve(track)
+    return this.prepareStream(track, stream, { signal })
+  }
+  async prepareStream(track: MusicTrack, stream: MusicStream,
+    { signal, allowMediaUrl }: { signal?: AbortSignal; allowMediaUrl?: (url: URL) => boolean } = {}) {
     signal?.throwIfAborted()
     const task = await createMediaTask(this.tasksDir)
     try {
@@ -158,7 +162,8 @@ export class MusicService {
         let current = new URL(target)
         let headers = current.origin === url.origin ? { ...options.headers } : stripPrivate(options.headers)
         for (let i = 0; i < 6; i++) {
-          if (!["http:", "https:"].includes(current.protocol) || current.username || current.password) throw new Error("音频地址无效")
+          if (!["http:", "https:"].includes(current.protocol) || current.username || current.password ||
+              (allowMediaUrl && !allowMediaUrl(current))) throw new Error("音频地址无效")
           const response = await this.fetch(current, { ...options, headers, redirect: "manual" })
           if (![301, 302, 303, 307, 308].includes(response.status)) return response
           const location = response.headers.get("location")

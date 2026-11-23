@@ -20,6 +20,7 @@ import { createWeixinChannelsPreview } from "./services/weixin-channels/preview.
 import { createOfficialLinkPreview } from "./services/official-links/command.ts"
 import { createWebSummary } from "./services/web-summary/command.ts"
 import { createXiguaPreview } from "./services/xigua/preview.ts"
+import { createQqWorldNotice } from "./services/public-share/qq-world.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
@@ -52,6 +53,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const kuaishou = createKuaishouCommands(services)
   const jike = createJikeCommands(services)
   const xigua = createXiguaPreview({ ...services.xigua, signal: services.signal })
+  const qqWorld = createQqWorldNotice({ signal: services.signal })
   const biliLogin = createBilibiliLogin(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
@@ -93,6 +95,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (jikeFeatures.length) return jikeFeatures
       const xiguaFeatures = xigua.features(context)
       if (xiguaFeatures.length) return xiguaFeatures
+      const qqWorldFeatures = qqWorld.features(context)
+      if (qqWorldFeatures.length) return qqWorldFeatures
       const shortVideoFeatures = douyin.features(context)
       if (shortVideoFeatures.length) return shortVideoFeatures
       const summaryFeatures = webSummary.features(context)
@@ -107,7 +111,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await weixinChannels.fallback(message, context) ?? await music.fallback(message, context) ??
         await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ?? await xigua.fallback(message, context) ??
-        await douyin.fallback(message, context) ?? await webSummary.fallback(message, context) ?? officialLinks.fallback(message, context)
+        await qqWorld.fallback(message, context) ?? await douyin.fallback(message, context) ??
+        await webSummary.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }
 }

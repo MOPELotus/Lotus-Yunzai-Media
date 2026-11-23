@@ -12,6 +12,23 @@ function mapping(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
+export async function legacyGeneralShareSettings(currentTools: Readonly<Record<string, unknown>> = {}, root = rootPath): Promise<PublicShareSettings> {
+  let legacy: Record<string, unknown> = {}
+  if (currentTools.globalBlackList == null || currentTools.privateResolve == null) {
+    for (const base of ["backup/plugins/rconsole-plugin", "plugins/rconsole-plugin"]) {
+      const source = await readMigrationSourceFile(root, join(root, base, "config/tools.yaml"), 256 * 1024)
+      if (!source) continue
+      legacy = mapping(Bun.YAML.parse(source.bytes.toString("utf8")))
+      break
+    }
+  }
+  const blacklist = currentTools.globalBlackList ?? legacy.globalBlackList
+  return {
+    enable: !(Array.isArray(blacklist) && blacklist.some(value => value === oldController || value === "general")),
+    private: (currentTools.privateResolve ?? legacy.privateResolve) === true,
+  }
+}
+
 export function createPublicShareSettings(platform: Platform, label: string, directory = dataPath, root = rootPath) {
   const file = join(directory, "media", platform + ".yaml")
   async function read() {
@@ -28,22 +45,11 @@ export function createPublicShareSettings(platform: Platform, label: string, dir
 
   async function settings(currentTools: Readonly<Record<string, unknown>> = {}): Promise<PublicShareSettings> {
     const saved = await read()
-    const legacy: Record<string, unknown> = {}
-    if (typeof saved.enable !== "boolean" || typeof saved.private !== "boolean") {
-      for (const base of ["backup/plugins/rconsole-plugin", "plugins/rconsole-plugin"]) {
-        const source = await readMigrationSourceFile(root, join(root, base, "config/tools.yaml"), 256 * 1024)
-        if (!source) continue
-        const old = mapping(Bun.YAML.parse(source.bytes.toString("utf8")))
-        legacy.globalBlackList = old.globalBlackList
-        legacy.privateResolve = old.privateResolve
-        break
-      }
-    }
-    const blacklist = currentTools.globalBlackList ?? legacy.globalBlackList
+    if (typeof saved.enable === "boolean" && typeof saved.private === "boolean") return { enable: saved.enable, private: saved.private }
+    const legacy = await legacyGeneralShareSettings(currentTools, root)
     return {
-      enable: typeof saved.enable === "boolean" ? saved.enable :
-        !(Array.isArray(blacklist) && blacklist.some(value => value === oldController || value === "general")),
-      private: typeof saved.private === "boolean" ? saved.private : (currentTools.privateResolve ?? legacy.privateResolve) === true,
+      enable: typeof saved.enable === "boolean" ? saved.enable : legacy.enable,
+      private: typeof saved.private === "boolean" ? saved.private : legacy.private,
     }
   }
 

@@ -3,13 +3,12 @@ import { randomUUID } from "node:crypto"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
 import { renderTemplate, renderStatusCard } from "../../core/render/service.ts"
-import { sendMediaFile, mediaFailureMessage } from "../media/files.ts"
+import { sendMediaFile, mediaFailureMessage, mediaDeliveryUnknown } from "../media/files.ts"
 import { buildMediaMessageText, articlePages, isMediaCommandText } from "../media/message.ts"
 import { extractDouyinTarget } from "./links.ts"
 import { DouyinService, normalizeDouyinDownloadConfig } from "./service.ts"
 
-const downloadCommand = /^#抖音(?:下载|下视频)\s+([\s\S]+)$/u
-const shareHost = /(?:douyin|iesdouyin)\.com/iu
+const downloadCommand = /^#抖音(?:下载|下视频)(?:\s+([\s\S]*))?$/u
 const featureNames = ["[media] 抖音解析"] as const
 const graphemes = new Intl.Segmenter()
 
@@ -27,16 +26,16 @@ interface Services {
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
 }
 
-function sharedText(message: string, context: MessageFallbackContext): string | undefined {
+function sharedTarget(message: string, context: MessageFallbackContext) {
   if (context.message_type === "terminal" || isMediaCommandText(message)) return
-  const text = buildMediaMessageText({ ...context, msg: message })
-  if (shareHost.test(text) || extractDouyinTarget(text)) return text
+  return extractDouyinTarget(buildMediaMessageText({ ...context, msg: message }))
 }
 
 export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Services, {
   makeService = (requestTimeoutMs?: number) => new DouyinService({ timeoutMs: requestTimeoutMs }),
   loadConfig = loadGlobalConfig,
   renderLiveCard = renderStatusCard,
+  render = renderTemplate,
 } = {}) {
   const stopped = new AbortController()
   const signal = lifecycle ? AbortSignal.any([lifecycle, stopped.signal]) : stopped.signal
@@ -49,25 +48,31 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
     })
   })
 
-  async function replyImage(reply: Reply, image: Uint8Array | undefined, fallback: string) {
-    if (signal.aborted) return
-    if (!image || !await reply({ type: "image", file: image })) {
-      if (!signal.aborted) await reply(fallback)
+  async function replyImage(reply: Reply, active: AbortSignal, maxBytes: number,
+    draw: (renderScale?: number) => Promise<Uint8Array | undefined>, fallback: string) {
+    let image = await draw().catch(() => undefined)
+    if (image && image.byteLength > maxBytes && Number(Bun.env.LOTUS_RENDER_SCALE ?? 4) > 2 && !active.aborted) {
+      image = await draw(2).catch(() => undefined)
+    }
+    if (active.aborted) return
+    if (!image || image.byteLength > maxBytes || !await reply({ type: "image", file: image })) {
+      if (!active.aborted) await reply(fallback)
     }
   }
 
   async function handleWork(service: DouyinService, target: string, config: Config,
-    context: MessageFallbackContext, showInfo: boolean) {
-    const reply: Reply = (...args) => signal.aborted ? false : context.reply(...args)
+    context: MessageFallbackContext, showInfo: boolean, active: AbortSignal) {
+    const reply: Reply = (...args) => active.aborted ? false : context.reply(...args)
+    const maxBytes = context.inlineImageByteLimit ?? 16 * 1024 * 1024
     const saveId = "media-douyin-" + randomUUID()
     let result: Awaited<ReturnType<DouyinService["download"]>> | undefined
     try {
       await recovery
-      if (signal.aborted) return
-      const share = await service.resolveShare(target, signal)
+      if (active.aborted) return
+      const share = await service.resolveShare(target, active)
       if (share.kind === "live") {
-        const room = await service.getLiveInfo(share, signal).catch(() => undefined)
-        if (signal.aborted) return
+        const room = await service.getLiveInfo(share, active).catch(() => undefined)
+        if (active.aborted) return
         if (!room) {
           await reply(`抖音直播间的公开资料暂时无法核实。\n${share.url}`)
           return
@@ -77,63 +82,60 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
           ...(room.viewers === undefined ? [] : [{ label: "页面显示观看人数", value: String(room.viewers) }]),
         ]
         const cardItems = items.map(({ label, value }) => ({ label, value: liveCardText(value) || "见原页面" }))
-        const image = await renderLiveCard({ title: liveCardText(room.title) || "抖音直播间", subtitle: "抖音直播",
-          message: room.status, items: cardItems, userId: context.user_id }, { saveId }).catch(() => undefined)
-        await replyImage(reply, image, [`抖音直播 · ${room.title}`, room.status, ...items.map(({ label, value }) => `${label} ${value}`)].join("\n"))
+        await replyImage(reply, active, maxBytes, renderScale => renderLiveCard({
+          title: liveCardText(room.title) || "抖音直播间", subtitle: "抖音直播",
+          message: room.status, items: cardItems, userId: context.user_id,
+        }, { saveId, renderScale }), [`抖音直播 · ${room.title}`, room.status,
+          ...items.map(({ label, value }) => `${label} ${value}`)].join("\n"))
         await reply(showInfo ? share.url : `抖音直播仅提供房间预览。\n${share.url}`)
         return
       }
-      const info = await service.getInfo(share.target, { signal })
-      if (signal.aborted) return
+      const allowed = new PermissionService({ permissions: config.permissions }).explain(context, "douyin.download").ok
+      const download = normalizeDouyinDownloadConfig(config.douyin)
+      const denied = "[media] 你没有使用抖音下载的权限。"
+      if (!showInfo && (!allowed || !download.enable)) {
+        await reply(allowed ? "[media] 抖音下载未启用。" : denied)
+        return
+      }
+      const info = await service.getInfo(share.target, { signal: active })
+      if (active.aborted) return
       if (showInfo) {
-        try {
-          await replyImage(reply, await renderTemplate("douyin-info", {
-            ...info, avatar: info.author?.avatar, userId: context.user_id,
-          }, { saveId }), `[media] ${info.title}\n作者：${info.owner || "未知"}\n${info.url}`)
-          for (const [index, page] of articlePages(info.article).entries()) {
-            if (signal.aborted) return
-            const image = await renderTemplate("article", {
-              title: info.title, owner: info.owner, page: index + 1, blocks: page, userId: context.user_id,
-            }, { saveId: `${saveId}-article-${index}` })
-            await replyImage(reply, image, page.map(block => block.text || block.urls?.[0] || "").join("\n"))
-          }
-        } catch (error) {
-          await reply(`[media] ${info.title}\n作者：${info.owner || "未知"}\n${info.url}\n信息卡生成失败：${String((error as Error).message)}`)
+        await replyImage(reply, active, maxBytes, renderScale => render("douyin-info", {
+          ...info, avatar: info.author?.avatar, userId: context.user_id,
+        }, { saveId, renderScale }), `[media] ${info.title}\n作者：${info.owner || "未知"}\n${info.url}`)
+        for (const [index, page] of articlePages(info.article).entries()) {
+          if (active.aborted) return
+          await replyImage(reply, active, maxBytes, renderScale => render("article", {
+            title: info.title, owner: info.owner, page: index + 1, blocks: page, userId: context.user_id,
+          }, { saveId: `${saveId}-article-${index}`, renderScale }), page.map(block => block.text || block.urls?.[0] || "").join("\n"))
         }
       }
-      if (signal.aborted) return
-      if (!new PermissionService({ permissions: config.permissions }).explain(context, "douyin.download").ok) {
-        await reply("[media] 你没有使用抖音下载的权限。")
+      if (active.aborted) return
+      if (!allowed) {
+        await reply(denied)
         return
       }
-      const download = normalizeDouyinDownloadConfig(config.douyin)
-      if (!download.enable) {
-        if (!showInfo) await reply("[media] 抖音下载未启用。")
-        return
-      }
+      if (!download.enable) return
       result = await service.download(info, download, {
-        signal,
+        signal: active,
         onEvent: (event: { message: string }) => console.debug("[media] 抖音下载：" + event.message),
       })
-      if (signal.aborted) return
+      if (active.aborted) return
       if (!result.ok || !("files" in result)) throw new Error(mediaFailureMessage("reason" in result ? result : undefined))
       if (result.warnings.length) await reply("[media] " + [...new Set(result.warnings)].join("；"))
       for (const file of result.files) {
-        if (signal.aborted) return
-        await sendMediaFile({ ...context, reply }, file, { ...download, signal })
+        if (active.aborted) return
+        await sendMediaFile({ ...context, reply }, file, { ...download, signal: active })
       }
     } catch (error) {
-      if (signal.aborted) return
-      const failure = error as Error & { code?: string }
-      console.warn(`[media] 抖音解析 ${failure.code || "error"}: ${failure.message}`)
-      try {
-        await replyImage(reply, await renderStatusCard({
-          title: "抖音解析", subtitle: "Lotus-Yunzai · 抖音", badge: "失败",
-          message: failure.message, userId: context.user_id,
-        }, { saveId: saveId + "-error" }), "[media] " + failure.message)
-      } catch {
-        await reply("[media] " + failure.message)
-      }
+      if (active.aborted) return
+      const code = error instanceof Error && "code" in error ? error.code : undefined
+      const message = error instanceof Error ? error.message : "抖音解析失败，请稍后重试。"
+      console.warn(`[media] 抖音解析 ${code || "error"}: ${message}`)
+      await replyImage(reply, active, maxBytes, renderScale => renderStatusCard({
+        title: "抖音解析", subtitle: "Lotus-Yunzai · 抖音", badge: code === mediaDeliveryUnknown ? "未确认" : "失败",
+        message, userId: context.user_id,
+      }, { saveId: saveId + "-error", renderScale }), "[media] " + message)
     } finally {
       if (result && "taskDir" in result) await service.releaseTask(result).catch(error => {
         console.warn("[media] 抖音任务清理失败：" + error.message)
@@ -144,16 +146,18 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
   const fallback: MessageFallback = async (message, context) => {
     if (signal.aborted) return
     const explicit = downloadCommand.exec(message)
-    const share = explicit ? undefined : sharedText(message, context)
-    if (!explicit && !share) return
+    const target = explicit ? explicit[1]?.trim() ?? "" : sharedTarget(message, context)
+    if (!explicit && !target) return
+    const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+    const active = connection ? AbortSignal.any([signal, connection]) : signal
+    if (active.aborted) return
 
     const config = await loadConfig()
+    if (active.aborted) return
     if (!config.douyin.enable) return explicit ? "[media] 抖音解析已关闭。" : undefined
+    if (!target) return "[media] 请输入要下载的抖音分享链接。"
     const service = makeService(config.douyin.request_timeout_ms)
-    const target = explicit ? explicit[1]!.trim() : service.extractTarget(share)
-    if (!target) return
-    if (signal.aborted) return
-    const job = handleWork(service, target, config, context, !explicit)
+    const job = handleWork(service, target, config, context, !explicit, active)
     work.add(job)
     try { await job } finally { work.delete(job) }
     return []
@@ -162,7 +166,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
   return {
     fallback,
     features(context: MessageFallbackContext) {
-      return downloadCommand.test(context.normalizedMessage) || sharedText(context.normalizedMessage, context) ? featureNames : []
+      return downloadCommand.test(context.normalizedMessage) || sharedTarget(context.normalizedMessage, context) ? featureNames : []
     },
     async dispose() {
       stopped.abort()

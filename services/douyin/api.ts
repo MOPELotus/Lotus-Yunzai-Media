@@ -31,12 +31,12 @@ export function buildDetailUrl(id: string, { sign = generateABogus, now = Date.n
   return `https://www.douyin.com/aweme/v1/web/aweme/detail/?${query}&a_bogus=${encodeURIComponent(sign(query, { userAgent: WEB_UA, now }))}`
 }
 
-export async function fetchWebDetail(id: string, visitor: string | VisitorSession, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, sign, now = Date.now() }: RequestOptions & DetailOptions = {}) {
+export async function fetchWebDetail(id: string, visitor: string | VisitorSession, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal, sign, now = Date.now() }: RequestOptions & DetailOptions = {}) {
   const session = typeof visitor === "string" ? { ttwid: visitor, uifid: undefined } : visitor
   const detailUrl = buildDetailUrl(id, { sign, now })
   const request = session?.uifid ? signVisitorUrl(detailUrl, session.uifid, { now }) : { url: detailUrl, headers: {} }
   const { response, text } = await requestText(fetchImpl, request.url, {
-    redirect: "error", headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/", "Accept-Language": "zh-CN,zh;q=0.9", Cookie: `ttwid=${session?.ttwid || ""};`, ...request.headers },
+    redirect: "error", signal, headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/", "Accept-Language": "zh-CN,zh;q=0.9", Cookie: `ttwid=${session?.ttwid || ""};`, ...request.headers },
   }, { timeoutMs })
   if (!response.ok) {
     if (/ArgusSecurityPlugin|Uifid Not Found/i.test(text)) throw new DouyinError("risk_control", "抖音风控要求额外游客校验")

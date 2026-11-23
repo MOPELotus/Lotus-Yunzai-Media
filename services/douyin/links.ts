@@ -31,23 +31,33 @@ export function validateDouyinUrl(input: string) {
 
 export function extractDouyinTarget(message: unknown = "") {
   const raw = String(message).replace(/\\\//g, "/").replace(/&amp;/g, "&")
-  const urls = raw.match(/https?:\/\/(?:(?:[a-z0-9-]+\.)?(?:douyin|iesdouyin)\.com|webcast\.amemv\.com)(?![a-z0-9.-])(?:\/[^\s<>"'\\，。！？、；：（）]*)?/gi) || []
+  const urls = raw.match(/https?:\/\/[^\s<>"'\\{},。！？、；：（）【】《》]+/giu) || []
   for (const input of urls) {
-    const candidate = input.replace(/[，。！？、；：）)\]}]+$/g, "")
-    try { return validateDouyinUrl(candidate).href } catch {}
+    const candidate = input.replace(/[!?)\].;]+$/u, "")
+    try {
+      const url = validateDouyinUrl(candidate)
+      if (url.hostname === reflowHost || workFromUrl(url) ||
+          url.hostname === "v.douyin.com" && url.pathname !== "/") return url.href
+    } catch {}
   }
   return ""
 }
 
-export function targetFromUrl(input: string): DouyinTarget | null {
-  const url = validateDouyinUrl(input)
-  if (url.hostname === reflowHost) return null
-  const match = url.pathname.match(/\/(?:share\/)?(video|note|article)\/(\d+)(?:\/|$)/)
-  const id = match?.[2] || ["modal_id", "aweme_id", "item_id", "vid"].map(key => url.searchParams.get(key)).find(value => /^\d+$/.test(value || ""))
+function workFromUrl(url: URL): DouyinTarget | null {
+  if (url.hostname === reflowHost || url.hostname === "v.douyin.com") return null
+  const match = url.pathname.match(/^\/(?:share\/)?(video|note|article)\/([1-9]\d{0,19})\/?$/u)
+  const keys = ["modal_id", "aweme_id", "item_id", "vid"]
+  const queryIds = keys.flatMap(key => url.searchParams.getAll(key))
+  const id = match?.[2] ?? (queryIds.length > 0 && queryIds.every(value => value === queryIds[0])
+    && /^[1-9]\d{0,19}$/u.test(queryIds[0]!) ? queryIds[0] : undefined)
   return id ? { id, type: match?.[1] || "video", url: url.href } : null
 }
 
-export async function resolveDouyinShare(input: unknown, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions & { signal?: AbortSignal } = {}):
+export function targetFromUrl(input: string): DouyinTarget | null {
+  return workFromUrl(validateDouyinUrl(input))
+}
+
+export async function resolveDouyinShare(input: unknown, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions = {}):
   Promise<DouyinLiveTarget | { kind: "work"; target: DouyinTarget }> {
   const extracted = extractDouyinTarget(input)
   if (!extracted) throw new DouyinError("invalid_link", "未找到有效的抖音作品链接")

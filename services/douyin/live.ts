@@ -43,7 +43,7 @@ function findRoom(html: string, id: string): PublicRoom | undefined {
 }
 
 export async function readDouyinLive(target: DouyinLiveTarget,
-  { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions & { signal?: AbortSignal } = {}) {
+  { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions = {}) {
   const { response, text } = await requestText(fetchImpl, target.url, { redirect: "error", credentials: "omit", signal },
     { timeoutMs, maxBytes: 2 * 1024 * 1024 })
   if (!response.ok) throw new DouyinError("live_page_http", `抖音直播页面 HTTP ${response.status}`)

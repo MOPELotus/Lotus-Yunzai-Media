@@ -65,6 +65,22 @@ type DownloadArtifact =
   | { file: string; kind: string; sizeBytes: number; index: number }
   | { file: string; kind: "text"; index: 0 }
 
+// A single message can stop waiting without cancelling another message's shared visitor request.
+async function waitForVisitor(pending: Promise<string | VisitorSession>, signal?: AbortSignal) {
+  if (!signal) return pending
+  let cancel: () => void = () => {}
+  try {
+    const aborted = new Promise<never>((_, reject) => {
+      cancel = () => reject(signal.reason)
+      if (signal.aborted) cancel()
+      else signal.addEventListener("abort", cancel, { once: true })
+    })
+    return await Promise.race([pending, aborted])
+  } finally {
+    signal.removeEventListener("abort", cancel)
+  }
+}
+
 export function normalizeDouyinDownloadConfig(config: DownloadConfig = {}) {
   const source = config.download || config
   const multiPagePolicy = source.multi_page_policy
@@ -110,24 +126,22 @@ export class DouyinService {
   }
 
   async getInfo(input: string | WorkTarget, { deadline = Infinity, signal }: { deadline?: number; signal?: AbortSignal } = {}): Promise<DouyinWork> {
-    const fetch: DouyinFetch = signal ? (url, options) => this.fetch(url, {
-      ...options, signal: options?.signal ? AbortSignal.any([signal, options.signal]) : signal,
-    }) : this.fetch
     const requestBudget = () => {
       signal?.throwIfAborted()
       const remaining = Math.min(this.timeoutMs, deadline - Date.now())
       if (remaining <= 0) throw new DouyinError("timeout", "作品下载超时")
       return remaining
     }
-    const target = typeof input === "string" ? await resolveDouyinTarget(input, { fetch, timeoutMs: requestBudget() }) : input
+    const target = typeof input === "string" ? await resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: requestBudget(), signal }) : input
     if (!/^\d+$/.test(target?.id || "")) throw new DouyinError("invalid_link", "抖音作品 ID 无效")
     let previous: string | VisitorSession = ""
     let primaryError: unknown
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const getVisitor: (options: VisitorRequest) => Promise<string | VisitorSession> = this.visitor.getSession || this.visitor.get
-        previous = await getVisitor.call(this.visitor, { refresh: attempt > 0, previous, timeoutMs: requestBudget() })
-        const detail = await fetchWebDetail(target.id, previous, { fetch, timeoutMs: requestBudget(), sign: this.sign, now: this.now() })
+        const pending = getVisitor.call(this.visitor, { refresh: attempt > 0, previous, timeoutMs: requestBudget() })
+        previous = await waitForVisitor(pending, signal)
+        const detail = await fetchWebDetail(target.id, previous, { fetch: this.fetch, timeoutMs: requestBudget(), signal, sign: this.sign, now: this.now() })
         return normalizeDouyinWork(detail, { source: "web", expectedId: target.id })
       } catch (error) {
         signal?.throwIfAborted()
@@ -136,7 +150,7 @@ export class DouyinService {
       }
     }
     try {
-      const detail = await fetchSsrDetail(target.id, { fetch, timeoutMs: requestBudget() })
+      const detail = await fetchSsrDetail(target.id, { fetch: this.fetch, timeoutMs: requestBudget(), signal })
       return normalizeDouyinWork(detail, { source: "ssr", expectedId: target.id })
     } catch (error) {
       signal?.throwIfAborted()

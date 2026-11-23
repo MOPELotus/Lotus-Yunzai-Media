@@ -1,5 +1,5 @@
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
-import { MOBILE_UA } from "./links.ts"
+import { MOBILE_UA, targetFromUrl, validateDouyinUrl } from "./links.ts"
 import type { AwemeDetail } from "./model.ts"
 
 interface RouterData {
@@ -43,10 +43,21 @@ export function detailFromRouter(router: RouterData, id: string) {
   throw new DouyinError("ssr_empty", "分享页面没有可用的作品详情")
 }
 
-export async function fetchSsrDetail(id: string, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000 }: RequestOptions = {}) {
-  const { response, text } = await requestText(fetchImpl, `https://www.iesdouyin.com/share/video/${id}/`, {
-    redirect: "follow", headers: { "User-Agent": MOBILE_UA, Referer: "https://www.douyin.com/" },
-  }, { timeoutMs })
-  if (!response.ok) throw new DouyinError("ssr_http", `分享页面 HTTP ${response.status}`)
-  return detailFromRouter(extractRouterData(text), id)
+export async function fetchSsrDetail(id: string, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions = {}) {
+  if (!/^[1-9]\d{0,19}$/u.test(id)) throw new DouyinError("invalid_link", "抖音作品 ID 无效")
+  const active = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
+  let url = new URL(`https://www.iesdouyin.com/share/video/${id}/`)
+  for (let hop = 0; hop <= 3; hop++) {
+    const { response, text } = await requestText(fetchImpl, url.href, {
+      redirect: "manual", credentials: "omit", signal: active,
+      headers: { "User-Agent": MOBILE_UA, Referer: "https://www.douyin.com/" },
+    }, { timeoutMs })
+    if (response.ok) return detailFromRouter(extractRouterData(text), id)
+    const location = response.status >= 300 && response.status < 400 && response.headers.get("location")
+    if (!location) throw new DouyinError("ssr_http", `分享页面 HTTP ${response.status}`)
+    const next = validateDouyinUrl(new URL(location, url).href)
+    if (targetFromUrl(next.href)?.id !== id) throw new DouyinError("ssr_redirect", "分享页面跳转到其他作品")
+    url = next
+  }
+  throw new DouyinError("ssr_redirect", "分享页面跳转次数超出限制")
 }

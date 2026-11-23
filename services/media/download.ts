@@ -12,7 +12,7 @@ interface DownloadOptions {
   readonly timeoutMs?: number
   readonly maxBytes?: number
   readonly kind?: MediaKind
-  readonly cdn?: Extract<CdnKind, "miyoushe-video" | "netease-mv">
+  readonly cdn?: Extract<CdnKind, "miyoushe-video" | "netease-mv" | "acfun-video">
   readonly signal?: AbortSignal
 }
 
@@ -28,6 +28,7 @@ export function sniffMedia(bytes: Buffer): { kind: MediaKind; ext: string } | nu
   }
   if (bytes.subarray(0, 4).equals(Buffer.from([26, 69, 223, 163]))) return { kind: "video", ext: ".mkv" }
   if (bytes.toString("ascii", 0, 3) === "FLV") return { kind: "video", ext: ".flv" }
+  if (bytes[0] === 0x47 && bytes[188] === 0x47 && bytes[376] === 0x47) return { kind: "video", ext: ".ts" }
   return null
 }
 
@@ -40,15 +41,19 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   let length = 0
   let expected = 0
   let prefix = Buffer.alloc(0)
+  const sniffBytes = cdn === "acfun-video" ? 377 : 64
   try {
     active.throwIfAborted()
     const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active }, cdn)
-    if (!response.ok || !response.body) throw new Error(`媒体下载失败 HTTP ${response.status}`)
+    if (!response.ok || !response.body || cdn === "acfun-video" && (response.status !== 200 || response.headers.has("content-range"))) {
+      await response.body?.cancel().catch(() => {})
+      throw new Error(`媒体下载失败 HTTP ${response.status}`)
+    }
     expected = Number(response.headers.get("content-length")) || 0
     if (maxBytes > 0 && expected > maxBytes) throw new Error("媒体大小超过下载限制")
     const guard = new Transform({ transform(chunk: Buffer, _encoding, callback) {
       length += chunk.length
-      if (prefix.length < 64) prefix = Buffer.concat([prefix, chunk.subarray(0, 64 - prefix.length)])
+      if (prefix.length < sniffBytes) prefix = Buffer.concat([prefix, chunk.subarray(0, sniffBytes - prefix.length)])
       if (maxBytes > 0 && length > maxBytes) callback(new Error("媒体大小超过下载限制"))
       else callback(null, chunk)
     } })

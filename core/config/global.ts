@@ -52,3 +52,9 @@ export async function loadGlobalConfig(root = deployment) {
     },
   }
 }
+
+export async function loadAcfunConfig(root = deployment) {
+  const global = await readLotusGlobalConfig(root)
+  const acfun = fields(global.acfun)
+  return { enable: acfun.enable !== false, privatePreview: acfun.private_preview === true, permissions: global.permissions }
+}

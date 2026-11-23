@@ -1,4 +1,5 @@
 import type { CommandModule } from "../../lib/commands.ts"
+import { createAcfunCommands } from "./services/acfun/command.ts"
 import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
 import { createBilibiliVideoCommands } from "./services/bilibili/video-command.ts"
 import { createDouyinCommands } from "./services/douyin/command.ts"
@@ -30,6 +31,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   })
   const mcwiki = createMcWikiCommand({ signal: services.signal })
   const douyin = createDouyinCommands(services)
+  const acfun = createAcfunCommands(services)
   const biliLogin = createBilibiliLogin(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
@@ -37,7 +39,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   return {
     ...subscriptions,
     async dispose() {
-      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), biliVideo.dispose(), music.dispose(), officialVideo.dispose(), miyoushePost.dispose()])
+      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), acfun.dispose(), biliVideo.dispose(), music.dispose(), officialVideo.dispose(), miyoushePost.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {
@@ -47,6 +49,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return ["[media] B 站解析"]
       const features = biliVideo.features(context)
       if (features.length) return features
+      const acfunFeatures = acfun.features(context)
+      if (acfunFeatures.length) return acfunFeatures
       const songFeatures = music.features(context)
       if (songFeatures.length) return songFeatures
       const articleFeatures = miyoushePost.features(context)
@@ -58,7 +62,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (message === biliLogin.command) return biliLogin.fallback(message, context)
       if (environment.matches(message)) return environment.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
-        await music.fallback(message, context) ?? await miyoushePost.fallback(message, context) ?? douyin.fallback(message, context)
+        await acfun.fallback(message, context) ?? await music.fallback(message, context) ?? await miyoushePost.fallback(message, context) ?? douyin.fallback(message, context)
     },
   }
 }

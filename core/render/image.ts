@@ -1,4 +1,4 @@
-import { fetchCdn, type MediaFetch } from "../../services/media/cdn.ts"
+import { acfunImageUrl, fetchCdn, type MediaFetch } from "../../services/media/cdn.ts"
 
 interface ImageFetchOptions {
   readonly fetch?: MediaFetch
@@ -11,7 +11,7 @@ export async function fetchImageBytes(url: string, { fetch: fetchImpl = globalTh
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetchCdn(fetchImpl, url, { signal: controller.signal }, "image")
+    const response = await fetchCdn(fetchImpl, url, { signal: controller.signal }, acfunImageUrl(url) ? "acfun-image" : "image")
     if (!response.ok) throw new Error(`图片请求 HTTP ${response.status}`)
     if (Number(response.headers.get("content-length")) > maxBytes) throw new Error("图片超过渲染大小限制")
     const chunks = []

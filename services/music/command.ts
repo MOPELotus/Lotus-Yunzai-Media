@@ -400,7 +400,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const title = item.kind === "mv" ? item.mv.title : item.kind === "episode" ? item.episode.name : item.track.name
       const author = item.kind === "mv" ? item.mv.creators?.map(value => value.name).filter(Boolean).join(" / ")
         : item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
-      const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : musicNames[selected.platform]
+      const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : musicNames[selected.platform] ?? selected.platform
       const hint = item.kind === "mv" ? "发送 #播放 加原文链接可请求完整 MV。" : "发送 #播放 加原文链接可请求完整音源。"
       return await musicSharePreview(context, active, { title, author, url: selected.url }, platform, hint)
     } catch (error) {

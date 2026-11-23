@@ -17,7 +17,7 @@ function record(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
-function biliDecimalId(value: unknown) {
+export function biliDecimalId(value: unknown) {
   if (typeof value === "number" && Number.isSafeInteger(value)) value = String(value)
   return typeof value === "string" && /^[1-9]\d{0,21}$/u.test(value) ? value : undefined
 }

@@ -307,6 +307,11 @@ export async function readBiliLogin(redis: SubscriptionRedis | undefined) {
   return { ...session, expiresAt }
 }
 
+export function readBiliCommentLogin(redis: SubscriptionRedis) {
+  // The same credential must be scoped to both the account check and the comment endpoint.
+  return storedSession(redis, platforms.bilibili, new URL("/", platforms.bilibili.origin))
+}
+
 export function biliIssuedLogin(headers: Headers, url: URL) {
   const issued = new Map<string, IssuedCookie>()
   for (const cookie of rotation(platforms.bilibili, url, headers).values()) {

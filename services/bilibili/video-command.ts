@@ -9,8 +9,10 @@ import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
 import { createBiliProvider } from "../subscriptions/bilibili/index.ts"
 import { createSubscriptionConfig } from "../subscriptions/config.ts"
 import { makeDynamicMessages } from "../subscriptions/render.ts"
+import type { GetSubscriptionRedis } from "../subscriptions/types.ts"
 import { ToolInstallerService } from "../tools/installer.ts"
 import { biliCommentTarget, createBiliComments, type BiliComment, type BiliCommentTarget } from "./comments.ts"
+import { createBiliCommentWriter } from "./comment-write.ts"
 import {
   BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, isBiliVideoPage, normalizeDownloadConfig,
   quotedBiliCardLink, resolveCommandPath,
@@ -33,6 +35,7 @@ const quotedDescriptionCommand = /^#?简介$/u
 const quotedVideoCommand = /^#?(?:下载视频|视频下载|获取视频)$/u
 const quotedImagesCommand = /^#?(?:获取图片|下载图片|图片)$/u
 const expandCommentCommand = /^#?展开(?:\s*\+?\s*([0-9]{1,8}))?\s*$/u
+const writeCommentCommand = /^#?评论([\s\S]*)$/u
 const previewWindow = 30 * 60_000
 const maxPreviewEntries = 512
 const subscriptionSettings = createSubscriptionConfig(dataPath, lockFile)
@@ -47,6 +50,7 @@ type VideoAction =
   | { kind: "pick"; index: number; tuku: boolean }
   | { kind: "watch"; keyword: string }
   | { kind: "comments"; index: number }
+  | { kind: "write-comment"; text: string }
   | { kind: "quote"; action: QuotedAction }
   | { kind: "download" | "link"; target: string }
 
@@ -75,6 +79,7 @@ interface Services {
   readonly fetch?: BilibiliService["fetch"]
   readonly settings?: typeof subscriptionSettings.settings
   readonly renderComments?: typeof renderStatusCard
+  readonly getRedis?: GetSubscriptionRedis
 }
 
 function videoAction(message: string, context: MessageFallbackContext): VideoAction | undefined {
@@ -97,6 +102,11 @@ function videoAction(message: string, context: MessageFallbackContext): VideoAct
   if (expand) {
     return context.message_type !== "terminal" && !context.isDelegated && context.reply_id !== undefined && context.lookupReply
       ? { kind: "comments", index: Number(expand[1] ?? 1) } : undefined
+  }
+  const writing = writeCommentCommand.exec(message)
+  if (writing) {
+    return context.message_type !== "terminal" && context.reply_id !== undefined && context.lookupReply
+      ? { kind: "write-comment", text: writing[1]!.trim() } : undefined
   }
   const quotedAction = quotedLinkCommand.test(message) ? "preview"
     : quotedCoverCommand.test(message) ? "cover"
@@ -149,10 +159,12 @@ async function readOriginal(url: string, byteLimit: number, signal: AbortSignal,
 }
 
 export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, settings = subscriptionSettings.settings,
-  renderComments = renderStatusCard }: Services) {
+  renderComments = renderStatusCard,
+  getRedis = () => (globalThis as { redis?: ReturnType<GetSubscriptionRedis> }).redis }: Services) {
   const sessions = new Map<string, SearchSession>()
   const previews = new Map<string, Preview & { expires: number }>()
   const comments = createBiliComments(fetch)
+  const postComment = createBiliCommentWriter(fetch, getRedis)
   const request = fetch ?? globalThis.fetch
   const running = new Set<string>()
   let recovery: Promise<unknown> | undefined
@@ -260,6 +272,21 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     catch { if (!active?.aborted) return "B 站公开子评论暂不可用。" }
     await showDiscussion(context, { discussion: { ...discussion, rows, children: true } }, "B 站评论详情", selected)
     return []
+  }
+
+  async function writeComment(context: MessageFallbackContext, text: string) {
+    const user = context.user_id
+    const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+    if (context.isDelegated || user === undefined || !connection || !context.isBotMaster(user)) return
+    const active = signal ? AbortSignal.any([signal, connection]) : connection
+    if (active.aborted || !(await settings("bilibili")).parseVideoLink) return
+    const target = await quotedTarget(context)
+    const url = target && URL.parse(target)
+    if (!url || active.aborted) return
+    if (!text || Array.from(text).length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) {
+      return "引用 B 站分享卡片或机器人解析结果后发送 评论 正文，正文须在 1–1000 字以内。"
+    }
+    return postComment(url, text, context, active)
   }
 
   async function sendOriginals(context: MessageFallbackContext, sources: readonly string[], transport: BilibiliService["fetch"],
@@ -415,6 +442,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     const action = videoAction(message, context)
     if (!action) return
     if (action.kind === "comments") return expandComment(context, action.index)
+    if (action.kind === "write-comment") return writeComment(context, action.text)
     const key = sessionKey(context)
     const session = currentSession(key)
     if (action.kind === "page" && !session?.tuku) return "[media] 请先发送 #点B站视频 关键词。"

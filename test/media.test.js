@@ -112,6 +112,45 @@ test.each(["transcode", "zip"])("抖音下载在 %s 阶段沿用取消信号，�
   expect(stages).toEqual(phase === "zip" ? ["transcode", "transcode", "zip"] : ["transcode"])
 })
 
+test("抖音首镜转码失败或输出超限后，剩余预算仍可用于同作品备用镜", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-output-cap-"))
+  directories.push(directory)
+  const urls = ["https://fixture.douyincdn.com/failed", "https://fixture.douyincdn.com/expanded", "https://fixture.douyincdn.com/fits"]
+  const work = normalizeDouyinWork({ aweme_id: "12345678", desc: "大小测试",
+    video: { play_addr: { url_list: urls } },
+  })
+  const mp4 = Buffer.from("00000010667479706d70343200000000", "hex")
+  const attempts = []
+  let converted = 0
+  const service = new DouyinService({ tasksDir: directory,
+    async fetch(url) {
+      attempts.push(url)
+      return new Response(mp4)
+    },
+    async prepareVideo(file) {
+      converted++
+      const target = file.replace(/\.mp4$/u, "-compatible.mp4")
+      if (converted === 1) {
+        await writeFile(target, "partial")
+        throw new Error("转码失败")
+      }
+      await writeFile(target, converted === 2 ? Buffer.concat([mp4, mp4]) : mp4)
+      return { file: target, warnings: [converted === 2 ? "拒绝的候选" : "最终候选"] }
+    },
+  })
+  const result = await service.download(work, { max_estimated_size_mb: 24 / (1024 * 1024) })
+  try {
+    expect(attempts).toEqual(urls)
+    expect(result).toMatchObject({ ok: true, warnings: ["最终候选"], partial: false,
+      artifacts: [{ sizeBytes: 16, kind: "video" }] })
+    expect(result.files).toHaveLength(1)
+    expect(await Bun.file(result.files[0]).size).toBe(16)
+  } finally {
+    await service.releaseTask(result)
+  }
+  expect(await readdir(directory)).toEqual([])
+})
+
 test("自动解析跳过显式媒体命令的参数，仍接受直接分享的链接和编号", () => {
   const bvid = "BV1dAxE6VErW"
   const link = "https://www.bilibili.com/video/" + bvid

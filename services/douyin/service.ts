@@ -183,12 +183,17 @@ export class DouyinService {
               signal,
             }
             const result = await downloadMedia(url, base, options)
-            consumed += result.sizeBytes
+            let conversionWarnings: readonly string[] = []
             if (kind === "video") {
               const prepared = await this.prepareVideo(result.file, { ...download, timeout_ms: remainingTime(), codec: candidate.codec, signal })
-              warnings.push(...prepared.warnings)
+              if (prepared.file !== result.file) result.sizeBytes = (await fs.stat(prepared.file)).size
               result.file = prepared.file
+              conversionWarnings = prepared.warnings
             }
+            signal?.throwIfAborted()
+            if (cap > 0 && result.sizeBytes > cap - consumed) throw new Error("作品媒体总大小超过下载限制")
+            consumed += result.sizeBytes
+            warnings.push(...conversionWarnings)
             return result
           } catch (error) {
             lastError = error

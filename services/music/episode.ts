@@ -81,4 +81,4 @@ export function verifiedEpisodePlayback(selection: VoiceSearchSelection, respons
   return { track, stream }
 }
 
-export type { EpisodeResult, VoiceSearchItem }
+export type { EpisodeData, EpisodeResult, VoiceSearchItem }

@@ -12,7 +12,8 @@ import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/t
 import { runMediaProcess } from "../media/files.ts"
 import { resolveData } from "../../core/path.ts"
 import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accounts.ts"
-import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeResult, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
+import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeData, type EpisodeResult, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
+import type { PublicMusicTarget } from "./share-link.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -35,6 +36,8 @@ export interface MusicStream {
   backup_urls?: string[]
   headers?: Record<string, string>
   duration_ms?: number
+  origin_track?: string
+  resolved_track?: string
 }
 
 interface MusicLogin {
@@ -170,11 +173,31 @@ export class MusicService {
     const [episode] = await this.searchEpisodes(keyword, { limit: 1, signal })
     if (episode) return this.playEpisode(episode, signal)
   }
-  async resolve(track: MusicTrack) {
+  async publicShare(target: PublicMusicTarget, signal?: AbortSignal) {
+    const ref = `${target.platform}:${target.id}`
+    const name = (value: unknown) => typeof value === "string" && value.trim()
+    if (target.kind === "episode") {
+      const item = await this.tuneweave.request<EpisodeData>(`/v1/episodes/${encodeURIComponent(ref)}`, { signal, redirect: "error" })
+      const episode = voiceSearchSelection({ type: "podcast_episode", data: item })
+      if (!episode || episode.ref !== ref || !name(item.name)) throw new Error("节目身份无法核实。")
+      return { kind: "episode" as const, episode }
+    }
+    const track = await this.tuneweave.request<MusicTrack>(`/v1/tracks/${encodeURIComponent(ref)}`, { signal, redirect: "error" })
+    if (track?.ref !== ref || track.platform !== target.platform || String(track.id) !== target.id || !name(track.name)) {
+      throw new Error("歌曲身份无法核实。")
+    }
+    return { kind: "track" as const, track }
+  }
+  async resolve(track: MusicTrack, { exact = false }: { exact?: boolean } = {}) {
     const accounts = await readMusicAccounts(this.accountsFile), account = accounts[track.platform]
-    const params = new URLSearchParams({ quality: this.config.quality, fallback: "true", unblock: "false", fallback_platforms: Object.keys(MUSIC_PLATFORMS).filter(p => p !== track.platform).join(","), ...(account?.alias && !account.credential ? { account: account.alias } : {}) })
+    const params = new URLSearchParams({ quality: this.config.quality, fallback: String(!exact), unblock: "false",
+      ...(!exact && { fallback_platforms: Object.keys(MUSIC_PLATFORMS).filter(p => p !== track.platform).join(",") }),
+      ...(account?.alias && !account.credential ? { account: account.alias } : {}) })
     const stream = await this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, accounts)
     if (!stream?.url || stream.trial) throw new Error("没有可用的完整音源，建议主人扫码登录音乐平台")
+    if (exact && (stream.resolved_platform !== track.platform || stream.origin_track !== track.ref || stream.resolved_track !== track.ref)) {
+      throw new Error("平台返回的完整音源与链接中的歌曲不一致。")
+    }
     return stream
   }
   async prepare(track: MusicTrack, { signal }: { signal?: AbortSignal } = {}) {

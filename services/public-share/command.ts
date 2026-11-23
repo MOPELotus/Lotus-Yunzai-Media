@@ -1,6 +1,8 @@
 import { join } from "node:path"
 import type { CommandReply, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
+import { loadPublicShareConfig } from "../../core/config/global.ts"
+import { PermissionService } from "../../core/permissions/service.ts"
 import { resolveData } from "../../core/path.ts"
 import { fetchImageBytes } from "../../core/render/image.ts"
 import { renderSourceCard } from "../../core/render/source-cards.ts"
@@ -14,6 +16,7 @@ import { parsePublicShare, readPublicShare, type PublicShare } from "./source.ts
 const names = { weishi: "微视", zuiyou: "最右" }
 const links = /https?:\/\/[^\s<>"'，。！？；）】]+/giu
 const maxVideo = 100 * 1024 * 1024
+const maxInline = 16 * 1024 * 1024
 const maxGallery = 20
 const maxGalleryBytes = 16 * 1024 * 1024
 
@@ -35,12 +38,13 @@ function identify(message: string, context: MessageFallbackContext) {
   }
 }
 
-export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fetchPage, fetchMedia, render = renderSourceCard,
+export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fetchPage, fetchMedia, loadConfig = loadPublicShareConfig, render = renderSourceCard,
   tasksDir = resolveData("public-share", "tasks") }: {
   readonly signal?: AbortSignal
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
   readonly fetchPage?: MediaFetch
   readonly fetchMedia?: MediaFetch
+  readonly loadConfig?: typeof loadPublicShareConfig
   readonly render?: typeof renderSourceCard
   readonly tasksDir?: string
 } = {}) {
@@ -76,8 +80,9 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
       await recovery
       active.throwIfAborted()
       task = await createMediaTask(tasksDir)
+      const limit = context.deliverMedia ? maxVideo : maxInline
       const { file } = await downloadMedia(source.video.href, join(task.dir, "video"), {
-        signal: active, kind: "video", cdn: `${source.site}-video`, maxBytes: maxVideo, timeoutMs: 60_000, fetch: fetchMedia,
+        signal: active, kind: "video", cdn: `${source.site}-video`, maxBytes: limit, timeoutMs: 60_000, fetch: fetchMedia,
       })
       await sendMediaFile(context, file, { signal: active, file_name: safeMediaName(source.title) + file.slice(file.lastIndexOf(".")) })
       return []
@@ -93,15 +98,17 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
   }
 
   async function preview(source: PublicShare, context: MessageFallbackContext, active: AbortSignal): Promise<CommandReply> {
-    const inlineLimit = context.inlineImageByteLimit ?? 16 * 1024 * 1024
+    const inlineLimit = context.inlineImageByteLimit ?? maxInline
     const title = source.title
     const site = names[source.site]
     const text = [`${site} · ${title}`, source.owner, source.url,
       source.video && "发送 #播放 加原文链接可请求原站视频。"].filter(Boolean).join("\n")
     const card = { title, owner: source.owner, id: site, cover: source.cover, createdAt: source.createdAt,
-      type: source.video ? "video" : source.images.length ? "gallery" : "article", duration: source.duration, media: source.images }
+      type: source.video ? "video" : source.images.length ? "gallery" : "article", duration: source.duration, media: source.images, showStats: false }
     let image = await render("bilibili-info", card).catch(() => undefined)
-    if (image && image.byteLength > inlineLimit) image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)
+    if (image && image.byteLength > inlineLimit && Number(Bun.env.LOTUS_RENDER_SCALE ?? 4) > 2 && !active.aborted) {
+      image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)
+    }
     if (active.aborted) return []
     const nodes: MessageReply[] = [image && image.byteLength <= inlineLimit ? [{ type: "image", file: image }, text] : text]
     // The post's own image order is independent of recommendations or comment pictures on the page.
@@ -129,6 +136,13 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
     if (match.play && match.connection?.aborted !== false) return "请在当前绑定的群聊或好友私聊中播放。"
     const active = match.connection ? AbortSignal.any([signal, match.connection]) : signal
     try {
+      const config = await loadConfig(match.target.site)
+      if (active.aborted) return []
+      const scope = `${match.target.site}.${match.play ? "play" : "preview"}`
+      if (!config.enable || !new PermissionService({ permissions: config.permissions }).can(context, scope)) {
+        return match.play ? `当前会话未启用${names[match.target.site]}播放。` : undefined
+      }
+      if (!match.play && context.message_type === "private" && !config.privatePreview) return
       const source = await readPublicShare(match.target, active, fetchPage)
       if (active.aborted) return []
       if (!source) return `暂时无法核实${names[match.target.site]}分享。\n${match.target.url.href}`

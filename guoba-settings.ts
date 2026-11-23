@@ -6,11 +6,10 @@ import { isAlias, isMap, parseDocument } from "yaml"
 import { lockFile } from "../../lib/file-lock.ts"
 import { GlobalConfigWriteError, updateLotusGlobalConfig } from "../../lib/lotus-global-config-write.ts"
 import { insertSourcePairs, replaceSourceScalar, sourceAliasOverrides, sourceMappingPair, type Pair, type SourceEdit } from "../../lib/yaml-source-edits.ts"
-import { loadAcfunConfig } from "./core/config/global.ts"
+import { loadGlobalConfig, loadPublicShareConfig, publicShareSiteNames, type PublicShareSite } from "./core/config/global.ts"
 import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
-import { loadGlobalConfig } from "./core/config/global.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
 
 import type { SubscriptionPlatform } from "./services/subscriptions/types.ts"
@@ -111,17 +110,18 @@ const officialVideoTags = [
   ["group_config", "群聊屏蔽的游戏", "按「群号: gs, sr」填写。游戏代号为 gs、sr、zzz、bh3、by、xbgd。"],
 ] as const
 
-const acfunToggles = [
-  ["enable", "解析及播放 AcFun 视频", "允许从群聊中的 AcFun 分享显示作品信息，并响应显式播放指令。"],
+const publicShareSites = Object.keys(publicShareSiteNames) as PublicShareSite[]
+const publicShareToggles = [
+  ["enable", "解析及播放", "允许从群聊中的公开分享显示作品信息，并响应显式播放指令。"],
   ["private_preview", "私聊自动预览", "关闭时仍可在私聊发送播放指令。"],
 ] as const
 
-type AcfunPatch = Partial<Record<typeof acfunToggles[number][0], boolean>>
+type SharePatch = Partial<Record<typeof publicShareToggles[number][0], boolean>>
 
-function acfunPatch(values: Readonly<Record<string, unknown>>, edited: ReadonlySet<string> | undefined) {
-  const patch: AcfunPatch = {}
-  for (const [key] of acfunToggles) {
-    const name = `acfun.${key}`
+function publicSharePatch(site: PublicShareSite, values: Readonly<Record<string, unknown>>, edited: ReadonlySet<string> | undefined) {
+  const patch: SharePatch = {}
+  for (const [key] of publicShareToggles) {
+    const name = `${site}.${key}`
     if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
     if (typeof values[name] !== "boolean") return
     patch[key] = values[name]
@@ -129,11 +129,11 @@ function acfunPatch(values: Readonly<Record<string, unknown>>, edited: ReadonlyS
   return patch
 }
 
-async function saveAcfun(root: URL, patch: AcfunPatch) {
+async function savePublicShare(root: URL, site: PublicShareSite, patch: SharePatch) {
   await updateLotusGlobalConfig(root, {
     canWrite: () => true,
     prepare(text, local) {
-      const state = local.acfun
+      const state = local[site]
       if (state !== undefined && (!state || typeof state !== "object" || Array.isArray(state))) throw new GlobalConfigWriteError("config")
       const current = state as Record<string, unknown> | undefined
       const changes = Object.entries(patch).filter(([key, value]) => current?.[key] !== value)
@@ -141,7 +141,7 @@ async function saveAcfun(root: URL, patch: AcfunPatch) {
       const document = parseDocument(text, { strict: true, merge: true, uniqueKeys: true, keepSourceTokens: true })
       if (document.errors.length || (document.contents && !isMap(document.contents))) throw new GlobalConfigWriteError("config")
       const map = document.contents ?? undefined
-      const section = map?.get("acfun", true)
+      const section = map?.get(site, true)
       const pairs: Pair[] = []
       const edits: SourceEdit[] = []
       for (const [key, value] of changes) {
@@ -153,12 +153,12 @@ async function saveAcfun(root: URL, patch: AcfunPatch) {
       if (pairs.length) {
         if (isAlias(section)) edits.push(sourceAliasOverrides(text, section, pairs))
         else if (isMap(section)) edits.push(insertSourcePairs(text, section, pairs))
-        else if (section === undefined) edits.push(insertSourcePairs(text, map, [sourceMappingPair("acfun", patch)]))
+        else if (section === undefined) edits.push(insertSourcePairs(text, map, [sourceMappingPair(site, patch)]))
         else throw new GlobalConfigWriteError("config")
       }
       const yaml = edits.sort((a, b) => b.start - a.start || b.end - a.end)
         .reduce((content, edit) => content.slice(0, edit.start) + edit.value + content.slice(edit.end), text)
-      if (!isDeepStrictEqual(Bun.YAML.parse(yaml), { ...local, acfun: { ...current, ...patch } })) throw new GlobalConfigWriteError("config")
+      if (!isDeepStrictEqual(Bun.YAML.parse(yaml), { ...local, [site]: { ...current, ...patch } })) throw new GlobalConfigWriteError("config")
       return { yaml, value: undefined }
     },
   })
@@ -235,8 +235,15 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           componentProps: tags ? { mode: "tags" } : options ? { options: options.map((label, value) => ({ label, value })) }
             : max !== undefined ? { min: min ?? 0, max, step: 1 } : undefined,
         })),
-      ]), { component: "SOFT_GROUP_BEGIN", label: "AcFun 视频" },
-      ...acfunToggles.map(([key, label, bottomHelpMessage]) => ({ field: `acfun.${key}`, label, bottomHelpMessage, component: "Switch" })),
+      ]),
+      ...publicShareSites.flatMap(site => [
+        { component: "SOFT_GROUP_BEGIN", label: site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site] },
+        ...publicShareToggles.map(([key, label, bottomHelpMessage]) => ({
+          field: `${site}.${key}`,
+          label: key === "enable" ? `${label} ${site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site]}` : label,
+          bottomHelpMessage, component: "Switch",
+        })),
+      ]),
       { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },
       ...officialVideoToggles.map(([key, label]) => ({ field: `officialVideo.${key}`, label, component: "Switch" })),
       ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
@@ -248,8 +255,11 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           const settings = await config.settings(id)
           return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
-        const [videos, acfun, tools] = await Promise.all([officialVideo.settings(), loadAcfunConfig(root), loadConfig().then(config => config.tools)])
-        return { ...Object.fromEntries(entries), acfun: { enable: acfun.enable, private_preview: acfun.privatePreview }, pipixia: await pipixia.settings(tools), officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
+        const [videos, shareSettings, tools] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
+          const settings = await loadPublicShareConfig(site, root)
+          return [site, { enable: settings.enable, private_preview: settings.privatePreview }]
+        })), loadConfig().then(config => config.tools)])
+        return { ...Object.fromEntries(entries), ...Object.fromEntries(shareSettings), pipixia: await pipixia.settings(tools), officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
       },
@@ -257,8 +267,12 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         const edited = Array.isArray(changedFields) ? new Set(changedFields) : undefined
         const videoPatch = officialVideoPatch(values, edited)
         if (!videoPatch) return Result.error("请填写有效的米游社官号视频设置。", 422)
-        const sharePatch = acfunPatch(values, edited)
-        if (!sharePatch) return Result.error("请填写有效的 AcFun 视频设置。", 422)
+        const sharePatches = new Map<PublicShareSite, SharePatch>()
+        for (const site of publicShareSites) {
+          const patch = publicSharePatch(site, values, edited)
+          if (!patch) return Result.error(`请填写有效的${publicShareSiteNames[site]}设置。`, 422)
+          if (Object.keys(patch).length) sharePatches.set(site, patch)
+        }
         const pipixiaPatch: Partial<PipixiaSettings> = {}
         for (const [key] of pipixiaFields) {
           const name = `pipixia.${key}`
@@ -287,7 +301,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             .map(({ field, value }) => [field.key, value])))
         }
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
-        if (Object.keys(sharePatch).length) await saveAcfun(root, sharePatch)
+        for (const [site, patch] of sharePatches) await savePublicShare(root, site, patch)
         if (Object.keys(pipixiaPatch).length) await pipixia.save(pipixiaPatch)
         return Result.ok()
       },

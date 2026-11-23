@@ -53,16 +53,23 @@ export async function loadGlobalConfig(root = deployment) {
   }
 }
 
-export async function loadAcfunConfig(root = deployment) {
+export const publicShareSiteNames = { acfun: "AcFun", weishi: "微视", zuiyou: "最右" } as const
+export type PublicShareSite = keyof typeof publicShareSiteNames
+
+export async function loadPublicShareConfig(site: PublicShareSite, root = deployment) {
   const global = await readLotusGlobalConfig(root)
-  const acfun = fields(global.acfun)
-  const enable = typeof acfun.enable === "boolean" ? acfun.enable : undefined
-  const privatePreview = typeof acfun.private_preview === "boolean" ? acfun.private_preview : undefined
+  const config = fields(global[site])
+  const enable = typeof config.enable === "boolean" ? config.enable : undefined
+  const privatePreview = typeof config.private_preview === "boolean" ? config.private_preview : undefined
   const legacy = enable === undefined || privatePreview === undefined
     ? await readOptionalConfigFile(root, "plugins/rconsole-plugin/config/tools.yaml") ??
       await readOptionalConfigFile(root, "backup/plugins/rconsole-plugin/config/tools.yaml")
     : undefined
-  const blocked = Array.isArray(legacy?.globalBlackList) && legacy.globalBlackList.includes("Acfun")
+  const blocked = Array.isArray(legacy?.globalBlackList) && legacy.globalBlackList.includes(site === "acfun" ? "Acfun" : publicShareSiteNames[site])
   return { enable: enable ?? !blocked, privatePreview: privatePreview ?? (legacy?.privateResolve === true),
     permissions: global.permissions }
+}
+
+export function loadAcfunConfig(root = deployment) {
+  return loadPublicShareConfig("acfun", root)
 }

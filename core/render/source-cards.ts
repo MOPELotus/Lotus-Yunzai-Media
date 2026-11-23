@@ -41,6 +41,7 @@ export interface SourceCard {
  readonly music?: { readonly title?: string; readonly author?: string }
  readonly collection?: { readonly title?: string }
  readonly sources?: readonly { readonly quality?: string; readonly width?: number; readonly height?: number; readonly codec?: string }[]
+ readonly showStats?: boolean
  readonly stat?: Partial<Record<"like" | "reply" | "favorite" | "coin" | "view" | "danmaku" | "share", number>>
  readonly online?: number
  readonly liveStatus?: string
@@ -315,8 +316,10 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
   if(data.collection?.title)p.y+=p.text(`合集：${data.collection.title}`,30,p.y,p.width-60,18,'#c2c5cb')+20
   if(data.sources?.length)p.y+=p.text(`可用视频源：${data.sources.map(source=>[source.quality||'清晰度未记录',source.width&&source.height?`${source.width}×${source.height}`:'',source.codec||''].filter(Boolean).join(' ')).join(' / ')}`,30,p.y,p.width-60,18,'#c2c5cb')+20
   for(const warning of data.warnings||[])p.y+=p.text(warning,30,p.y,p.width-60,18,'#c2c5cb')+16
-  p.rule(30,p.y,p.width-60,'rgba(211,188,142,.35)');p.y+=22
-  p.y+=p.text(mediaStats(data,template),30,p.y,p.width-60,18,GOLD,{leading:28})+18
+  if(data.showStats!==false){
+   p.rule(30,p.y,p.width-60,'rgba(211,188,142,.35)');p.y+=22
+   p.y+=p.text(mediaStats(data,template),30,p.y,p.width-60,18,GOLD,{leading:28})+18
+  }
  }
  close()
 }

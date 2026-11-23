@@ -1,3 +1,5 @@
+import { createPublicShareCommands } from "../services/public-share/command.ts"
+import { loadPublicShareConfig } from "../core/config/global.ts"
 import { expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
@@ -26,7 +28,8 @@ const defaults = {
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAtAllCD: 1800,
   liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1 }
 const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0 }
-const acfunDefaults = { enable: true, private_preview: false }
+const shareDefaults = { enable: true, private_preview: false }
+const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults }
 const pipixiaDefaults = { enable: true, private: false }
 const videoDefaults = { forwardMsg: true, cover: false, bh3: false, by: false, xbgd: false, groups: [], group_config: [] }
 
@@ -66,7 +69,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
   const data = await mkdtemp(join(tmpdir(), "lotus-media-config-"))
   try {
     const { configInfo: form } = supportGuoba(data)
-    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: weiboDefaults, acfun: acfunDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
     expect(existsSync(join(data, "yuki-plugin"))).toBe(false)
 
     const directory = join(data, "yuki-plugin", "config", "bilibili")
@@ -80,7 +83,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
     expect(await form.getConfigData()).toEqual({ bilibili: {
       ...biliDefaults, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7,
-    }, weibo: weiboDefaults, acfun: acfunDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
     expect(await form.setConfigData({ "bilibili.forwardSendDynamic": 0 }, { Result })).toEqual({ ok: true })
     expect(existsSync(override)).toBe(false)
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "bilibili.maxPicsForSingleMsg": 0.5 },
@@ -100,7 +103,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
     const fresh = supportGuoba(data).configInfo
     expect(await fresh.getConfigData()).toEqual({ bilibili: {
       ...biliDefaults, pushMsgMode: 0, mergeTextPic: 0, maxPicsForSingleMsg: 0,
-    }, weibo: weiboDefaults, acfun: acfunDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(true)
     expect(await fresh.setConfigData({ "bilibili.maxPicsForSingleMsg": 1 }, { Result })).toEqual({ ok: true })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
@@ -189,7 +192,7 @@ test("锅巴保存调度设置，重启后按平台注册任务且手动任务�
       "weibo.checkDynamicCD": "  * * * * * *  " }, { Result })).toEqual({ ok: true })
     expect(await form.getConfigData()).toEqual({
       bilibili: { ...biliDefaults, pushStatus: 0, checkDynamicCD: "* * * * * *" },
-      weibo: { ...weiboDefaults, checkDynamicCD: "* * * * * *" }, acfun: acfunDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults,
+      weibo: { ...weiboDefaults, checkDynamicCD: "* * * * * *" }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults,
     })
     for (const id of Object.keys(providers)) {
       await config.update(id, { kind: "private", bot: "99", chat: "42" }, "1234", "add", [], [], "测试号")
@@ -225,7 +228,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     )
     expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0, banWords: ["样例"],
-    }, acfun: acfunDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "weibo.maxTextLengthForSingleMsg": 50001 }, { Result }))
       .toEqual({ ok: false, status: 422 })
     expect(existsSync(bilibili)).toBe(false)
@@ -250,7 +253,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(await form.getConfigData()).toEqual({ bilibili: { ...biliDefaults, mergeTextPic: 0 }, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4, banWords: ["样例"],
       parseWeiboLink: 0, parseWeiboPrivate: 1,
-    }, acfun: acfunDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
   } finally {
     await rm(data, { force: true, recursive: true })
@@ -412,6 +415,55 @@ test("AcFun 面板沿用已归档的旧开关，保存只改明确字段并即�
     expect(withAlias).toContain("other: &defaults {enable: true, color: red}\n")
     expect(Bun.YAML.parse(withAlias)).toMatchObject({ acfun: { enable: false, color: "red" } })
     expect(await readFile(join(old, "tools.yaml"), "utf8")).toBe(archived)
+  } finally {
+    await plugin.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("微视和最右面板分别继承旧解析开关，保存后按新值和权限调用入口", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lotus-public-share-config-"))
+  const root = pathToFileURL(dir + "/")
+  const archive = join(dir, "backup", "plugins", "rconsole-plugin", "config")
+  const config = join(dir, "config")
+  const file = join(config, "global.yaml")
+  const original = "# 注释应保留\npermissions:\n  scopes:\n    zuiyou.play: {policy: deny}\n"
+  const old = "globalBlackList: [微视, Acfun]\nprivateResolve: false\n"
+  const session = new AbortController()
+  const calls = []
+  const context = { message_type: "private", user_id: 123, self_id: 77, isMaster: false,
+    privateCredentialSignal: session.signal, reply: async () => true }
+  const weishi = "https://isee.weishi.qq.com/ws/app-pages/share/index.html?wxplay=1&id=7YaXkbaPB1WtR4KeU"
+  const zuiyou = "https://share.xiaochuankeji.cn/hybrid/share/post?pid=340830632"
+  const plugin = createPublicShareCommands({
+    loadConfig: site => loadPublicShareConfig(site, root),
+    render: async () => new Uint8Array([1]),
+    async fetchPage(url) {
+      calls.push(url)
+      const body = url === weishi ? 'try { window.Vise.initState = {"feedsList":[{"id":"7YaXkbaPB1WtR4KeU","feedDesc":"样本"}]}; } catch {}'
+        : 'window.APP_INITIAL_STATE={"sharePost":{"postDetail":{"post":{"id":340830632,"privateStatus":0,"content":"样本"}}}}'
+      return new Response(`<script id="appState">${body}</script>`)
+    },
+  })
+  try {
+    await Promise.all([mkdir(archive, { recursive: true }), mkdir(config, { recursive: true })])
+    await writeFile(join(archive, "tools.yaml"), old)
+    await writeFile(file, original)
+    const { configInfo: form } = supportGuoba(dir)
+    expect(form.schemas.filter(item => /^(weishi|zuiyou)\./u.test(item.field ?? "")).map(item => [item.field, item.component]))
+      .toEqual([["weishi.enable", "Switch"], ["weishi.private_preview", "Switch"], ["zuiyou.enable", "Switch"], ["zuiyou.private_preview", "Switch"]])
+    expect(await form.getConfigData()).toMatchObject({ weishi: { enable: false, private_preview: false }, zuiyou: { enable: true, private_preview: false } })
+    expect(await plugin.fallback(weishi, context)).toBeUndefined()
+    expect(await plugin.fallback(zuiyou, context)).toBeUndefined()
+    expect(await plugin.fallback("#播放 " + zuiyou, context)).toContain("未启用最右播放")
+    expect(calls).toEqual([])
+    expect(await form.setConfigData({ "weishi.enable": true, "weishi.private_preview": true, "zuiyou.enable": false },
+      { Result, changedFields: ["weishi.enable", "weishi.private_preview"] })).toEqual({ ok: true })
+    expect(await readFile(file, "utf8")).toBe(original + "weishi:\n  enable: true\n  private_preview: true\n")
+    expect(await form.getConfigData()).toMatchObject({ weishi: { enable: true, private_preview: true }, zuiyou: { enable: true, private_preview: false } })
+    expect(await plugin.fallback(weishi, context)).toMatchObject([{ type: "image" }, expect.stringContaining("样本")])
+    expect(calls).toEqual([weishi])
+    expect(await readFile(join(archive, "tools.yaml"), "utf8")).toBe(old)
   } finally {
     await plugin.dispose()
     await rm(dir, { recursive: true, force: true })

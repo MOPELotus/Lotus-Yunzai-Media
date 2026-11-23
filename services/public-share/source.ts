@@ -150,7 +150,10 @@ export async function readPublicShare(target: Target, signal: AbortSignal, fetch
       current = next
       continue
     }
-    if (!current.id) return
+    if (!current.id) {
+      await response.body?.cancel()
+      return
+    }
     const html = await htmlOf(response, active)
     if (html) return current.site === "weishi" ? weishi(html, current) : zuiyou(html, current)
     return

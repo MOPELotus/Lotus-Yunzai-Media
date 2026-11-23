@@ -1,4 +1,4 @@
-import { readOptionalLocalConfig } from "../../../../lib/config.ts"
+import { readOptionalConfigFile, readOptionalLocalConfig } from "../../../../lib/config.ts"
 import { legacyLotusDirectories, readLotusGlobalConfig } from "../../../../lib/lotus-global-config.ts"
 
 type Fields = Record<string, unknown>
@@ -56,5 +56,13 @@ export async function loadGlobalConfig(root = deployment) {
 export async function loadAcfunConfig(root = deployment) {
   const global = await readLotusGlobalConfig(root)
   const acfun = fields(global.acfun)
-  return { enable: acfun.enable !== false, privatePreview: acfun.private_preview === true, permissions: global.permissions }
+  const enable = typeof acfun.enable === "boolean" ? acfun.enable : undefined
+  const privatePreview = typeof acfun.private_preview === "boolean" ? acfun.private_preview : undefined
+  const legacy = enable === undefined || privatePreview === undefined
+    ? await readOptionalConfigFile(root, "plugins/rconsole-plugin/config/tools.yaml") ??
+      await readOptionalConfigFile(root, "backup/plugins/rconsole-plugin/config/tools.yaml")
+    : undefined
+  const blocked = Array.isArray(legacy?.globalBlackList) && legacy.globalBlackList.includes("Acfun")
+  return { enable: enable ?? !blocked, privatePreview: privatePreview ?? (legacy?.privateResolve === true),
+    permissions: global.permissions }
 }

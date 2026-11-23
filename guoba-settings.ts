@@ -1,5 +1,12 @@
 import { Job } from "node-schedule"
+import { sep } from "node:path"
+import { isDeepStrictEqual } from "node:util"
+import { pathToFileURL } from "node:url"
+import { isAlias, isMap, parseDocument } from "yaml"
 import { lockFile } from "../../lib/file-lock.ts"
+import { GlobalConfigWriteError, updateLotusGlobalConfig } from "../../lib/lotus-global-config-write.ts"
+import { insertSourcePairs, replaceSourceScalar, sourceAliasOverrides, sourceMappingPair, type Pair, type SourceEdit } from "../../lib/yaml-source-edits.ts"
+import { loadAcfunConfig } from "./core/config/global.ts"
 import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
@@ -102,6 +109,59 @@ const officialVideoTags = [
   ["group_config", "群聊屏蔽的游戏", "按「群号: gs, sr」填写。游戏代号为 gs、sr、zzz、bh3、by、xbgd。"],
 ] as const
 
+const acfunToggles = [
+  ["enable", "解析及播放 AcFun 视频", "允许从群聊中的 AcFun 分享显示作品信息，并响应显式播放指令。"],
+  ["private_preview", "私聊自动预览", "关闭时仍可在私聊发送播放指令。"],
+] as const
+
+type AcfunPatch = Partial<Record<typeof acfunToggles[number][0], boolean>>
+
+function acfunPatch(values: Readonly<Record<string, unknown>>, edited: ReadonlySet<string> | undefined) {
+  const patch: AcfunPatch = {}
+  for (const [key] of acfunToggles) {
+    const name = `acfun.${key}`
+    if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
+    if (typeof values[name] !== "boolean") return
+    patch[key] = values[name]
+  }
+  return patch
+}
+
+async function saveAcfun(root: URL, patch: AcfunPatch) {
+  await updateLotusGlobalConfig(root, {
+    canWrite: () => true,
+    prepare(text, local) {
+      const state = local.acfun
+      if (state !== undefined && (!state || typeof state !== "object" || Array.isArray(state))) throw new GlobalConfigWriteError("config")
+      const current = state as Record<string, unknown> | undefined
+      const changes = Object.entries(patch).filter(([key, value]) => current?.[key] !== value)
+      if (!changes.length) return { value: undefined }
+      const document = parseDocument(text, { strict: true, merge: true, uniqueKeys: true, keepSourceTokens: true })
+      if (document.errors.length || (document.contents && !isMap(document.contents))) throw new GlobalConfigWriteError("config")
+      const map = document.contents ?? undefined
+      const section = map?.get("acfun", true)
+      const pairs: Pair[] = []
+      const edits: SourceEdit[] = []
+      for (const [key, value] of changes) {
+        const old = isMap(section) ? section.get(key, true) : undefined
+        const flow = String(value)
+        if (old) edits.push(replaceSourceScalar(text, old, flow))
+        else pairs.push({ key, flow, block: [`${key}: ${flow}`] })
+      }
+      if (pairs.length) {
+        if (isAlias(section)) edits.push(sourceAliasOverrides(text, section, pairs))
+        else if (isMap(section)) edits.push(insertSourcePairs(text, section, pairs))
+        else if (section === undefined) edits.push(insertSourcePairs(text, map, [sourceMappingPair("acfun", patch)]))
+        else throw new GlobalConfigWriteError("config")
+      }
+      const yaml = edits.sort((a, b) => b.start - a.start || b.end - a.end)
+        .reduce((content, edit) => content.slice(0, edit.start) + edit.value + content.slice(edit.end), text)
+      if (!isDeepStrictEqual(Bun.YAML.parse(yaml), { ...local, acfun: { ...current, ...patch } })) throw new GlobalConfigWriteError("config")
+      return { yaml, value: undefined }
+    },
+  })
+}
+
 function officialVideoPatch(values: Readonly<Record<string, unknown>>, edited: ReadonlySet<string> | undefined) {
   const patch: Record<string, boolean | readonly string[]> = {}
   for (const [key] of officialVideoToggles) {
@@ -156,7 +216,8 @@ function changed(field: SettingsField, value: FieldInput, settings: Subscription
   return before !== value
 }
 
-export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory)) {
+export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory),
+  root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep)) {
   const config = createSubscriptionConfig(directory, lockFile)
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
@@ -171,7 +232,9 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           componentProps: tags ? { mode: "tags" } : options ? { options: options.map((label, value) => ({ label, value })) }
             : max !== undefined ? { min: min ?? 0, max, step: 1 } : undefined,
         })),
-      ]), { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },
+      ]), { component: "SOFT_GROUP_BEGIN", label: "AcFun 视频" },
+      ...acfunToggles.map(([key, label, bottomHelpMessage]) => ({ field: `acfun.${key}`, label, bottomHelpMessage, component: "Switch" })),
+      { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },
       ...officialVideoToggles.map(([key, label]) => ({ field: `officialVideo.${key}`, label, component: "Switch" })),
       ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
         component: "Select", componentProps: { mode: "tags" } }))],
@@ -180,8 +243,8 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           const settings = await config.settings(id)
           return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
-        const videos = await officialVideo.settings()
-        return { ...Object.fromEntries(entries), officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
+        const [videos, acfun] = await Promise.all([officialVideo.settings(), loadAcfunConfig(root)])
+        return { ...Object.fromEntries(entries), acfun: { enable: acfun.enable, private_preview: acfun.privatePreview }, officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
       },
@@ -189,6 +252,8 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         const edited = Array.isArray(changedFields) ? new Set(changedFields) : undefined
         const videoPatch = officialVideoPatch(values, edited)
         if (!videoPatch) return Result.error("请填写有效的米游社官号视频设置。", 422)
+        const sharePatch = acfunPatch(values, edited)
+        if (!sharePatch) return Result.error("请填写有效的 AcFun 视频设置。", 422)
         const changes = new Map<SubscriptionPlatform, { field: SettingsField; value: FieldInput }[]>()
         for (const { id, label, fields } of platforms) {
           const selected = []
@@ -209,6 +274,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             .map(({ field, value }) => [field.key, value])))
         }
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
+        if (Object.keys(sharePatch).length) await saveAcfun(root, sharePatch)
         return Result.ok()
       },
     },

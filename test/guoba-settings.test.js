@@ -9,7 +9,8 @@ import { lockFile } from "../../../lib/file-lock.ts"
 import { supportGuoba } from "../guoba.support.js"
 import { createSubscriptionConfig } from "../services/subscriptions/config.ts"
 import { createSubscriptionDelivery, useDynamicForward } from "../services/subscriptions/delivery.ts"
-import { loadGlobalConfig } from "../core/config/global.ts"
+import { loadAcfunConfig, loadGlobalConfig } from "../core/config/global.ts"
+import { createAcfunCommands } from "../services/acfun/command.ts"
 
 const Result = {
   ok: () => ({ ok: true }),
@@ -25,6 +26,7 @@ const defaults = {
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAtAllCD: 1800,
   liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1 }
 const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0 }
+const acfunDefaults = { enable: true, private_preview: false }
 const videoDefaults = { forwardMsg: true, cover: false, bh3: false, by: false, xbgd: false, groups: [], group_config: [] }
 
 test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主配置优先", async () => {
@@ -63,7 +65,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
   const data = await mkdtemp(join(tmpdir(), "lotus-media-config-"))
   try {
     const { configInfo: form } = supportGuoba(data)
-    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: weiboDefaults, officialVideo: videoDefaults })
+    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: weiboDefaults, acfun: acfunDefaults, officialVideo: videoDefaults })
     expect(existsSync(join(data, "yuki-plugin"))).toBe(false)
 
     const directory = join(data, "yuki-plugin", "config", "bilibili")
@@ -77,7 +79,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
     expect(await form.getConfigData()).toEqual({ bilibili: {
       ...biliDefaults, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7,
-    }, weibo: weiboDefaults, officialVideo: videoDefaults })
+    }, weibo: weiboDefaults, acfun: acfunDefaults, officialVideo: videoDefaults })
     expect(await form.setConfigData({ "bilibili.forwardSendDynamic": 0 }, { Result })).toEqual({ ok: true })
     expect(existsSync(override)).toBe(false)
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "bilibili.maxPicsForSingleMsg": 0.5 },
@@ -97,7 +99,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
     const fresh = supportGuoba(data).configInfo
     expect(await fresh.getConfigData()).toEqual({ bilibili: {
       ...biliDefaults, pushMsgMode: 0, mergeTextPic: 0, maxPicsForSingleMsg: 0,
-    }, weibo: weiboDefaults, officialVideo: videoDefaults })
+    }, weibo: weiboDefaults, acfun: acfunDefaults, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(true)
     expect(await fresh.setConfigData({ "bilibili.maxPicsForSingleMsg": 1 }, { Result })).toEqual({ ok: true })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
@@ -186,7 +188,7 @@ test("锅巴保存调度设置，重启后按平台注册任务且手动任务�
       "weibo.checkDynamicCD": "  * * * * * *  " }, { Result })).toEqual({ ok: true })
     expect(await form.getConfigData()).toEqual({
       bilibili: { ...biliDefaults, pushStatus: 0, checkDynamicCD: "* * * * * *" },
-      weibo: { ...weiboDefaults, checkDynamicCD: "* * * * * *" }, officialVideo: videoDefaults,
+      weibo: { ...weiboDefaults, checkDynamicCD: "* * * * * *" }, acfun: acfunDefaults, officialVideo: videoDefaults,
     })
     for (const id of Object.keys(providers)) {
       await config.update(id, { kind: "private", bot: "99", chat: "42" }, "1234", "add", [], [], "测试号")
@@ -222,7 +224,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     )
     expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0, banWords: ["样例"],
-    }, officialVideo: videoDefaults })
+    }, acfun: acfunDefaults, officialVideo: videoDefaults })
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "weibo.maxTextLengthForSingleMsg": 50001 }, { Result }))
       .toEqual({ ok: false, status: 422 })
     expect(existsSync(bilibili)).toBe(false)
@@ -247,7 +249,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(await form.getConfigData()).toEqual({ bilibili: { ...biliDefaults, mergeTextPic: 0 }, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4, banWords: ["样例"],
       parseWeiboLink: 0, parseWeiboPrivate: 1,
-    }, officialVideo: videoDefaults })
+    }, acfun: acfunDefaults, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
   } finally {
     await rm(data, { force: true, recursive: true })
@@ -358,5 +360,59 @@ test("恢复两平台旧推送过滤设置并保存为原 YAML 类型", async ()
     })
   } finally {
     await rm(data, { force: true, recursive: true })
+  }
+})
+
+test("AcFun 面板沿用已归档的旧开关，保存只改明确字段并即时控制入口", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lotus-media-acfun-config-"))
+  const root = pathToFileURL(dir + "/")
+  const old = join(dir, "backup", "plugins", "rconsole-plugin", "config")
+  const config = join(dir, "config")
+  const file = join(config, "global.yaml")
+  const original = "# 保留头注释\r\nother: {weight: 4, quiet: true}\r\n"
+  const archived = "# 旧配置原样保留\r\nglobalBlackList: [Acfun, 微博]\r\nprivateResolve: true\r\n"
+  const calls = []
+  const link = "https://www.acfun.cn/v/ac48976163"
+  const context = { message_type: "private", user_id: 123, self_id: 77, reply: async () => true }
+  const plugin = createAcfunCommands({}, {
+    loadConfig: async () => loadAcfunConfig(root),
+    render: async () => new Uint8Array([1]),
+    async fetch(url) {
+      calls.push(url)
+      return new Response('<script>window.pageInfo = window.videoInfo = {"dougaId":48976163,"title":"作品"};</script>')
+    },
+  })
+  try {
+    await Promise.all([mkdir(old, { recursive: true }), mkdir(config, { recursive: true })])
+    await writeFile(join(old, "tools.yaml"), archived)
+    await writeFile(file, original)
+    const { configInfo: form } = supportGuoba(dir)
+    expect(form.schemas.filter(item => item.field?.startsWith("acfun.")).map(item => [item.field, item.component]))
+      .toEqual([["acfun.enable", "Switch"], ["acfun.private_preview", "Switch"]])
+    expect((await form.getConfigData()).acfun).toEqual({ enable: false, private_preview: true })
+    expect(await plugin.fallback(link, context)).toBeUndefined()
+    expect(await plugin.fallback("#播放 " + link, { ...context, message_type: "group" })).toContain("未启用")
+    expect(calls).toEqual([])
+    expect(await form.setConfigData({ "acfun.enable": "false" }, { Result })).toEqual({ ok: false, status: 422 })
+    expect(await readFile(file, "utf8")).toBe(original)
+    expect(await form.setConfigData({ "acfun.enable": true, "acfun.private_preview": false, "bilibili.pushMsgMode": 0 },
+      { Result, changedFields: ["acfun.enable"] })).toEqual({ ok: true })
+    const current = await readFile(file, "utf8")
+    expect(current).toBe(original + "acfun:\r\n  enable: true\r\n")
+    expect((await form.getConfigData()).acfun).toEqual({ enable: true, private_preview: true })
+    expect(await plugin.fallback(link, context)).toEqual([{ type: "image", file: new Uint8Array([1]) }, link])
+    expect(calls).toEqual([link])
+    expect(await form.setConfigData({ "acfun.private_preview": false }, { Result })).toEqual({ ok: true })
+    expect((await form.getConfigData()).acfun).toEqual({ enable: true, private_preview: false })
+    expect(await plugin.fallback(link, context)).toBeUndefined()
+    await writeFile(file, "# 相邻字段\nother: &defaults {enable: true, color: red}\nacfun: *defaults\n")
+    expect(await form.setConfigData({ "acfun.enable": false }, { Result })).toEqual({ ok: true })
+    const withAlias = await readFile(file, "utf8")
+    expect(withAlias).toContain("other: &defaults {enable: true, color: red}\n")
+    expect(Bun.YAML.parse(withAlias)).toMatchObject({ acfun: { enable: false, color: "red" } })
+    expect(await readFile(join(old, "tools.yaml"), "utf8")).toBe(archived)
+  } finally {
+    await plugin.dispose()
+    await rm(dir, { recursive: true, force: true })
   }
 })

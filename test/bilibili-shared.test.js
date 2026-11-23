@@ -201,6 +201,74 @@ test("B 站共用登录入口不重复扫码，停用只改动态配置", async 
   }
 })
 
+test("传统动态扫码先检查现有来源，Redis 离线时也复用本地或同一个视频账号", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "lotus-bili-login-existing-"))
+  let redis
+  let sharedState = "active"
+  let localStatus = "active"
+  let sharedChecks = 0
+  const upstream = []
+  const handler = biliSubscriptionLogin({
+    getRedis: () => redis, owner: context => context.isMaster, directory: folder, lockFile,
+    shared: { async status() { sharedChecks++; return sharedState } },
+    fetch: async (input, { headers }) => {
+      const url = new URL(input)
+      upstream.push(url.pathname)
+      const requestHeaders = new Headers(headers)
+      if (url.pathname === "/x/web-interface/nav") {
+        expect(url.host).toBe("api.bilibili.com")
+        expect(requestHeaders.get("Cookie")).toBe("SESSDATA=local-cookie; DedeUserID=90")
+        return Response.json({ code: 0, data: localStatus === "expired" ? { isLogin: false } :
+          { isLogin: true, mid: localStatus === "unknown" ? 91 : 90, uname: "合成用户" } })
+      }
+      expect(url.host).toBe("passport.bilibili.com")
+      expect(url.pathname).toBe("/x/passport-login/web/qrcode/generate")
+      expect(requestHeaders.has("Cookie")).toBe(false)
+      return Response.json({ code: -1 })
+    },
+  })
+  const owner = { isMaster: true, message_type: "private", privateCredentialSignal: new AbortController().signal }
+  try {
+    expect(await handler("#扫码B站登录", { ...owner, isDelegated: true })).toContain("仅机器人主人")
+    expect(await handler("#扫码B站登录", { ...owner, message_type: "group" })).toContain("好友私聊")
+    expect(sharedChecks).toBe(0)
+    expect(await handler("#扫码B站登录", owner)).toContain("无需再扫码")
+    expect(await handler("#我的B站登录", owner)).toContain("共用视频登录")
+    expect(await handler("#扫码B站动态登录", owner)).toContain("存储未连接")
+    expect(sharedChecks).toBe(2)
+    expect(upstream).toEqual([])
+
+    sharedState = "unavailable"
+    await mkdir(join(folder, "yuki-plugin"))
+    await writeFile(join(folder, "yuki-plugin", "biliCookie.yaml"), '"SESSDATA=local-cookie; DedeUserID=90"')
+    expect(await handler("#扫码B站登录", owner)).toContain("已使用本地 B 站会话")
+    expect(await handler("#我的B站登录", owner)).toContain("当前使用 B 站本地动态 Cookie")
+    expect(sharedChecks).toBe(2)
+    expect(upstream).toEqual(["/x/web-interface/nav", "/x/web-interface/nav"])
+
+    localStatus = "unknown"
+    expect(await handler("#扫码B站登录", owner)).toContain("无法确认原 B 站本地会话")
+    expect(sharedChecks).toBe(2)
+
+    redis = { mGet: async keys => keys.map(() => null), set: async () => "OK", eval: async () => 1 }
+    const before = upstream.length
+    expect(await handler("#扫码B站动态登录", owner)).toContain("未能取得")
+    expect(upstream.slice(before)).toEqual(["/x/passport-login/web/qrcode/generate"])
+    expect(sharedChecks).toBe(2)
+
+    localStatus = "expired"
+    sharedState = "active"
+    expect(await handler("#扫码B站登录", owner)).toContain("无需再扫码")
+    expect(await handler("#我的B站登录", owner)).toContain("共用视频登录")
+    expect(upstream.slice(before + 1)).toEqual(["/x/web-interface/nav", "/x/web-interface/nav"])
+    redis.mGet = async () => { throw new Error("合成 Redis 连接中断") }
+    expect(await handler("#扫码B站登录", owner)).toContain("无需再扫码")
+    expect(await handler("#我的B站登录", owner)).toContain("共用视频登录")
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+})
+
 test("独立动态二维码出图失败只发送已验证的登录链接，并要求送达回执", async () => {
   const folder = await mkdtemp(join(tmpdir(), "lotus-bili-qr-render-"))
   const link = "https://passport.bilibili.com/h5-app/passport/login/scan?qrcode_key=synthetic-123"

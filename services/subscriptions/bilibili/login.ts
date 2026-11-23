@@ -151,33 +151,44 @@ export function biliSubscriptionLogin({ getRedis, owner, signal, directory, lock
     })
   }
 
-  async function sourceStatus(redis: SubscriptionRedis | undefined, active: AbortSignal) {
+  async function independentStatus(redis: SubscriptionRedis | undefined, active: AbortSignal) {
     const local = await checkLogin(request, await readBiliLocal(directory), active)
-    if (local.status === "active") return "当前使用 B 站本地动态 Cookie。\n" + local.text
-    if (local.status === "unknown") return "无法确认 B 站本地 Cookie 的状态。"
-    const stored = await checkLogin(request, await readBiliLogin(redis), active)
-    if (stored.status === "active") return "当前使用 B 站扫码会话。\n" + stored.text
-    if (stored.status === "unknown") return "无法确认 B 站扫码会话状态。"
+    if (local.status === "active" || local.status === "unknown") return { local: true, login: local }
+    const storedSession = await readBiliLogin(redis).catch(() => {
+      active.throwIfAborted()
+      return undefined
+    })
+    const stored = await checkLogin(request, storedSession, active)
+    return stored.status === "absent" && local.status === "expired"
+      ? { local: true, login: local }
+      : { local: false, login: stored }
+  }
+
+  async function sourceStatus(redis: SubscriptionRedis | undefined, active: AbortSignal) {
+    const { local, login } = await independentStatus(redis, active)
+    if (login.status === "active") return (local ? "当前使用 B 站本地动态 Cookie。" : "当前使用 B 站扫码会话。") + "\n" + login.text
+    if (login.status === "unknown") return local ? "无法确认 B 站本地 Cookie 的状态。" : "无法确认 B 站扫码会话状态。"
     if (await shared?.status(active) === "active") return sharedActive
-    if (local.status === "expired" || stored.status === "expired") return "B 站动态会话已失效，当前使用公开读取。"
+    if (login.status === "expired") return "B 站动态会话已失效，当前使用公开读取。"
     return "当前使用 B 站公开读取。"
   }
 
-  async function scan(context: MessageFallbackContext, lock: LoginLock, active: AbortSignal, independent: boolean) {
-    const checked = await checkLogin(request, await readBiliLogin(getRedis()), active)
+  async function existingLogin(redis: SubscriptionRedis | undefined, active: AbortSignal) {
+    const { local, login } = await independentStatus(redis, active)
+    if (login.status === "active") {
+      return local ? "当前动态已使用本地 B 站会话。\n" + login.text : login.text + "\n如需更换，请先发送 #删除B站登录。"
+    }
+    if (login.status === "unknown") return local ? "无法确认原 B 站本地会话状态，请稍后重试。" : "无法确认原 B 站动态登录状态，请稍后重试。"
+    const share = await shared?.status(active)
+    if (share === "active") return sharedActive
+    if (share === "absent" || share === "expired") return "请发送 #B站登录，扫码一次即可用于视频和动态。"
+    if (share === "unknown") return "无法确认 B 站视频登录，请稍后重试。需要独立账号可发送 #扫码B站动态登录。"
+  }
+
+  async function scan(context: MessageFallbackContext, redis: SubscriptionRedis, lock: LoginLock, active: AbortSignal) {
+    const checked = await checkLogin(request, await readBiliLogin(redis), active)
     if (checked.status === "active") return checked.text + "\n如需更换，请先发送 #删除B站登录。"
     if (checked.status === "unknown") return "无法确认原 B 站动态登录状态，请稍后重试。"
-    if (!independent) {
-      const share = await shared?.status(active)
-      if (share && share !== "unavailable") {
-        const local = await checkLogin(request, await readBiliLocal(directory), active)
-        if (local.status === "active") return "当前动态已使用本地 B 站会话。" + "\n" + local.text
-        if (local.status === "unknown") return "无法确认原 B 站本地会话状态，请稍后重试。"
-      }
-      if (share === "active") return sharedActive
-      if (share === "absent" || share === "expired") return "请发送 #B站登录，扫码一次即可用于视频和动态。"
-      if (share === "unknown") return "无法确认 B 站视频登录，请稍后重试。需要独立账号可发送 #扫码B站动态登录。"
-    }
     const applied = await readJson(request, qrBase + "generate?source=main-fe-header", active)
     const codeKey = applied.data?.data?.qrcode_key
     const appliedUrl = applied.data?.data?.url
@@ -224,8 +235,8 @@ export function biliSubscriptionLogin({ getRedis, owner, signal, directory, lock
     return pollSignal.aborted ? "B 站登录二维码已过期，请重新扫码。" : "B 站扫码登录未完成，请稍后重试。"
   }
 
-  async function logout(lock: LoginLock, active: AbortSignal) {
-    const state = await readBiliLogin(getRedis())
+  async function logout(redis: SubscriptionRedis, lock: LoginLock, active: AbortSignal) {
+    const state = await readBiliLogin(redis)
     if (!state) {
       if (await shared?.status(active) === "active") return "没有独立的 B 站扫码会话。视频登录已保留，如需停用共用请发送 #停用B站动态共用。"
       return "当前没有 B 站扫码会话。"
@@ -267,20 +278,15 @@ export function biliSubscriptionLogin({ getRedis, owner, signal, directory, lock
       }
       if (binding?.[1]) return await bind(binding[1], active)
       if (clearing) return await clearLocal(active)
-      if (source) return await sourceStatus(redis, active)
-      if (!redis) return "动态登录存储未连接。"
-      if (showing) {
-        const result = await checkLogin(request, await readBiliLogin(redis), active)
-        if (result.status === "active") return result.text
-        if (result.status !== "unknown" && await shared?.status(active) === "active") {
-          return "B 站动态可共用视频登录。发送 #我的B站CK 可查看实际来源。"
-        }
-        if (result.status === "absent") return "当前没有 B 站扫码会话。"
-        return result.status === "expired" ? "B 站扫码会话已失效，请重新扫码。" : "无法确认 B 站动态登录状态。"
+      if (source || showing) return await sourceStatus(redis, active)
+      if (starting && !starting[1]) {
+        const existing = await existingLogin(redis, active)
+        if (existing) return existing
       }
+      if (!redis) return "动态登录存储未连接。"
       lock = await lockBiliLogin(redis)
       if (!lock) return "已有 B 站登录操作在进行，请稍后再试。"
-      return starting ? await scan(context, lock, active, Boolean(starting[1])) : await logout(lock, active)
+      return starting ? await scan(context, redis, lock, active) : await logout(redis, lock, active)
     } catch {
       if (!active.aborted) return "B 站动态登录操作未完成，请稍后重试。"
     } finally {

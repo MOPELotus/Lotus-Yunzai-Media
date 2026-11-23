@@ -27,7 +27,7 @@ const defaults = {
 }
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAtAllCD: 1800,
   liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1, biliPgcAuto: false, biliPgcQuality: 32, biliPgcDuration: 1800 }
-const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0 }
+const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0, weiboComments: 1 }
 const shareDefaults = { enable: true, private_preview: false }
 const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults, wxchannels: shareDefaults, xhs: shareDefaults, xhh: shareDefaults }
 const pipixiaDefaults = { enable: true, private: false }
@@ -258,6 +258,33 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
   } finally {
     await rm(data, { force: true, recursive: true })
+  }
+})
+
+test("微博热评开关迁入旧工具设置，保存时只改热评并保留私聊和订阅设置", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lotus-weibo-comment-settings-"))
+  const data = join(root, "data")
+  const old = join(root, "backup/plugins/rconsole-plugin/config/tools.yaml")
+  const primary = join(data, "yuki-plugin/config/weibo/config.yaml")
+  const override = join(data, "yuki-plugin/config/weibo/config.guoba.support.yaml")
+  const previous = { parseWeiboPrivate: false, pushStatus: false, whitelist: ["原样保留"] }
+  try {
+    for (const folder of [join(old, ".."), join(override, "..")]) await mkdir(folder, { recursive: true })
+    await writeFile(old, "weiboComments: false\nprivateResolve: true\n")
+    await writeFile(override, YAML.stringify(previous))
+    const { configInfo: form } = supportGuoba(data, undefined, pathToFileURL(root + "/"))
+    const store = createSubscriptionConfig(data, lockFile)
+    expect(form.schemas.find(({ field }) => field === "weibo.weiboComments")).toMatchObject({ component: "Select" })
+    expect((await form.getConfigData()).weibo).toMatchObject({ weiboComments: 0, parseWeiboPrivate: 0, pushStatus: 0 })
+    expect(await store.settings("weibo")).toMatchObject({ weiboComments: false, parseWeiboPrivate: false, enable: false })
+    await writeFile(primary, "weiboComments: true\n")
+    expect((await form.getConfigData()).weibo.weiboComments).toBe(1)
+    expect(await form.setConfigData({ "weibo.weiboComments": 0 }, { Result })).toEqual({ ok: true })
+    expect(YAML.parse(await readFile(override, "utf8"))).toEqual({ ...previous, weiboComments: 0 })
+    expect((await store.settings("weibo")).weiboComments).toBe(false)
+    expect(await readFile(old, "utf8")).toBe("weiboComments: false\nprivateResolve: true\n")
+  } finally {
+    await rm(root, { force: true, recursive: true })
   }
 })
 

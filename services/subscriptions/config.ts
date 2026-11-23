@@ -1,7 +1,9 @@
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname, join, sep } from "node:path"
+import { pathToFileURL } from "node:url"
 import { isDeepStrictEqual } from "node:util"
 import YAML, { type Document, type Node } from "yaml"
+import { readOptionalConfigFile } from "../../../../lib/config.ts"
 import type { LockSubscriptionFile, SubscriptionPlatform } from "./types.ts"
 
 export interface SubscriptionDestination {
@@ -178,6 +180,7 @@ export function settingsFor(value: Mapping, platform?: SubscriptionPlatform) {
     biliPgcDuration:typeof value.biliPgcDuration === "number" ? value.biliPgcDuration : undefined,
     parseWeiboLink:flag(value.parseWeiboLink,true),
     parseWeiboPrivate:flag(value.parseWeiboPrivate,false),
+    weiboComments:flag(value.weiboComments,true),
     sharedBiliLogin:flag(value.sharedBiliLogin,true),
     log:flag(value.pushTaskLog,true),
   }
@@ -248,7 +251,8 @@ export function changeTypes<T>(existing: readonly T[], selected: readonly T[], a
   return [...types]
 }
 
-export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSubscriptionFile) {
+export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSubscriptionFile,
+  deployment = pathToFileURL(dirname(dataDirectory) + sep)) {
   const root = join(dataDirectory, "yuki-plugin","config")
   const file = (id: SubscriptionPlatform, name: string) => join(root,id,name + ".yaml")
   async function effective(id: SubscriptionPlatform, name: string) {
@@ -258,8 +262,20 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
     const path = file(id,name)
     return { path, ...(await read(path) ?? { raw: "", data: {} }) }
   }
+  async function readSettings(id: SubscriptionPlatform, { path, data }: Awaited<ReturnType<typeof effective>>) {
+    if (id !== "weibo" || data.weiboComments !== undefined) return settingsFor(data, id)
+    try {
+      const base = path === file(id, "config") ? data : (await read(file(id, "config")))?.data
+      if (base?.weiboComments !== undefined) return settingsFor({ ...data, weiboComments: base.weiboComments }, id)
+      const legacy = await readOptionalConfigFile(deployment, "plugins/rconsole-plugin/config/tools.yaml") ??
+        await readOptionalConfigFile(deployment, "backup/plugins/rconsole-plugin/config/tools.yaml")
+      return settingsFor({ ...data, weiboComments: legacy?.weiboComments }, id)
+    } catch {
+      return settingsFor({ ...data, weiboComments: false }, id)
+    }
+  }
   return {
-    async settings(id: SubscriptionPlatform) { return settingsFor((await effective(id,"config")).data, id) },
+    async settings(id: SubscriptionPlatform) { return readSettings(id, await effective(id, "config")) },
     async routes(id: SubscriptionPlatform) { return routesFrom((await effective(id,"push")).data) },
     async replaceOwnerRoutes(id: SubscriptionPlatform, bot: string, previous: readonly EditableSubscriptionRoute[],
       next: readonly EditableSubscriptionRoute[], names: ReadonlyMap<string, string>, authorize: () => boolean, signal: AbortSignal) {
@@ -300,11 +316,11 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
       const lock = await lockFile(join(folder, ".config-lock.sqlite"), "动态推送设置")
       try {
         signal?.throwIfAborted()
-        const { raw, data } = await effective(id, "config")
-        const entries = Object.entries(changes(settingsFor(data, id)))
+        const current = await effective(id, "config")
+        const entries = Object.entries(changes(await readSettings(id, current)))
         if (!entries.length) return
 
-        const document: Document = YAML.parseDocument(raw)
+        const document: Document = YAML.parseDocument(current.raw)
         if (!YAML.isMap(document.contents)) document.contents = document.createNode({})
         for (const [field, value] of entries) document.set(field, value)
         await writeDocument(path, document, signal)

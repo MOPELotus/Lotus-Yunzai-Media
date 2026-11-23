@@ -101,6 +101,8 @@ const platforms: readonly { id: SubscriptionPlatform; label: string; fields: rea
       help: "自动预览聊天中分享的公开微博。站点要求登录时提示打开原文。" },
     { key: "parseWeiboPrivate", setting: "parseWeiboPrivate", label: "私聊预览公开微博", options: ["关闭", "开启"],
       help: "主开关开启后，允许在私聊自动预览。" },
+    { key: "weiboComments", setting: "weiboComments", label: "预览公开微博热评", options: ["关闭", "开启"],
+      help: "聊天预览最多附带 20 条公开热评，订阅推送不受影响。" },
   ] },
 ]
 
@@ -230,7 +232,7 @@ function changed(field: SettingsField, value: FieldInput, settings: Subscription
 export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory),
   root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep),
   pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig, kuaishou = createKuaishouSettings(directory), jike = createJikeSettings(directory)) {
-  const config = createSubscriptionConfig(directory, lockFile)
+  const config = createSubscriptionConfig(directory, lockFile, root)
   const officialLinks = createOfficialLinkSettings(directory, root)
   const summary = createSummaryModel({ directory, root })
   const summaryFields = [

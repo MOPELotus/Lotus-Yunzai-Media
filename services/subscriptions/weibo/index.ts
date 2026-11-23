@@ -88,14 +88,17 @@ function clean(text: unknown, limit: number) {
 }
 
 function contentOf(post: WeiboPost) {
-  const html = post.longText?.longTextContent || post.text
+  return textOf(post.longText?.longTextContent || post.text, 131_072, 16_000)
+}
+
+function textOf(html: unknown, inputLimit: number, outputLimit: number) {
   if (typeof html !== "string") return ""
-  const $ = load(html.slice(0, 131_072), {}, false)
+  const $ = load(html.slice(0, inputLimit), {}, false)
   $("script, style, template, noscript, iframe").remove()
   $("br").replaceWith(() => "\n")
   $("p, div").each((_, node) => { $(node).append("\n") })
   $("img").replaceWith((_, node) => $("<span>").text(clean($(node).attr("alt"), 80)))
-  return clean($.root().text(), 16_000)
+  return clean($.root().text(), outputLimit)
 }
 
 function imageUrl(value: unknown) {
@@ -237,6 +240,71 @@ export async function fetchPublicWeiboPost({ id, uid }: WeiboPostIdentity, signa
   }
 }
 
+interface WeiboCommentPayload {
+  id?: unknown
+  idstr?: unknown
+  user?: WeiboUser
+  text?: unknown
+  like_count?: unknown
+  created_at?: unknown
+  source?: unknown
+  status?: WeiboPost
+}
+
+export interface WeiboPublicComment {
+  readonly author: string
+  readonly text: string
+  readonly likes?: string
+  readonly createdAt?: number
+  readonly source?: string
+}
+
+export async function fetchPublicWeiboComments(mid: string, signal?: AbortSignal,
+  request: NonNullable<WeiboProviderOptions["fetch"]> = globalThis.fetch): Promise<readonly WeiboPublicComment[]> {
+  if (!decimalId(mid)) return []
+  const api = new URL("https://m.weibo.cn/comments/hotflow")
+  api.search = new URLSearchParams({ id: mid, mid, max_id_type: "0" }).toString()
+  const timeout = AbortSignal.timeout(5_000)
+  const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
+  try {
+    deadline.throwIfAborted()
+    const response = await request(api, { method: "GET", credentials: "omit", redirect: "manual", signal: deadline,
+      headers: { Accept: "application/json", Referer: detailRoot + mid, "X-Requested-With": "XMLHttpRequest", "User-Agent": "Lotus-Yunzai" } })
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {})
+      return []
+    }
+    const envelope: { ok?: unknown; data?: { data?: unknown; status?: WeiboPost } } | null =
+      JSON.parse(await readText(response, 512 * 1024))
+    deadline.throwIfAborted()
+    const parent = postId(envelope?.data?.status)
+    if (envelope?.ok !== 1 || !Array.isArray(envelope.data?.data) || (parent && parent !== mid)) return []
+    const seen = new Set<string>()
+    const comments: WeiboPublicComment[] = []
+    for (const value of envelope.data.data) {
+      if (!record(value)) continue
+      const row = value as WeiboCommentPayload
+      const id = decimalId(row.idstr) ?? decimalId(row.id)
+      const status = postId(row.status)
+      if (!id || seen.has(id) || (status && status !== mid)) continue
+      const author = clean(row.user?.screen_name, 80)
+      const text = textOf(row.text, 16_384, 600).replace(/\n{2,}/gu, "\n").split("\n")
+      const content = text.length > 6 ? text.slice(0, 6).join("\n") + "…" : text.join("\n")
+      if (!author || !content) continue
+      const createdAt = publishedAt(row.created_at)
+      seen.add(id)
+      comments.push({ author, text: content, likes: publicCount(row.like_count),
+        createdAt: createdAt && createdAt <= 8_640_000_000_000 ? createdAt : undefined,
+        source: textOf(row.source, 1024, 80) || undefined })
+      if (comments.length === 20) break
+    }
+    return comments
+  } catch {
+    signal?.throwIfAborted()
+    return []
+  }
+}
+
 function completePost(post: DynamicPost, raw: WeiboPost | undefined, needs: DetailNeeds | undefined) {
   if (!raw || !needs || !samePost(raw, post)) return post
   const content = needs.text ? contentOf(raw) : ""
@@ -248,7 +316,7 @@ function completePost(post: DynamicPost, raw: WeiboPost | undefined, needs: Deta
   }
 }
 
-async function readText(response: Response) {
+async function readText(response: Response, maxBytes = 4 * 1024 * 1024) {
   const reader = response.body?.getReader()
   if (!reader) throw new Error("微博接口没有返回内容。")
   try {
@@ -259,7 +327,7 @@ async function readText(response: Response) {
       const { value, done } = await reader.read()
       if (done) return raw + decoder.decode()
       bytes += value.byteLength
-      if (bytes > 4 * 1024 * 1024) throw new Error("微博公开接口响应过大。")
+      if (bytes > maxBytes) throw new Error("微博公开接口响应过大。")
       raw += decoder.decode(value, { stream: true })
     }
   } finally {

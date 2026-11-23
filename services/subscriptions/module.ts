@@ -38,6 +38,7 @@ interface SubscriptionOptions {
   now?: () => number
   renderHelp?: () => Promise<MessageReply>
   fetchWeiboPost?: Parameters<typeof createWeiboPreview>[0]["fetchPost"]
+  fetchWeiboComments?: Parameters<typeof createWeiboPreview>[0]["fetchComments"]
 }
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -93,7 +94,7 @@ function display(provider: SubscriptionProvider, items: readonly SubscriptionRou
 
 export async function createSubscriptionModule(services: SubscriptionServices, { providers, directory=dataDirectory, shared,
   getRedis=()=>(globalThis as { redis?: SubscriptionRedis }).redis, render, now,
-  renderHelp=renderSubscriptionHelp, fetchWeiboPost }: SubscriptionOptions = {}) {
+  renderHelp=renderSubscriptionHelp, fetchWeiboPost, fetchWeiboComments }: SubscriptionOptions = {}) {
   const weiboSession = subscriptionSession("weibo", directory, getRedis)
   const config = createSubscriptionConfig(directory,services.lockFile)
   shared ??= biliSharedSession({ enabled: async () => (await config.settings("bilibili")).sharedBiliLogin })
@@ -105,7 +106,8 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
     directory, lockFile: services.lockFile, shared,
     setShared: (enabled: boolean, signal?: AbortSignal) => config.editSettings("bilibili", () => ({ sharedBiliLogin: enabled }), signal) })
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
-  const weiboPreview = createWeiboPreview({ settings: () => config.settings("weibo"), signal: services.signal, fetchPost: fetchWeiboPost, render })
+  const weiboPreview = createWeiboPreview({ settings: () => config.settings("weibo"), signal: services.signal,
+    fetchPost: fetchWeiboPost, fetchComments: fetchWeiboComments, render })
   const dispatch = createSubscriptionDelivery({ providers:sources,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
   const authorVideos = sources.bilibili && createAuthorVideoModule({

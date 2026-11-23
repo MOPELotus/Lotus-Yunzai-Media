@@ -49,7 +49,7 @@ Lotus-Yunzai 的 B 站、抖音、动态订阅和点歌模块。直接发送视�
 | `default_platform` | `netease`，还可选 `qq/kugou/kuwo/migu/soda` |
 | `quality` | `standard` |
 | `search_limit` | `10` |
-| `session_timeout_ms` | `120000` |
+| `session_timeout_ms` | 普通点歌默认 `120000`，多选默认 `180000` |
 | `download_timeout_ms` | `180000` |
 | `max_size_mb` | `128` |
 

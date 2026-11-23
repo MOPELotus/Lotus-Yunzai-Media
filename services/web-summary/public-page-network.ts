@@ -82,6 +82,21 @@ function endpointHost(value: unknown) {
   }
 }
 
+export function parsePublicPageDenyHosts(value: unknown): string[] | undefined {
+  if (Array.isArray(value) && value.length <= 32 &&
+      value.every(item => typeof item === "string" && dnsName(normalizeHost(item)))) return [...value]
+}
+
+export function parsePublicPageDenyNetworks(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > 64 || !value.every(item => typeof item === "string")) return
+  try {
+    blocks(value)
+    return [...value]
+  } catch {
+    return
+  }
+}
+
 export async function deploymentPublicPageControls(modelUrl?: string, root = installation): Promise<PublicPageControls> {
   const [server, global, bot] = await Promise.all([
     readServerSettings(root, process.env), readLotusGlobalConfig(root), readLocalConfig(root, "bot"),
@@ -91,14 +106,12 @@ export async function deploymentPublicPageControls(modelUrl?: string, root = ins
     mapping(global.coin_shop).public_url, transfer.publicOrigin, modelUrl]
   const hosts = hostValues.map(endpointHost).filter((host): host is string => Boolean(host))
   const extra = mapping(global.web_summary)
-  const { deny_hosts, deny_networks } = extra
-  if ((deny_hosts !== undefined && (!Array.isArray(deny_hosts) || deny_hosts.length > 32 ||
-      deny_hosts.some(value => typeof value !== "string" || !dnsName(normalizeHost(value))))) ||
-      (deny_networks !== undefined && (!Array.isArray(deny_networks) || deny_networks.length > 64 ||
-      deny_networks.some(value => typeof value !== "string")))) throw new Error("网页摘要的出站排除配置无效。")
-  return { hosts: [...hosts, normalizeHost(server.hostname), normalizeHost(hostname()), ...(deny_hosts ?? []).map(normalizeHost)],
+  const denyHosts = extra.deny_hosts === undefined ? [] : parsePublicPageDenyHosts(extra.deny_hosts)
+  const denyNetworks = extra.deny_networks === undefined ? [] : parsePublicPageDenyNetworks(extra.deny_networks)
+  if (!denyHosts || !denyNetworks) throw new Error("网页摘要的出站排除配置无效。")
+  return { hosts: [...hosts, normalizeHost(server.hostname), normalizeHost(hostname()), ...denyHosts.map(normalizeHost)],
     networks: [...Object.values(networkInterfaces()).flatMap(entries => (entries ?? []).map(entry => entry.cidr ?? entry.address)),
-      ...(deny_networks ?? [])] }
+      ...denyNetworks] }
 }
 
 function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {

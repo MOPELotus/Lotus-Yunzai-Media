@@ -14,6 +14,7 @@ import { loadBiliPgcSettings } from "./services/bilibili/pgc.ts"
 import { biliPgcQualities } from "./services/bilibili/pgc-playback.ts"
 import { createOfficialLinkSettings, officialLinkToggles, officialLinkTrustFields, parseTrustedOfficialLinkUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
 import { createSummaryModel, parseSummaryModelPatch } from "./services/official-links/summary-model.ts"
+import { publicPageExclusions, readPublicPageExclusions, savePublicPageExclusions } from "./services/web-summary/public-page-settings.ts"
 import { createJikeSettings, jikeFields } from "./services/jike/settings.ts"
 import { createPublicShareSettings } from "./services/public-share/settings.ts"
 import { xiguaFields } from "./services/xigua/preview.ts"
@@ -242,6 +243,10 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
     { key: "summaryModel", label: "网页总结模型名", component: "Input" },
     { key: "summaryApiKey", label: "网页总结 API 密钥", component: "InputPassword" },
   ] as const
+  const exclusionFields = [
+    { key: "deny_hosts", label: "网页摘要排除域名", bottomHelpMessage: "每行一个域名，最多 32 个。请输入完整域名，请勿填写网址或通配符。" },
+    { key: "deny_networks", label: "网页摘要排除 IP 网段", bottomHelpMessage: "每行一个 IPv4、IPv6 地址或 CIDR 网段，最多 64 项。留空时仍会排除内置受管地址。" },
+  ] as const
   const publicShares = [
     { id: "pipixia", name: "皮皮虾", fields: pipixiaFields, store: pipixia },
     { id: "kuaishou", name: "快手", fields: kuaishouFields, store: kuaishou },
@@ -296,7 +301,9 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         field: `officialLinks.${key}`, label: `${label} 信任 QQ`, component: "Select",
         componentProps: { mode: "tags" }, bottomHelpMessage: "留空将只允许主人使用此来源。"
       })),
-      ...summaryFields.map(({ key, ...schema }) => ({ ...schema, field: `officialLinks.${key}` }))],
+      ...summaryFields.map(({ key, ...schema }) => ({ ...schema, field: `officialLinks.${key}` })),
+      ...exclusionFields.map(({ key, ...schema }) => ({ ...schema, field: `web_summary.${key}`,
+        component: "Select", componentProps: { mode: "tags" } }))],
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
@@ -307,14 +314,15 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           }
           return [id, values]
         }))
-        const [videos, shareSettings, tools, officialLinkSettings, summarySettings] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
+        const [videos, shareSettings, tools, officialLinkSettings, summarySettings, webSummaryExclusions] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
           const settings = await loadPublicShareConfig(site, root)
           return [site, { enable: settings.enable, private_preview: settings.privatePreview }]
-        })), loadConfig().then(config => config.tools), officialLinks.settings(), summary.settings()])
+        })), loadConfig().then(config => config.tools), officialLinks.settings(), summary.settings(), readPublicPageExclusions(root)])
         const { summaryApiKeyConfigured, ...summaryInput } = summarySettings
         const shares = await Promise.all(publicShares.map(async share => [share.id, await share.store.settings(tools)]))
         return { ...Object.fromEntries([...entries, ...shareSettings, ...shares]),
           officialLinks: { ...officialLinkSettings, ...summaryInput, ...(summaryApiKeyConfigured && { summaryApiKey: "configured" }) },
+          ...(webSummaryExclusions && { web_summary: webSummaryExclusions }),
           officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
@@ -361,6 +369,14 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           return Object.hasOwn(values, field) && (!edited || edited.has(field)) ? [[key, values[field]]] : []
         })))
         if (!summaryPatch) return Result.error("请填写有效的网页总结配置。", 422)
+        const exclusionPatch: Partial<Record<keyof typeof publicPageExclusions, string[]>> = {}
+        for (const { key, label } of exclusionFields) {
+          const field = `web_summary.${key}`
+          if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
+          const entries = publicPageExclusions[key](values[field])
+          if (!entries) return Result.error(`请填写有效的${label}。`, 422)
+          exclusionPatch[key] = entries
+        }
         const pgcPatch: Record<string, boolean | number> = {}
         for (const key of ["biliPgcAuto", "biliPgcQuality", "biliPgcDuration"] as const) {
           const field = `bilibili.${key}`
@@ -386,6 +402,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           }
           if (selected.length) changes.set(id, selected)
         }
+        if (Object.keys(exclusionPatch).length) await savePublicPageExclusions(root, exclusionPatch)
         for (const [id, selected] of changes) {
           await config.editSettings(id, (settings) => Object.fromEntries(selected
             .filter(({ field, value }) => changed(field, value, settings))

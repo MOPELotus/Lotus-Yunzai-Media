@@ -1,6 +1,6 @@
 import { loadImage, type CanvasRenderingContext2D, type Image } from "skia-canvas"
 import QRCode from "qrcode"
-import { ImageSizeLimitError } from "@lotus-yunzai/skia"
+import { ImageSizeLimitError, nativeImageRasterScale } from "@lotus-yunzai/skia"
 import { drawMediaNewsImage, drawMediaNewsText, mediaNewsColors, renderMediaNewsPages, type RenderOptions } from "../../core/render/source-cards.ts"
 
 import type { MessageReply } from "../../../../lib/messages.ts"
@@ -165,7 +165,7 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
 
   const label = `${provider.label} · ${category(provider, post)}`
   const metadata = time.format(post.createdAt * 1000)
-  const render = (scale: 2 | 4) => renderMediaNewsPages({
+  const render = (scale: 1 | 2 | 4) => renderMediaNewsPages({
     owner: post.author, title: post.title || label, byline: post.title ? label : "", metadata, avatar,
   }, layout => {
     const x = layout.x
@@ -240,15 +240,16 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
     mode: subscriptionRenderMode(),
     signal,
   })
-  let pages = await render(4).catch(error => {
-    if (!(error instanceof ImageSizeLimitError)) throw error
+  const scale = nativeImageRasterScale()
+  let pages = await render(scale).catch(error => {
+    if (scale === 1 || !(error instanceof ImageSizeLimitError)) throw error
   })
   const oversized = (page: { readonly png: Uint8Array }) => page.png.byteLength > inlineImageByteLimit
-  if (!pages || pages.some(oversized)) {
+  if (scale === 4 && (!pages || pages.some(oversized))) {
     signal?.throwIfAborted()
     pages = await render(2)
   }
-  if (pages.some(oversized)) throw new ImageSizeLimitError("动态图片超过当前会话大小上限。")
+  if (!pages || pages.some(oversized)) throw new ImageSizeLimitError("动态图片超过当前会话大小上限。")
   return pages.map(page => {
     onRender?.(page.engine)
     return page.png

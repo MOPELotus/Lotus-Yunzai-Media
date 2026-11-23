@@ -243,7 +243,7 @@ class SourceCanvas{
     ctx.imageSmoothingEnabled=true
     ctx.imageSmoothingQuality='high'
     for(const draw of this.commands)draw(ctx,images,{top,bottom})
-   },options.mode??renderMode())
+   },options.mode??renderMode(),{renderScale:scale})
    options.onRender?.(rendered.engine)
    pages.push(rendered)
   }

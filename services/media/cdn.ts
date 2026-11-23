@@ -5,7 +5,29 @@ const miyousheVideoDomains = new Set(["prod-vod-sign.miyoushe.com", "prod-vod-si
 const acfunVideoHosts = new Set(["tx-safety-video.acfun.cn", "ali-safety-video.acfun.cn"])
 const acfunImageHosts = new Set(["tx-free-imgs.acfun.cn"])
 export type MusicVideoCdn = "netease-mv" | "kuwo-mv" | "qq-mv" | "kugou-mv"
-export type CdnKind = "image" | "miyoushe-video" | MusicVideoCdn | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video" | "weixin-channels-image"
+const musicCoverSources = {
+  netease: [/^[a-z0-9-]+\.music\.126\.net$/u, /^\/[A-Za-z0-9=_-]+\/\d+\.(?:jpe?g|png|webp)$/iu],
+  qq: [/^y\.gtimg\.cn$/u, /^\/music\/photo_new\//u],
+  kugou: [/^img(?:e|essl)\.kugou\.com$/u, /^\/stdmusic\//u],
+  kuwo: [/^img\d+\.kuwo\.cn$/u, /^\/star\/albumcover\//u],
+  migu: [/^d\.musicapp\.migu\.cn$/u, /^\/data\/oss\/resource\//u],
+  bilibili: [/^i[0-2]\.hdslb\.com$/u, /^\/bfs\/archive\//u],
+  soda: [/^p\d+-luna\.douyinpic\.com$/u, /^\/img\/tos-cn-[a-z0-9-]+\//u],
+} as const
+export type MusicCoverPlatform = keyof typeof musicCoverSources
+export type MusicCoverCdn = `music-cover-${MusicCoverPlatform}`
+export type CdnKind = "image" | "miyoushe-video" | MusicVideoCdn | MusicCoverCdn | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video" | "weixin-channels-image"
+
+export function musicCoverSource(value: string | undefined, platform: string) {
+  if (!value || value.length > 2048 || !Object.hasOwn(musicCoverSources, platform)) return
+  const url = URL.parse(value)
+  const [host, path] = musicCoverSources[platform as MusicCoverPlatform]
+  if (!url || !["https:", "http:"].includes(url.protocol) || url.port || url.username || url.password || url.hash ||
+      !host.test(url.hostname) || !path.test(url.pathname)) return
+  url.protocol = "https:"
+  if (platform === "netease") url.searchParams.set("param", "200y200")
+  return { url, cdn: `music-cover-${platform as MusicCoverPlatform}` as const }
+}
 
 function acfunCdnUrl(value: string | URL, hosts: ReadonlySet<string>) {
   const url = URL.parse(String(value))
@@ -112,6 +134,11 @@ export type MediaFetch = (url: string, options?: MediaRequest) => Promise<Respon
 export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, options: MediaRequest, kind?: CdnKind) {
   const domains = kind === "image" ? imageDomains : douyinDomains
   function target(value: string | URL) {
+    if (kind?.startsWith("music-cover-")) {
+      const cover = musicCoverSource(String(value), kind.slice("music-cover-".length))
+      if (!cover) throw new Error("图片地址不属于原平台封面 CDN。")
+      return cover.url
+    }
     if (kind === "acfun-video" || kind === "acfun-image") {
       const url = kind === "acfun-video" ? acfunVideoUrl(value) : acfunImageUrl(value)
       if (!url || kind === "acfun-video" && !/\.(?:m3u8|ts)$/u.test(url.pathname)) throw new Error("媒体地址不属于 AcFun CDN。")

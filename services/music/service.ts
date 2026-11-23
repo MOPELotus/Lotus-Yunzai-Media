@@ -30,7 +30,8 @@ export type MusicTrack = {
   readonly name: string
   readonly artists?: readonly { readonly name: string; readonly avatar_url?: string }[]
   readonly album?: { readonly cover_url?: string }
-  readonly extensions?: { readonly url?: string; readonly album_audio_id?: string | number; readonly hash?: string; readonly numeric_id?: string }
+  readonly extensions?: { readonly url?: string; readonly album_audio_id?: string | number; readonly hash?: string; readonly numeric_id?: string;
+    readonly video_cover_url?: string; readonly video_duration_ms?: number }
   readonly duration_ms?: number
   readonly episode_id?: string
 }

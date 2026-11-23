@@ -1,10 +1,11 @@
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { RecallOwnReply, ReplyOptions } from "../../../../lib/messages.ts"
+import { nativeImageRasterScale } from "@lotus-yunzai/skia"
 import { join } from "node:path"
 import { enablePartnerAfterLogin } from "../../../../lib/panel-partner.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
-import { renderStatusCard, renderTemplate } from "../../core/render/service.ts"
+import { renderMusicList, renderStatusCard, renderTemplate } from "../../core/render/service.ts"
 import { formatLocalDateTime } from "../../core/time.ts"
 import { safeMediaName, sendMediaFile } from "../media/files.ts"
 import { downloadMedia } from "../media/download.ts"
@@ -18,6 +19,8 @@ import { openOwnQqStream, openPublicQqStream, ownMusicStatus, readQqCollection, 
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicStream, type MusicTrack, type MusicConfig } from "./service.ts"
 import { findMusicShare, parseMusicShare, resolveMusicShare } from "./share-link.ts"
 import { externalMusicLabels, readExternalMusicShare } from "./external-share.ts"
+import { musicLength, musicMenuCovers, type MusicMenuRow } from "./menu.ts"
+import type { MediaFetch } from "../media/cdn.ts"
 
 const aliases: Readonly<Record<string, string>> = {
   网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq",
@@ -102,6 +105,8 @@ interface Services {
   readonly openMusic?: typeof defaultOpenMusic
   readonly fetchMusicShare?: typeof globalThis.fetch
   readonly renderMusicShare?: typeof renderStatusCard
+  readonly fetchMusicCover?: MediaFetch
+  readonly renderMusicMenu?: typeof renderMusicList
 }
 
 const musicNames: Readonly<Record<string, string>> = { ...MUSIC_PLATFORMS, bilibili: "B 站" }
@@ -180,7 +185,7 @@ async function renderPartnerReport(title: string, report: PartnerReport, userId?
 }
 
 export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultOpenMusic, fetchMusicShare,
-  renderMusicShare = renderStatusCard }: Services) {
+  renderMusicShare = renderStatusCard, fetchMusicCover, renderMusicMenu = renderMusicList }: Services) {
   const sessions = new Map<string, Session>()
   const pendingSearches = new Map<string, { readonly multiple: boolean }>()
   const selections = new Map<string, ReissueSelection>()
@@ -526,6 +531,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         return
       }
       const api = session.api
+      const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+      const active = connection ? AbortSignal.any([moduleSignal, connection]) : moduleSignal
       if (!session.multiple && session.platform === "netease" && session.page === 1) session.cloud = await cloud.search(context, api, session.keyword)
       const limit = session.multiple ? multiplePageSize : api.config.search_limit
       const start = (session.page - 1) * limit
@@ -534,10 +541,10 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const offset = Math.max(0, start - matching.length)
       const remaining = limit - requestedCloud.length
       const search = !session.podcast && remaining > 0 ? await api.search(session.platform, session.keyword, session.page,
-        { limit: remaining, offset, signal: moduleSignal }) : undefined
+        { limit: remaining, offset, signal: active }) : undefined
       const episodes = session.podcast && remaining > 0 ? await api.searchEpisodes(session.keyword,
-        { limit: remaining, offset, signal: moduleSignal }) : []
-      if (sessions.get(key) !== session || moduleSignal.aborted) return
+        { limit: remaining, offset, signal: active }) : []
+      if (sessions.get(key) !== session || active.aborted) return
       const previous = session.multiple ? session.tracks ?? [] : []
       let tracks = [...requestedCloud.map(item => item.track), ...search?.tracks ?? []]
       if (session.multiple) {
@@ -553,9 +560,22 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       session.tracks = [...previous, ...tracks]
       session.episodes = episodes
       session.expires = Date.now() + session.timeoutMs
-      const results = [
-        ...tracks.map((track, index) => `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}${index < requestedCloud.length ? " · 云盘" : ""}`),
-        ...episodes.map(episode => `${episode.name} · ${episode.creator || "未知主播"} · 播客`),
+      const results: MusicMenuRow[] = [
+        ...tracks.map((track, index) => {
+          const cloud = index < requestedCloud.length
+          const video = track.platform === "bilibili"
+          const length = musicLength(video ? track.extensions?.video_duration_ms : track.duration_ms)
+          return {
+            number: previous.length + index + 1, name: track.name,
+            artist: track.artists?.map(artist => artist.name).join(" / ") || (video ? "未知作者" : "未知歌手"),
+            source: cloud ? "网易云盘" : video ? "B 站视频" : musicNames[track.platform],
+            length: video && length ? "总长 " + length : length,
+            ...(!cloud && { coverUrl: video ? track.extensions?.video_cover_url : track.album?.cover_url, coverPlatform: track.platform }),
+          }
+        }),
+        ...episodes.map((episode, index) => ({ number: previous.length + tracks.length + index + 1, name: episode.name,
+          artist: episode.creator || "未知主播", source: "网易云播客", length: musicLength(episode.duration),
+          coverUrl: episode.cover, coverPlatform: "netease" })),
       ]
       const choiceHint = session.multiple ? "回复任一已显示的数字选一首，可反复选择。#下一页 翻页，#取消 结束。"
         : session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。"
@@ -566,14 +586,20 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         : "没有搜索结果，可更换关键词或平台。"
       const title = session.multiple ? `${musicNames[session.platform]}多选点歌 · 第 ${session.page} 页`
         : session.podcast ? "网易云播客" : musicNames[session.platform] + "点歌"
-      const image = await renderStatusCard({ title, subtitle: session.keyword,
-        badge: `第 ${session.page} 页`, userId: context.user_id, message,
-        items: results.map((value, index) => ({ label: String(previous.length + index + 1), value })),
-      }, requestedCloud.length ? undefined : { saveId: `media-music-search-${context.user_id}` }).catch(() => undefined)
-      if (sessions.get(key) === session) {
+      const musicRows = await musicMenuCovers(results, active, fetchMusicCover)
+      if (sessions.get(key) !== session || active.aborted) return
+      const card = { title, subtitle: session.keyword, badge: `第 ${session.page} 页`, message, musicRows }
+      const limitBytes = context.inlineImageByteLimit ?? maxInlineBytes
+      const renderScale = Number(Bun.env.LOTUS_RENDER_SCALE ?? nativeImageRasterScale())
+      let image = await renderMusicMenu(card, { renderScale }).catch(() => undefined)
+      if (image && image.length > limitBytes && renderScale > 2 && !active.aborted) {
+        image = await renderMusicMenu(card, { renderScale: 2 }).catch(() => undefined)
+      }
+      if (sessions.get(key) === session && !active.aborted) {
         if (requestedCloud.length && session.cloud) await cloud.assertVisible(context, api, session.cloud.binding)
         const options = menuReplyOptions(key, session)
-        await imageReply(context, image, [message, ...results.map((value, index) => `${previous.length + index + 1}. ${value}`)].join("\n"), options)
+        await imageReply(context, image && image.length <= limitBytes ? image : undefined, [message, ...results.map(row =>
+          row.number + ". " + [row.name, row.artist, row.source, row.length].filter(Boolean).join(" · "))].join("\n"), options)
       }
     } finally {
       session.loading = false

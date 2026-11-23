@@ -6,7 +6,7 @@ import { fetchImageBytes } from "./image.ts"
 import { plainGameText } from "./plain-text.ts"
 import type { ArticleBlock } from "../../services/media/message.ts"
 
-export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "acfun-info" | "pipixia-info" | "kuaishou-info" | "weixin-channels-info" | "article"
+export type SourceTemplate = "status" | "music-list" | "bilibili-info" | "douyin-info" | "acfun-info" | "pipixia-info" | "kuaishou-info" | "weixin-channels-info" | "article"
 
 export interface RenderOptions {
  readonly mode?: Parameters<typeof renderPng>[3]
@@ -17,6 +17,15 @@ export interface RenderOptions {
 
 type StatusRow = string | { readonly label?: string; readonly title?: string; readonly value?: unknown; readonly body?: unknown }
 
+export interface MusicListRow {
+ readonly number: number
+ readonly name: string
+ readonly artist: string
+ readonly source?: string
+ readonly length?: string
+ readonly cover?: Image
+}
+
 export interface SourceCard {
  readonly title?: string
  readonly subtitle?: string
@@ -24,6 +33,7 @@ export interface SourceCard {
  readonly userId?: number | string
  readonly badge?: string
  readonly items?: readonly StatusRow[]
+ readonly musicRows?: readonly MusicListRow[]
  readonly generatedAt?: string
  readonly avatar?: string
  readonly owner?: string
@@ -54,6 +64,7 @@ interface TextOptions {
  readonly minSize?: number
  readonly shadow?: boolean
  readonly singleLine?: boolean
+ readonly ellipsis?: boolean
  readonly literal?: boolean
 }
 
@@ -168,10 +179,20 @@ class SourceCanvas{
   const font=options.font||TEXT
   let lines
   if(options.singleLine){
-   const line=plainGameText(value).replace(/\s*\n\s*/g,' ')
-   lines=[line]
+   let line=plainGameText(value).replace(/\s*\n\s*/g,' ')
    this.ctx.font=`${size}px ${font}`
    while(this.ctx.measureText(line).width>width&&size>(options.minSize||10)){size-=.5;this.ctx.font=`${size}px ${font}`}
+   if(options.ellipsis&&this.ctx.measureText(line).width>width){
+    const points=Array.from(line)
+    let start=0,end=points.length
+    while(start<end){
+     const middle=Math.ceil((start+end)/2)
+     if(this.ctx.measureText(points.slice(0,middle).join('')+'…').width<=width)start=middle
+     else end=middle-1
+    }
+    line=points.slice(0,start).join('')+'…'
+   }
+   lines=[line]
   }else lines=options.literal ? this.wrap(String(value ?? ''),width,size,font) : this.lines(value,width,size,font)
   const leading=options.leading||size*1.5
   this.commands.push(ctx=>drawMediaNewsText(ctx,lines,x,y,width,size,color,options))
@@ -329,13 +350,44 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
 
 export async function renderSourceCard(template: SourceTemplate,data: SourceCard={},options: RenderOptions={}){
  await init()
- const p=new SourceCanvas(template==="status"?600:900)
+ const p=new SourceCanvas(template==="status"||template==="music-list"?600:900)
  if(template==="status"){
   elemental(p)
   p.log(data.title||'Lotus-Yunzai',data.items||[],[data.subtitle,data.message].filter(Boolean).join('\n'))
+ }else if(template==="music-list"){
+  elemental(p)
+  musicList(p,data)
  }else{
   await news(p,data,template)
  }
  newsFooter(p,data.generatedAt)
  return p.render(options)
+}
+
+function musicList(p: SourceCanvas, data: SourceCard) {
+ const rows = data.musicRows ?? []
+ p.rect(12, p.y, p.width - 24, 70, 'rgba(0,0,0,.65)', 10)
+ p.text(data.title, 28, p.y + 12, 490, 25, GOLD, { singleLine: true, minSize: 16 })
+ if (data.badge) p.text(data.badge, 500, p.y + 20, 68, 14, MUTED, { align: 'right' })
+ if (data.subtitle) {
+  p.clip(28, p.y + 46, 540, 19, 0)
+  p.text(data.subtitle, 28, p.y + 46, 535, 15, MUTED, { singleLine: true, ellipsis: true, minSize: 13 })
+  p.restore()
+ }
+ p.y += 80
+ for (const row of rows) {
+  const y = p.y
+  p.rect(12, y, p.width - 24, 52, 'rgba(0,0,0,.55)', 8)
+  p.text(row.number, 15, y + 17, 39, 16, GOLD, { align: 'center' })
+  p.rect(60, y + 5, 42, 42, 'rgba(211,188,142,.16)', 6)
+  if (row.cover) p.image(row.cover, 60, y + 5, 42, 42, { radius: 6, cover: true })
+  p.clip(115, y, 341, 52, 0)
+  p.text(row.name, 115, y + 5, 335, 19, WHITE, { singleLine: true, ellipsis: true, minSize: 15 })
+  p.text(row.artist, 115, y + 30, 335, 14, MUTED, { singleLine: true, ellipsis: true, minSize: 12 })
+  p.restore()
+  if (row.source) p.text(row.source, 464, y + 7, 105, 14, GOLD, { align: 'right', singleLine: true })
+  if (row.length) p.text(row.length, 464, y + 30, 105, 14, MUTED, { align: 'right', singleLine: true })
+  p.y += 57
+ }
+ if (data.message) p.y += p.text(data.message, 28, p.y + 7, 540, 14, MUTED, { leading: 20 }) + 15
 }

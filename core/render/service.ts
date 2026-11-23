@@ -22,3 +22,7 @@ export async function renderTemplate(template: "qr-login" | SourceTemplate, data
 export function renderStatusCard(data: SourceCard, options?: RenderOptions) {
   return renderTemplate("status", data, options)
 }
+
+export function renderMusicList(data: SourceCard, options?: RenderOptions) {
+  return renderTemplate("music-list", data, options)
+}

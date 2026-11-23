@@ -8,6 +8,8 @@ interface Video {
   ref?: string
   id?: string
   title?: string
+  cover_url?: string
+  duration_ms?: number
   creators?: { name?: string }[]
   extensions?: { bvid?: string; first_cid?: number | string; paid?: boolean; pay?: boolean; ugc_pay?: boolean }
 }
@@ -40,7 +42,7 @@ export function isBilibiliAudioCdn(url: URL, partRef?: string) {
     new RegExp(`/${cid}/${cid}(?:_[A-Za-z0-9-]+)?\\.(?:m4s|m4a)$`, "u").test(url.pathname))
 }
 
-export async function searchBilibiliAudio(api: VideoApi, keyword: string, limit: number, offset: number, signal?: AbortSignal) {
+export async function searchBilibiliAudio(api: VideoApi, keyword: string, limit: number, offset: number, signal?: AbortSignal): Promise<MusicTrack[]> {
   const query = new URLSearchParams({ platform: "bilibili", type: "video", q: keyword, limit: String(limit), offset: String(offset) })
   const results = await api.request<{ type: string; data?: Video }[]>(`/v1/search?${query}`, { signal, redirect: "error" })
   if (!Array.isArray(results)) throw new Error("B 站视频搜索结果无法核实。")
@@ -52,7 +54,7 @@ export async function searchBilibiliAudio(api: VideoApi, keyword: string, limit:
     if (!name) return []
     const artists = Array.isArray(data.creators) ? data.creators.map(creator => ({ name: text(creator.name) })).filter(creator => creator.name) : []
     return [{ platform: "bilibili", ref: data.ref, id: bvid, name, artists,
-      extensions: { url: `https://www.bilibili.com/video/${bvid}` } }] satisfies MusicTrack[]
+      extensions: { url: `https://www.bilibili.com/video/${bvid}`, video_cover_url: data.cover_url, video_duration_ms: data.duration_ms } }] satisfies MusicTrack[]
   })
 }
 

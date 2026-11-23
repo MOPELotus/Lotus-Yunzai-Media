@@ -31,7 +31,7 @@ export interface SourceCard {
  readonly id?: string
  readonly type?: string
  readonly desc?: string
- readonly cover?: string
+ readonly cover?: string | Buffer
  readonly image?: string
  readonly blocks?: readonly ArticleBlock[]
  readonly duration?: number
@@ -230,12 +230,15 @@ class SourceCanvas{
  }
 }
 function elemental(p: SourceCanvas){p.rect(0,0,p.width,100000,'#243344');p.commands.push((ctx,images)=>{const img=images.get(background);if(img)ctx.drawImage(img,0,0,p.width,p.height)});p.refs.add(background)}
-async function newsImage(p: SourceCanvas,src: string | undefined){
+async function newsImage(p: SourceCanvas,src: string | Buffer | undefined){
  if(!src)return
- const img=await getImage(src)
- if(!img){p.image(src,30,p.y,p.width-60,200);p.y+=215;return}
+ const img=typeof src==="string"?await getImage(src):await loadImage(src).catch(()=>null)
+ if(!img){
+  if(typeof src==="string"){p.image(src,30,p.y,p.width-60,200);p.y+=215}
+  return
+ }
  const w=p.width-60,h=Math.min(3200,w*img.height/img.width)
- p.image(src,30,p.y,w,h,{radius:14});p.y+=h+20
+ p.image(typeof src==="string"?src:img,30,p.y,w,h,{radius:14});p.y+=h+20
 }
 function mediaStats(data: SourceCard,template: SourceTemplate){
  const s=data.stat||{},format=(n: number | undefined)=>n===undefined?'未记录':damageNumber(n)
@@ -302,7 +305,7 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
   title:data.title||'作品信息',
   byline:article?`第 ${data.page||1} 页`:data.id||'',
   avatar:data.avatar,
-  metadata:article?undefined:[data.type==='live'?'直播':data.type==='gallery'?'图集':data.type==='live_photo'?'动态图片':data.type==='article'?'文章':'视频',data.duration?`${Math.floor(data.duration/60)}分${Math.floor(data.duration%60)}秒`:'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?`${data.media.length} 个媒体项`:''].filter(Boolean).join(' · '),
+  metadata:article||data.type==="public-link"?undefined:[data.type==='live'?'直播':data.type==='gallery'?'图集':data.type==='live_photo'?'动态图片':data.type==='article'?'文章':'视频',data.duration?`${Math.floor(data.duration/60)}分${Math.floor(data.duration%60)}秒`:'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?`${data.media.length} 个媒体项`:''].filter(Boolean).join(' · '),
  })
  if(article){
   for(const block of data.blocks||[]){

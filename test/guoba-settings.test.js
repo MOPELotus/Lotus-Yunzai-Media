@@ -31,6 +31,7 @@ const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1
 const shareDefaults = { enable: true, private_preview: false }
 const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults }
 const pipixiaDefaults = { enable: true, private: false }
+const officialLinksDefaults = { youtube: true, youtubeMusic: true, telegram: true, private: false, trustedTelegramUsers: [] }
 const videoDefaults = { forwardMsg: true, cover: false, bh3: false, by: false, xbgd: false, groups: [], group_config: [] }
 
 test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主配置优先", async () => {
@@ -69,7 +70,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
   const data = await mkdtemp(join(tmpdir(), "lotus-media-config-"))
   try {
     const { configInfo: form } = supportGuoba(data)
-    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialLinks: officialLinksDefaults, officialVideo: videoDefaults })
     expect(existsSync(join(data, "yuki-plugin"))).toBe(false)
 
     const directory = join(data, "yuki-plugin", "config", "bilibili")
@@ -83,7 +84,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
     expect(await form.getConfigData()).toEqual({ bilibili: {
       ...biliDefaults, mergeTextPic: 0, forwardSendDynamic: 0, maxPicsForSingleMsg: 7,
-    }, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialLinks: officialLinksDefaults, officialVideo: videoDefaults })
     expect(await form.setConfigData({ "bilibili.forwardSendDynamic": 0 }, { Result })).toEqual({ ok: true })
     expect(existsSync(override)).toBe(false)
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "bilibili.maxPicsForSingleMsg": 0.5 },
@@ -103,7 +104,7 @@ test("媒体面板沿用旧默认值和配置，保存后下次推送使用覆�
     const fresh = supportGuoba(data).configInfo
     expect(await fresh.getConfigData()).toEqual({ bilibili: {
       ...biliDefaults, pushMsgMode: 0, mergeTextPic: 0, maxPicsForSingleMsg: 0,
-    }, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, weibo: weiboDefaults, ...publicShareDefaults, pipixia: pipixiaDefaults, officialLinks: officialLinksDefaults, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(true)
     expect(await fresh.setConfigData({ "bilibili.maxPicsForSingleMsg": 1 }, { Result })).toEqual({ ok: true })
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
@@ -192,7 +193,7 @@ test("锅巴保存调度设置，重启后按平台注册任务且手动任务�
       "weibo.checkDynamicCD": "  * * * * * *  " }, { Result })).toEqual({ ok: true })
     expect(await form.getConfigData()).toEqual({
       bilibili: { ...biliDefaults, pushStatus: 0, checkDynamicCD: "* * * * * *" },
-      weibo: { ...weiboDefaults, checkDynamicCD: "* * * * * *" }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults,
+      weibo: { ...weiboDefaults, checkDynamicCD: "* * * * * *" }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialLinks: officialLinksDefaults, officialVideo: videoDefaults,
     })
     for (const id of Object.keys(providers)) {
       await config.update(id, { kind: "private", bot: "99", chat: "42" }, "1234", "add", [], [], "测试号")
@@ -228,7 +229,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     )
     expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0, banWords: ["样例"],
-    }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialLinks: officialLinksDefaults, officialVideo: videoDefaults })
     expect(await form.setConfigData({ "bilibili.pushMsgMode": 0, "weibo.maxTextLengthForSingleMsg": 50001 }, { Result }))
       .toEqual({ ok: false, status: 422 })
     expect(existsSync(bilibili)).toBe(false)
@@ -253,7 +254,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     expect(await form.getConfigData()).toEqual({ bilibili: { ...biliDefaults, mergeTextPic: 0 }, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4, banWords: ["样例"],
       parseWeiboLink: 0, parseWeiboPrivate: 1,
-    }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialVideo: videoDefaults })
+    }, ...publicShareDefaults, pipixia: pipixiaDefaults, officialLinks: officialLinksDefaults, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
   } finally {
     await rm(data, { force: true, recursive: true })

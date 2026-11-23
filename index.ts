@@ -13,9 +13,11 @@ import { createMediaEnvironment } from "./services/tools/command.ts"
 import { createOfficialVideoCommands } from "./services/official-video/index.ts"
 import { createMiyoushePostCommands } from "./services/official-video/post-command.ts"
 import { createPublicShareCommands } from "./services/public-share/command.ts"
+import { createOfficialLinkPreview } from "./services/official-links/command.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
-  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0]
+  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
+  { readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal"> }
 
 type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<void> }
 
@@ -40,6 +42,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const officialVideo = createOfficialVideoCommands(services)
   const miyoushePost = createMiyoushePostCommands(services)
   const publicShare = createPublicShareCommands(services)
+  const officialLinks = createOfficialLinkPreview({ ...services.officialLinks, signal: services.signal })
   return {
     ...subscriptions,
     async dispose() {
@@ -63,7 +66,9 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       const articleFeatures = miyoushePost.features(context)
       if (articleFeatures.length) return articleFeatures
       const pipixiaFeatures = pipixia.features(context)
-      return pipixiaFeatures.length ? pipixiaFeatures : douyin.features(context)
+      if (pipixiaFeatures.length) return pipixiaFeatures
+      const shortVideoFeatures = douyin.features(context)
+      return shortVideoFeatures.length ? shortVideoFeatures : officialLinks.features(context)
     },
     async fallback(message, context) {
       if (officialVideo.matches(context.normalizedMessage)) return officialVideo.fallback(context.normalizedMessage, context)
@@ -72,7 +77,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (environment.matches(message)) return environment.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await music.fallback(message, context) ??
-        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? douyin.fallback(message, context)
+        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ??
+        await douyin.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }
 }

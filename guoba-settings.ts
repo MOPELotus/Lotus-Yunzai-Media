@@ -10,6 +10,7 @@ import { loadGlobalConfig, loadPublicShareConfig, publicShareSiteNames, type Pub
 import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
+import { createOfficialLinkSettings, officialLinkToggles, parseTrustedTelegramUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
 
 import type { SubscriptionPlatform } from "./services/subscriptions/types.ts"
@@ -222,6 +223,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
   root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep),
   pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig) {
   const config = createSubscriptionConfig(directory, lockFile)
+  const officialLinks = createOfficialLinkSettings(directory, root)
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
     configInfo: {
@@ -249,17 +251,22 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
         component: "Select", componentProps: { mode: "tags" } })),
       { component: "SOFT_GROUP_BEGIN", label: "皮皮虾" },
-      ...pipixiaFields.map(([key, label]) => ({ field: `pipixia.${key}`, label, component: "Switch" }))],
+      ...pipixiaFields.map(([key, label]) => ({ field: `pipixia.${key}`, label, component: "Switch" })),
+      { component: "SOFT_GROUP_BEGIN", label: "公开链接预览" },
+      ...officialLinkToggles.map(([key, label]) => ({ field: `officialLinks.${key}`, label, component: "Switch" })),
+      { field: "officialLinks.trustedTelegramUsers", label: "Telegram 信任 QQ", component: "Select",
+        componentProps: { mode: "tags" }, bottomHelpMessage: "只有主人和信任 QQ 可以触发公开 Telegram 预览。留空将只允许主人。" }],
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
           return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
-        const [videos, shareSettings, tools] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
+        const [videos, shareSettings, tools, officialLinkSettings] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
           const settings = await loadPublicShareConfig(site, root)
           return [site, { enable: settings.enable, private_preview: settings.privatePreview }]
-        })), loadConfig().then(config => config.tools)])
-        return { ...Object.fromEntries(entries), ...Object.fromEntries(shareSettings), pipixia: await pipixia.settings(tools), officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
+        })), loadConfig().then(config => config.tools), officialLinks.settings()])
+        return { ...Object.fromEntries(entries), ...Object.fromEntries(shareSettings), pipixia: await pipixia.settings(tools),
+          officialLinks: officialLinkSettings, officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
       },
@@ -280,6 +287,20 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           const value = values[name]
           if (typeof value !== "boolean") return Result.error("请填写有效的皮皮虾开关。", 422)
           pipixiaPatch[key] = value
+        }
+        const officialLinkPatch: OfficialLinkPatch = {}
+        for (const [key] of officialLinkToggles) {
+          const field = `officialLinks.${key}`
+          if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
+          const value = values[field]
+          if (typeof value !== "boolean") return Result.error("请填写有效的公开链接预览设置。", 422)
+          officialLinkPatch[key] = value
+        }
+        const trustedField = "officialLinks.trustedTelegramUsers"
+        if (Object.hasOwn(values, trustedField) && (!edited || edited.has(trustedField))) {
+          const users = parseTrustedTelegramUsers(values[trustedField])
+          if (!users) return Result.error("请填写有效的 Telegram 信任 QQ。", 422)
+          officialLinkPatch.trustedTelegramUsers = users
         }
         const changes = new Map<SubscriptionPlatform, { field: SettingsField; value: FieldInput }[]>()
         for (const { id, label, fields } of platforms) {
@@ -303,6 +324,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
         for (const [site, patch] of sharePatches) await savePublicShare(root, site, patch)
         if (Object.keys(pipixiaPatch).length) await pipixia.save(pipixiaPatch)
+        if (Object.keys(officialLinkPatch).length) await officialLinks.save(officialLinkPatch)
         return Result.ok()
       },
     },

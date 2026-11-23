@@ -1,5 +1,6 @@
 import type { CommandModule } from "../../lib/commands.ts"
 import { createAcfunCommands } from "./services/acfun/command.ts"
+import { createJikeCommands } from "./services/jike/command.ts"
 import { createKuaishouCommands } from "./services/kuaishou/command.ts"
 import { createPipixiaCommands } from "./services/pipixia/command.ts"
 import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
@@ -39,6 +40,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const acfun = createAcfunCommands(services)
   const pipixia = createPipixiaCommands(services)
   const kuaishou = createKuaishouCommands(services)
+  const jike = createJikeCommands(services)
   const biliLogin = createBilibiliLogin(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
@@ -71,6 +73,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (pipixiaFeatures.length) return pipixiaFeatures
       const kuaishouFeatures = kuaishou.features(context)
       if (kuaishouFeatures.length) return kuaishouFeatures
+      const jikeFeatures = jike.features(context)
+      if (jikeFeatures.length) return jikeFeatures
       const shortVideoFeatures = douyin.features(context)
       return shortVideoFeatures.length ? shortVideoFeatures : officialLinks.features(context)
     },
@@ -81,7 +85,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (environment.matches(message)) return environment.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await music.fallback(message, context) ??
-        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ??
+        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ??
         await douyin.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }

@@ -46,6 +46,11 @@ export function kuaishouVideoUrl(value: string | URL) {
       /\.mp4$/u.test(url.pathname)) return url
 }
 
+export function jikeImageUrl(value: string | URL) {
+  const url = URL.parse(String(value))
+  if (url?.origin === "https://cdnv2.ruguoapp.com" && !url.username && !url.password && !url.hash) return url
+}
+
 export function isPipixiaVideoUrl(url: URL) {
   return url.protocol === "https:" && !url.port && !url.username && !url.password && !url.hash &&
     /^v\d+-cdn-tos\.ppxvod\.com$/u.test(url.hostname)
@@ -93,7 +98,7 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
       return url
     }
     if (kind === "image") {
-      const cover = kuaishouCoverUrl(value)
+      const cover = kuaishouCoverUrl(value) ?? jikeImageUrl(value)
       if (cover) return cover
     }
     if (kind === "kuaishou-video") {

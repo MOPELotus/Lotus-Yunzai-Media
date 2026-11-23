@@ -11,6 +11,7 @@ import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
 import { createOfficialLinkSettings, officialLinkToggles, parseTrustedTelegramUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
+import { createJikeSettings, jikeFields } from "./services/jike/settings.ts"
 import { createKuaishouSettings, kuaishouFields } from "./services/kuaishou/settings.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
 
@@ -222,12 +223,13 @@ function changed(field: SettingsField, value: FieldInput, settings: Subscription
 
 export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory),
   root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep),
-  pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig, kuaishou = createKuaishouSettings(directory)) {
+  pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig, kuaishou = createKuaishouSettings(directory), jike = createJikeSettings(directory)) {
   const config = createSubscriptionConfig(directory, lockFile)
   const officialLinks = createOfficialLinkSettings(directory, root)
   const publicShares = [
     { id: "pipixia", name: "皮皮虾", fields: pipixiaFields, store: pipixia },
     { id: "kuaishou", name: "快手", fields: kuaishouFields, store: kuaishou },
+    { id: "jike", name: "即刻", fields: jikeFields, store: jike },
   ] as const
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },

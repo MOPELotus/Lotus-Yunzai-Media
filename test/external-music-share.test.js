@@ -1,4 +1,8 @@
 import { expect, test } from "bun:test"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { downloadMedia } from "../services/media/download.ts"
 import { readExternalMusicShare } from "../services/music/external-share.ts"
 import { parseMusicShare, resolveMusicShare } from "../services/music/share-link.ts"
 import { createMusicCommands } from "../services/music/command.ts"
@@ -122,6 +126,21 @@ test("公开 MV 校验 TuneWeave 详情、媒体授权、时长和对应 CDN", a
     move = true
     await expect(api.publicMvStream(mv, signal)).rejects.toThrow("完整公开 MV")
     move = false
+  }
+})
+
+test("MV CDN 返回部分内容时不生成可发送的 MP4", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-share-mv-"))
+  try {
+    const prefix = Buffer.concat([Buffer.from([0, 0, 0, 32]), Buffer.from("ftypisomtest")])
+    await expect(downloadMedia("https://opi.stream.tencentmusic.com/small.mp4", join(directory, "video"), {
+      kind: "video", cdn: "qq-mv", maxBytes: 1024, fetch: async () => new Response(prefix, {
+        status: 206, headers: { "Content-Range": "bytes 0-15/32" },
+      }),
+    })).rejects.toThrow("HTTP 206")
+    expect(await readdir(directory)).toEqual([])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
 })
 

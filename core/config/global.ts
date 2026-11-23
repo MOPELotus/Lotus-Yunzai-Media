@@ -1,3 +1,4 @@
+import { compatibleBilibiliDownload } from "../../../../lib/bilibili-download-compat.ts"
 import { readOptionalConfigFile, readOptionalLocalConfig } from "../../../../lib/config.ts"
 import { legacyLotusDirectories, readLotusGlobalConfig } from "../../../../lib/lotus-global-config.ts"
 
@@ -33,10 +34,12 @@ export async function loadGlobalConfig(root = deployment) {
   }
   const permissions = fields(global.permissions)
   const scopes = fields(permissions.scopes)
+  const bilibili = fields(global.bilibili)
+  const download = compatibleBilibiliDownload(bilibili)
   return {
     tools: fields(global.tools),
     tuneweave: fields(global.tuneweave),
-    bilibili: fields(global.bilibili),
+    bilibili: bilibili.download ? { ...bilibili, download } : download,
     douyin: { enable: true, request_timeout_ms: 15000, ...fields(global.douyin) },
     music: fields(global.music),
     netease_partner: fields(global.netease_partner),

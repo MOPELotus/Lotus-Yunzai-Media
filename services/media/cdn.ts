@@ -3,7 +3,7 @@ const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.co
 const miyousheVideoDomains = new Set(["prod-vod-sign.miyoushe.com", "prod-vod-sign.mihoyo.com"])
 const acfunVideoHosts = new Set(["tx-safety-video.acfun.cn", "ali-safety-video.acfun.cn"])
 const acfunImageHosts = new Set(["tx-free-imgs.acfun.cn"])
-export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video"
+export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video" | "pipixia-video"
 
 function acfunCdnUrl(value: string | URL, hosts: ReadonlySet<string>) {
   const url = URL.parse(String(value))
@@ -20,6 +20,11 @@ export function acfunImageUrl(value: string | URL) {
 
 export function isMiyousheVideoUrl(url: URL) {
   return url.protocol === "https:" && !url.port && !url.username && !url.password && !url.hash && miyousheVideoDomains.has(url.hostname)
+}
+
+export function isPipixiaVideoUrl(url: URL) {
+  return url.protocol === "https:" && !url.port && !url.username && !url.password && !url.hash &&
+    /^v\d+-cdn-tos\.ppxvod\.com$/u.test(url.hostname)
 }
 
 export function neteaseMvUrl(value: string | URL) {
@@ -63,6 +68,11 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
       if (!url) throw new Error("媒体地址不属于网易云 MV CDN。")
       return url
     }
+    if (kind === "pipixia-video") {
+      const url = new URL(value)
+      if (!isPipixiaVideoUrl(url)) throw new Error("媒体地址不属于皮皮虾视频 CDN。")
+      return url
+    }
     if (kind !== "miyoushe-video") return mediaUrl(value, domains)
     const url = new URL(value)
     if (!isMiyousheVideoUrl(url)) throw new Error("媒体地址不属于米游社视频 CDN。")
@@ -71,7 +81,7 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
   let url = target(value)
   for (let hop = 0; hop <= 5; hop++) {
     const response = await fetchImpl(url.href, { ...options,
-      ...((kind === "miyoushe-video" || kind === "netease-mv" || kind === "acfun-video" || kind === "acfun-image") && { credentials: "omit" as const }), redirect: "manual" })
+      ...((kind === "miyoushe-video" || kind === "netease-mv" || kind === "acfun-video" || kind === "acfun-image" || kind === "pipixia-video") && { credentials: "omit" as const }), redirect: "manual" })
     if (![301, 302, 303, 307, 308].includes(response.status)) return response
     await response.body?.cancel()
     const location = response.headers.get("location")

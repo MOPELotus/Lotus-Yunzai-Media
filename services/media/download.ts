@@ -12,7 +12,7 @@ interface DownloadOptions {
   readonly timeoutMs?: number
   readonly maxBytes?: number
   readonly kind?: MediaKind
-  readonly cdn?: Extract<CdnKind, "miyoushe-video" | "netease-mv" | "acfun-video">
+  readonly cdn?: Extract<CdnKind, "miyoushe-video" | "netease-mv" | "acfun-video" | "pipixia-video">
   readonly signal?: AbortSignal
 }
 

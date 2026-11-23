@@ -565,9 +565,11 @@ export class BilibiliService {
     try {
       await emitBiliEvent(hooks, { type: "download-start", message: `开始下载 ${plan.info.bvid}，分P策略：${plan.policy}。` })
       let files = await this.downloadWithTuneWeave(plan, download, task.dir, hooks)
+      hooks.signal?.throwIfAborted()
       if (download.multi_page_policy === "zip" && files.length > 1) {
         const target = path.join(task.dir, `${safeFileName(plan.info.title || plan.info.bvid)}-${plan.info.bvid}.zip`)
-        await packMediaFiles(files, target, { timeoutMs: download.timeout_ms, spawnImpl: this.spawn, cwd: task.dir })
+        await packMediaFiles(files, target, { timeoutMs: download.timeout_ms, spawnImpl: this.spawn, cwd: task.dir, signal: hooks.signal })
+        hooks.signal?.throwIfAborted()
         files = [target]
       }
       const fileNames = Object.fromEntries(files.map((file, index) => {

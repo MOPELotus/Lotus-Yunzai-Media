@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { spawn } from "node:child_process"
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { BilibiliService, quotedBiliCardLink } from "../services/bilibili/service.ts"
@@ -12,6 +13,35 @@ const parts = [1, 2, 3].map(page => ({ id: "cid:" + (100 + page), page, title: "
   video_ref: ref, duration_ms: 5000 * page }))
 const ok = (data, alias) => Response.json({ ok: true, data, meta: { platform: "bilibili", ...(alias && { account: alias }) } })
 const absent = () => Response.json({ ok: false, error: { code: "authentication_required" } }, { status: 401 })
+
+test("取消 B 站多 P 打包会终止压缩进程并清理任务", async () => {
+  const workDir = await mkdtemp(join(tmpdir(), "lotus-bili-zip-cancel-"))
+  const tasksDir = join(workDir, "tasks")
+  const abort = new AbortController()
+  let spawned = 0
+  let stopped = false
+  try {
+    const service = new BilibiliService({ accountFile: join(workDir, "account.yaml"), tasksDir,
+      spawn(_program, _args, options) {
+        spawned++
+        const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1_000)"], options)
+        child.once("close", () => { stopped = true })
+        queueMicrotask(() => abort.abort())
+        return child
+      },
+    })
+    service.buildDownloadPlan = async () => ({ ok: true, info: { bvid, title: "合成稿件" }, policy: "zip", pages: parts })
+    service.downloadWithTuneWeave = async (_plan, _config, task) => {
+      const files = [join(task, "P1.mp4"), join(task, "P2.mp4")]
+      await Promise.all(files.map(file => writeFile(file, "fixture")))
+      return files
+    }
+    await expect(service.download(link, { timeout_ms: 1_000 }, { signal: abort.signal })).rejects.toThrow("已取消")
+    expect(spawned).toBe(1)
+    expect(stopped).toBe(true)
+    expect(await readdir(tasksDir)).toEqual([])
+  } finally { await rm(workDir, { recursive: true, force: true }) }
+})
 
 test("重复请求 B 站登录先核对原别名，能续期时不需要重扫", async () => {
   const workDir = await mkdtemp(join(tmpdir(), "lotus-bili-login-"))

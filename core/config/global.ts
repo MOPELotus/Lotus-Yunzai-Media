@@ -53,7 +53,7 @@ export async function loadGlobalConfig(root = deployment) {
   }
 }
 
-export const publicShareSiteNames = { acfun: "AcFun", weishi: "微视", zuiyou: "最右" } as const
+export const publicShareSiteNames = { acfun: "AcFun", weishi: "微视", zuiyou: "最右", wxchannels: "视频号" } as const
 export type PublicShareSite = keyof typeof publicShareSiteNames
 
 export async function loadPublicShareConfig(site: PublicShareSite, root = deployment) {

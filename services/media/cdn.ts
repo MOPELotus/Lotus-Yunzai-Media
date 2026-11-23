@@ -5,7 +5,7 @@ const miyousheVideoDomains = new Set(["prod-vod-sign.miyoushe.com", "prod-vod-si
 const acfunVideoHosts = new Set(["tx-safety-video.acfun.cn", "ali-safety-video.acfun.cn"])
 const acfunImageHosts = new Set(["tx-free-imgs.acfun.cn"])
 export type MusicVideoCdn = "netease-mv" | "kuwo-mv" | "qq-mv" | "kugou-mv"
-export type CdnKind = "image" | "miyoushe-video" | MusicVideoCdn | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video"
+export type CdnKind = "image" | "miyoushe-video" | MusicVideoCdn | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video" | "weixin-channels-image"
 
 function acfunCdnUrl(value: string | URL, hosts: ReadonlySet<string>) {
   const url = URL.parse(String(value))
@@ -50,6 +50,17 @@ export function kuaishouVideoUrl(value: string | URL) {
 export function jikeImageUrl(value: string | URL) {
   const url = URL.parse(String(value))
   if (url?.origin === "https://cdnv2.ruguoapp.com" && !url.username && !url.password && !url.hash) return url
+}
+
+export function weixinChannelsImageUrl(value: string | URL, role?: "cover" | "avatar") {
+  const url = URL.parse(String(value))
+  if (!url || !["https:", "http:"].includes(url.protocol) || url.port || url.username || url.password || url.hash) return
+  const cover = url.hostname === "finder.video.qq.com" && /^\/\d+\/\d+\/stodownload$/u.test(url.pathname)
+  const avatar = url.hostname === "wx.qlogo.cn" && /^\/finderhead\/[A-Za-z0-9_/-]+$/u.test(url.pathname)
+  if (role === "avatar" ? avatar : role === "cover" ? cover : cover || avatar) {
+    url.protocol = "https:"
+    return url
+  }
 }
 
 export function isPipixiaVideoUrl(url: URL) {
@@ -112,6 +123,11 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
         const platform = kind === "netease-mv" ? "网易云" : kind === "kuwo-mv" ? "酷我" : kind === "kugou-mv" ? "酷狗" : "QQ 音乐"
         throw new Error(`媒体地址不属于${platform} MV CDN。`)
       }
+      return url
+    }
+    if (kind === "weixin-channels-image") {
+      const url = weixinChannelsImageUrl(value)
+      if (!url) throw new Error("图片地址不属于视频号预览 CDN。")
       return url
     }
     if (kind === "image") {

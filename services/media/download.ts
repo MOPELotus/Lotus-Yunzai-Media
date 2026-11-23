@@ -12,7 +12,7 @@ interface DownloadOptions {
   readonly timeoutMs?: number
   readonly maxBytes?: number
   readonly kind?: MediaKind
-  readonly cdn?: Exclude<CdnKind, "image" | "acfun-image">
+  readonly cdn?: Exclude<CdnKind, "image" | "acfun-image" | "weixin-channels-image">
   readonly signal?: AbortSignal
 }
 

@@ -6,7 +6,7 @@ import { fetchImageBytes } from "./image.ts"
 import { plainGameText } from "./plain-text.ts"
 import type { ArticleBlock } from "../../services/media/message.ts"
 
-export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "acfun-info" | "pipixia-info" | "kuaishou-info" | "article"
+export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "acfun-info" | "pipixia-info" | "kuaishou-info" | "weixin-channels-info" | "article"
 
 export interface RenderOptions {
  readonly mode?: Parameters<typeof renderPng>[3]
@@ -42,7 +42,7 @@ export interface SourceCard {
  readonly collection?: { readonly title?: string }
  readonly sources?: readonly { readonly quality?: string; readonly width?: number; readonly height?: number; readonly codec?: string }[]
  readonly showStats?: boolean
- readonly stat?: Partial<Record<"like" | "reply" | "favorite" | "coin" | "view" | "danmaku" | "share", number>>
+ readonly stat?: Partial<Record<"like" | "reply" | "favorite" | "coin" | "view" | "danmaku" | "share", number | string>>
  readonly online?: number
  readonly liveStatus?: string
 }
@@ -241,7 +241,7 @@ async function newsImage(p: SourceCanvas,src: string | Buffer | undefined){
  p.image(typeof src==="string"?src:img,30,p.y,w,h,{radius:14});p.y+=h+20
 }
 function mediaStats(data: SourceCard,template: SourceTemplate){
- const s=data.stat||{},format=(n: number | undefined)=>n===undefined?'未记录':damageNumber(n)
+ const s=data.stat||{},format=(n: number | string | undefined)=>typeof n==='string'?n:n===undefined?'未记录':damageNumber(n)
  const stats=data.type==='live'?[['直播状态',data.liveStatus],['在线人数',format(data.online)]]:[['点赞',format(s.like)],['评论',format(s.reply)],...((template==='pipixia-info'||template==='kuaishou-info')?[['播放',format(s.view)]]:[['收藏',format(s.favorite)]]),...(template==='bilibili-info'?[['投币',format(s.coin)],['播放',format(s.view)],['弹幕',format(s.danmaku)]]:template==='acfun-info'?[['播放',format(s.view)],['弹幕',format(s.danmaku)],['香蕉',format(s.coin)]]:[['分享',format(s.share)]])]
  return stats.map(([label,value])=>`${label} ${value||'未记录'}`).join('    ')
 }
@@ -305,7 +305,7 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
   title:data.title||'作品信息',
   byline:article?`第 ${data.page||1} 页`:data.id||'',
   avatar:data.avatar,
-  metadata:article||data.type==="public-link"?undefined:[data.type==='live'?'直播':data.type==='gallery'?'图集':data.type==='live_photo'?'动态图片':data.type==='article'?'文章':'视频',data.duration?`${Math.floor(data.duration/60)}分${Math.floor(data.duration%60)}秒`:'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?`${data.media.length} 个媒体项`:''].filter(Boolean).join(' · '),
+  metadata:article||data.type==="public-link"?undefined:[data.type==='live'?'直播':data.type==='gallery'?'图集':data.type==='live_photo'?'动态图片':data.type==='article'?'文章':data.type==='share'?'分享':'视频',data.duration?`${Math.floor(data.duration/60)}分${Math.floor(data.duration%60)}秒`:'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?`${data.media.length} 个媒体项`:''].filter(Boolean).join(' · '),
  })
  if(article){
   for(const block of data.blocks||[]){

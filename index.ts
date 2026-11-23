@@ -16,6 +16,7 @@ import { createMediaEnvironment } from "./services/tools/command.ts"
 import { createOfficialVideoCommands } from "./services/official-video/index.ts"
 import { createMiyoushePostCommands } from "./services/official-video/post-command.ts"
 import { createPublicShareCommands } from "./services/public-share/command.ts"
+import { createWeixinChannelsPreview } from "./services/weixin-channels/preview.ts"
 import { createOfficialLinkPreview } from "./services/official-links/command.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
@@ -52,6 +53,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const officialVideo = createOfficialVideoCommands(services)
   const miyoushePost = createMiyoushePostCommands(services)
   const publicShare = createPublicShareCommands(services)
+  const weixinChannels = createWeixinChannelsPreview({ signal: services.signal })
   const officialLinks = createOfficialLinkPreview({ ...services.officialLinks, signal: services.signal })
   return {
     ...subscriptions,
@@ -72,6 +74,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (acfunFeatures.length) return acfunFeatures
       const publicShareFeatures = publicShare.features(context)
       if (publicShareFeatures.length) return publicShareFeatures
+      const weixinFeatures = weixinChannels.features(context)
+      if (weixinFeatures.length) return weixinFeatures
       const songFeatures = music.features(context)
       if (songFeatures.length) return songFeatures
       const articleFeatures = miyoushePost.features(context)
@@ -92,7 +96,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (environment.matches(message)) return environment.fallback(message, context)
       if (biliPgc.matches(message, context)) return biliPgc.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
-        await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await music.fallback(message, context) ??
+        await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await weixinChannels.fallback(message, context) ?? await music.fallback(message, context) ??
         await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ??
         await douyin.fallback(message, context) ?? officialLinks.fallback(message, context)
     },

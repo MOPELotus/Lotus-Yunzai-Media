@@ -258,8 +258,10 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         { component: "SOFT_GROUP_BEGIN", label: site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site] },
         ...publicShareToggles.map(([key, label, bottomHelpMessage]) => ({
           field: `${site}.${key}`,
-          label: key === "enable" ? `${label} ${site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site]}` : label,
-          bottomHelpMessage, component: "Switch",
+          label: site === "wxchannels" && key === "enable" ? "解析视频号公开分享"
+            : key === "enable" ? `${label} ${site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site]}` : label,
+          bottomHelpMessage: site === "wxchannels" ? (key === "enable"
+            ? "预览公开作品，可打开原文在微信中观看。" : "开启后也可在好友私聊预览。") : bottomHelpMessage, component: "Switch",
         })),
       ]),
       { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },

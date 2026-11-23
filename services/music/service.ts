@@ -192,6 +192,17 @@ export class MusicService {
     const saved = (await readMusicAccounts(this.accountsFile))[platform]
     if (!saved?.alias || !musicAccountAlias.test(saved.alias) || saved.owner !== owner || !saved.uid) return false
     const alias = saved.alias
+    if ((platform === "kugou" || platform === "soda") && saved.credential?.startsWith("twc1_")) {
+      // Reading either provider's profile can rotate its session. Keep the
+      // stored alias and the caller credential together in one request.
+      try {
+        await refreshOwnMusicAccount(this, platform, owner, signal, { alias, uid: String(saved.uid) })
+        return true
+      } catch (error) {
+        if (musicAuthenticationRequired(error)) return false
+        throw error
+      }
+    }
     const verify = async () => {
       const { data, accountSelected } = await this.tuneweave.request<TuneWeaveQrProfile>(
         "/v1/account?" + new URLSearchParams({ platform, account: alias }), { signal, redirect: "error", accountSelection: { platform, alias } })

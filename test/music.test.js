@@ -290,6 +290,39 @@ test("复用明确过期的网易云或 QQ 登录会先续期同一 UID，再核
   }
 })
 
+test("酷狗和汽水使用同一登录代际验证账号，并同步服务器已确认的凭据轮换", async () => {
+  for (const platform of ["kugou", "soda"]) {
+    const root = await directory()
+    const accountsFile = join(root, "music.yaml"), alias = "lotus-music-" + platform
+    const previous = { uid: "1042", alias, owner: 42, credential: "twc1_old" }
+    const profile = { platform, account: alias, authenticated: true, user_id: previous.uid }
+    let mode = "success"
+    const service = new MusicService({ accountsFile, tuneweave: { config: { api_url: "http://127.0.0.1:7832" },
+      async request(route, options) {
+        expect(route).toBe("/v1/auth/session/refresh")
+        expect(options.body).toEqual({ platform, account: alias, credential_mode: "both" })
+        expect(options.credentials).toEqual(["twc1_old"])
+        const updated = { platform, credential: "twc1_rotated" }
+        if (mode !== "success") {
+          options.onCredentialUpdates([updated])
+          throw Object.assign(new Error(mode), { code: mode })
+        }
+        return { accountSelected: true, data: { ...profile, caller_credential: { platform, value: updated.credential } } }
+      },
+    } })
+    const signal = new AbortController().signal
+    for (const outcome of ["success", "upstream_error", "authentication_required", "conflict"]) {
+      mode = outcome
+      await saveMusicAccount(platform, previous, { file: accountsFile })
+      if (outcome === "success") expect(await service.reuseMusicLogin(platform, 42, signal, true)).toBe(true)
+      else if (outcome === "authentication_required") expect(await service.reuseMusicLogin(platform, 42, signal, true)).toBe(false)
+      else await expect(service.reuseMusicLogin(platform, 42, signal, true)).rejects.toThrow(outcome)
+      const rotated = outcome === "success" || outcome === "upstream_error"
+      expect((await readMusicAccounts(accountsFile))[platform].credential).toBe(rotated ? "twc1_rotated" : "twc1_old")
+    }
+  }
+})
+
 test("云盘列表返回时合伙人绑定已换号，旧结果不能进入缓存", async () => {
   const root = await directory()
   const accountsFile = join(root, "music.yaml"), partnerAccountsFile = join(root, "partner.yaml")

@@ -42,7 +42,7 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   let expected = 0
   let prefix = Buffer.alloc(0)
   const sniffBytes = cdn === "acfun-video" ? 377 : 64
-  const requireFullFile = cdn === "acfun-video" || cdn === "weishi-video" || cdn === "zuiyou-video"
+  const requireFullFile = cdn === "acfun-video" || cdn === "weishi-video" || cdn === "zuiyou-video" || cdn === "pipixia-video"
   try {
     active.throwIfAborted()
     const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active }, cdn)

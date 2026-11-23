@@ -134,14 +134,17 @@ test("锅巴写入与群、私聊解析共用存储，并继承旧通用开关",
   }
 })
 
-test("皮皮虾未知网关回执不重新上传，也不回退至逐字节重发", async () => {
+test.each([200, 206])("皮皮虾只上传完整响应，未知回执不重发（源站状态 %i）", async status => {
   const dir = await mkdtemp("/tmp/lotus-ppx-unknown-")
   const messages: unknown[] = []
   let downloads = 0, uploads = 0
   const commands = createPipixiaCommands({ tasksDir: dir, loadConfig: loadConfig(),
     fetch: async url => {
       if (url === article) return html(fixture)
-      if (url === source) { downloads++; return new Response(mp4) }
+      if (url === source) {
+        downloads++
+        return new Response(mp4, { status, headers: status === 206 ? { "Content-Range": "bytes 0-15/32" } : {} })
+      }
       throw new Error(url)
     },
     render: async () => Buffer.from([1]),
@@ -156,8 +159,8 @@ test("皮皮虾未知网关回执不重新上传，也不回退至逐字节重�
     await result.onDelivered(12)
     await result.onDelivered(12)
     expect(downloads).toBe(1)
-    expect(uploads).toBe(1)
-    expect(messages).toEqual(["视频送达未确认，请核对当前会话。"])
+    expect(uploads).toBe(status === 200 ? 1 : 0)
+    expect(messages).toEqual([status === 200 ? "视频送达未确认，请核对当前会话。" : "皮皮虾视频暂未送达，可打开上面的原帖。"])
     expect(await readdir(dir)).toEqual([])
   } finally {
     await commands.dispose()

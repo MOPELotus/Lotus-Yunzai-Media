@@ -50,7 +50,7 @@ export function createBiliCommentWriter(fetch: Request = globalThis.fetch, getRe
     if (dynamicId) return (await dynamic.fetchPost(dynamicId, signal))?.commentTarget
     if (!isBiliVideoPage(source)) return
     const id = source.pathname.split("/")[2]!
-    const aid = /^av/i.test(id) ? id.slice(2) : undefined
+    const aid = /^av/i.test(id) ? id.slice(2).replace(/^0+/u, "") : undefined
     const bvid = aid ? undefined : "BV" + id.slice(2)
     const view = new URL("/x/web-interface/view", api)
     view.search = aid ? new URLSearchParams({ aid }).toString() : new URLSearchParams({ bvid: bvid! }).toString()

@@ -250,10 +250,11 @@ interface QrOptions {
   signal?: AbortSignal
 }
 
-const BILI_SHORT_HOSTS = new Set(["b23.tv", "bili2233.cn"])
-const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "m.bilibili.com", "live.bilibili.com", ...BILI_SHORT_HOSTS])
-const dynamicLinkInText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/(?:t\.bilibili\.com\/|(?:www|m)\.bilibili\.com\/opus\/|m\.bilibili\.com\/dynamic\/)[1-9]\d{0,21}\/?(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
 const LIVE_INFO_API = "https://api.live.bilibili.com/room/v1/Room/get_info"
+const BILI_SHORT_HOSTS = new Set(["b23.tv", "bili2233.cn"])
+const BILI_ARCHIVE_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "m.bilibili.com"])
+const BILI_HOSTS = new Set([...BILI_ARCHIVE_HOSTS, "live.bilibili.com", ...BILI_SHORT_HOSTS])
+const targetInText = /https?:\/\/[^\s<>"'{},。！？；，、（）【】《》]+|\bBV[1-9A-Za-z]{10}\b|\bav0*[1-9]\d{0,19}\b/giu
 const bareB23InText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:\/\/)?b23\.tv\/([a-z0-9]+)(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
 const bareB23Target = /^(?:\/\/)?b23\.tv\/([a-z0-9]+)(?:[?#]\S*)?$/iu
 const legacyAccountFiles = ["Lotus-Plugin", "Lotus-ReFactor"].map(name =>
@@ -303,14 +304,14 @@ export class BilibiliService {
     const wholeCard = extractFromJsonCard(raw)
     if (wholeCard !== undefined) return wholeCard
 
-    const clean = raw.replace(/\\\//g, "/")
-    const match = clean.match(/https?:\/\/(?:www\.|m\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)
+    const clean = raw.replace(/\\\//g, "/").replace(/&amp;/gu, "&")
     const bare = bareB23InText.exec(clean)
-    const dynamic = dynamicLinkInText.exec(clean)
-    const first = [match, bare, dynamic].filter(candidate => candidate !== null)
-      .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))[0]
-    if (first && first === bare) return "https://b23.tv/" + bare[1]
-    return first && first === match ? first[0].replace(/[）。！？；，、!?)】》]+$/u, "") : first?.[0] || ""
+    for (const match of clean.matchAll(targetInText)) {
+      if (bare && bare.index < match.index) break
+      const value = match[0].replace(/[!?)\].;]+$/u, "")
+      if (!/^https?:\/\//iu.test(value) || isBiliMediaUrl(value)) return value
+    }
+    return bare ? "https://b23.tv/" + bare[1] : ""
   }
 
   async resolveTarget(input = "", signal?: AbortSignal): Promise<BilibiliTarget> {
@@ -322,16 +323,15 @@ export class BilibiliService {
     const parsed = parseBiliUrl(bare ? "https://b23.tv/" + bare[1] : text)
     if (!parsed) throw new Error("不支持的 B 站链接")
     const url = await this.resolveShortLink(parsed, signal)
-    const destination = url.href
-    const live = destination.match(/live\.bilibili\.com\/(\d+)/i)
-    if (live?.[1]) return { type: "live", roomId: live[1] }
+    const roomId = biliLiveRoomId(url)
+    if (roomId) return { type: "live", roomId }
     if (!isBiliVideoPage(url)) throw new Error("不支持的 B 站链接")
     const [, , token] = url.pathname.split("/")
     const page = biliPartNumber(url)
     if (page === null) throw new Error("B 站分 P 编号无效")
     const picked = page === undefined ? {} : { page }
     if (token?.slice(0, 2).toLowerCase() === "bv") return { type: "video", bvid: "BV" + token.slice(2), ...picked }
-    return { type: "video", aid: token!.slice(2), ...picked }
+    return { type: "video", aid: token!.slice(2).replace(/^0+/u, ""), ...picked }
   }
 
   async resolveShortLink(url: URL, active?: AbortSignal): Promise<URL> {
@@ -351,7 +351,7 @@ export class BilibiliService {
 
   async getInfo(input: BilibiliInput, signal?: AbortSignal): Promise<VideoInfo | LiveInfo> {
     const target = typeof input === "string" ? await this.resolveTarget(input, signal) : input
-    if (target.type === "live") return this.getLiveInfo(target.roomId)
+    if (target.type === "live") return this.getLiveInfo(target.roomId, signal)
     return this.getVideoInfo(target, signal)
   }
 
@@ -490,8 +490,8 @@ export class BilibiliService {
     }
   }
 
-  async getLiveInfo(roomId: string | number): Promise<LiveInfo> {
-    const json = await this.requestJson(`${LIVE_INFO_API}?room_id=${encodeURIComponent(roomId)}`)
+  async getLiveInfo(roomId: string | number, signal?: AbortSignal): Promise<LiveInfo> {
+    const json = await this.requestJson(`${LIVE_INFO_API}?room_id=${encodeURIComponent(roomId)}`, signal)
     if (json.code !== 0) throw new Error(json.message || `B站直播接口错误 ${json.code}`)
     const data = json.data || {}
     return {
@@ -732,13 +732,18 @@ export class BilibiliService {
     return this.accountFile
   }
 
-  async requestJson(url: string): Promise<LiveRoomResponse> {
+  async requestJson(url: string, active?: AbortSignal): Promise<LiveRoomResponse> {
     if (typeof this.fetch !== "function") throw new Error("fetch is unavailable")
-    const headers = { ...COMMON_HEADERS }
-    const response = await this.fetch(url, { headers, redirect: "error", signal: AbortSignal.timeout(15000) })
-    const text = await response.text()
-    const json = text ? JSON.parse(text) as LiveRoomResponse : null
-    if (!response.ok) throw new Error(`B站请求失败 HTTP ${response.status}`)
+    const timeout = AbortSignal.timeout(15000)
+    const signal = active ? AbortSignal.any([active, timeout]) : timeout
+    const response = await this.fetch(url, { headers: COMMON_HEADERS, redirect: "error", credentials: "omit", signal })
+    signal.throwIfAborted()
+    if (!response.ok) {
+      await response.body?.cancel()
+      throw new Error(`B站请求失败 HTTP ${response.status}`)
+    }
+    const json = await response.json().catch(() => null) as LiveRoomResponse | null
+    signal.throwIfAborted()
     if (!json) throw new Error("B站直播接口返回无效响应")
     return json
   }
@@ -952,9 +957,20 @@ export function biliDynamicId(url: URL) {
   }
 }
 
+export function biliLiveRoomId(url: URL) {
+  return url.hostname === "live.bilibili.com" ? /^\/0*([1-9]\d{0,19})\/?$/u.exec(url.pathname)?.[1] : undefined
+}
+
 export function isBiliVideoPage(url: URL) {
-  return (url.hostname === "www.bilibili.com" || url.hostname === "bilibili.com" || url.hostname === "m.bilibili.com") &&
-    /^\/video\/(?:BV[1-9A-Za-z]{10}|av[1-9]\d*)\/?$/iu.test(url.pathname)
+  return BILI_ARCHIVE_HOSTS.has(url.hostname) &&
+    /^\/video\/(?:BV[1-9A-Za-z]{10}|av0*[1-9]\d{0,19})\/?$/iu.test(url.pathname)
+}
+
+function isBiliMediaUrl(value: string) {
+  const url = parseBiliUrl(value)
+  return url && (isBiliVideoPage(url) || Boolean(biliDynamicId(url) || biliLiveRoomId(url)) ||
+    (BILI_SHORT_HOSTS.has(url.hostname) && url.pathname !== "/") ||
+    (BILI_ARCHIVE_HOSTS.has(url.hostname) && /^\/bangumi\/play\/(?:ep|ss)[1-9]\d{0,15}\/?$/u.test(url.pathname)))
 }
 
 function biliPartNumber(url: URL) {
@@ -1013,7 +1029,7 @@ function extractFromJsonCard(raw: string) {
   }
   const candidates: string[] = []
   collectUrls(card, candidates)
-  return candidates.find(value => parseBiliUrl(value)) || null
+  return candidates.find(isBiliMediaUrl) || null
 }
 
 function collectUrls(value: unknown, out: string[]) {

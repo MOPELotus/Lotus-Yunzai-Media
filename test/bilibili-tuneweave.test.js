@@ -121,6 +121,76 @@ test("可见 B 站链接与异站分享卡同条发送时，异站卡不遮蔽�
   }
 })
 
+test("旧分享提取以实际作品链接为准，链接参数和外站地址不会抢占入口", async () => {
+  const service = new BilibiliService({ fetch: async () => { throw new Error("提取不应联网") } })
+  const room = "https://live.bilibili.com/42"
+  const videoWithLiveParameter = link + "?from=" + room + "&p=2"
+  expect(await service.resolveTarget(videoWithLiveParameter)).toEqual({ type: "video", bvid, page: 2 })
+  expect(await service.resolveTarget(room + "/?from=share")).toEqual({ type: "live", roomId: "42" })
+  expect(await service.resolveTarget("https://m.bilibili.com/video/av000170001?p=2")).toEqual({ type: "video", aid: "170001", page: 2 })
+  await expect(service.resolveTarget(room + "/description")).rejects.toThrow("不支持的 B 站链接")
+  expect(await service.resolveTarget("https://live.bilibili.com/00042")).toEqual({ type: "live", roomId: "42" })
+  expect(service.extractTarget(room + "backup")).toBe("")
+  expect(service.extractTarget("参考 " + room + ".")).toBe(room)
+  const xml = '<msg url="' + link + '?from=share&amp;p=2"></msg>'
+  expect(await service.resolveTarget(service.extractTarget(xml))).toEqual({ type: "video", bvid, page: 2 })
+  const news = { homepage: "https://www.bilibili.com/", profile: "https://m.bilibili.com/space/42",
+    preview: "https://live.bilibili.com/311", jumpUrl: link }
+  expect(service.extractTarget(JSON.stringify({ meta: { news } }))).toBe(link)
+  expect(service.extractTarget(JSON.stringify({ homepage: news.homepage }))).toBeNull()
+  expect(service.extractTarget(JSON.stringify({ player: room }))).toBe(room)
+  expect(service.extractTarget(JSON.stringify({ light_app: { target: "https://www.bilibili.com/bangumi/play/ep42" } })))
+    .toBe("https://www.bilibili.com/bangumi/play/ep42")
+  for (const foreign of ["https://example.test/video/" + bvid, "https://[::1]/?video=" + bvid,
+    "https://bilibili.com.example.test/video/" + bvid, "https://example.test/?live=" + room]) {
+    expect(service.extractTarget(foreign)).toBe("")
+    expect(service.extractTarget(foreign + " " + bvid)).toBe(bvid)
+  }
+})
+
+test("普通解析关闭时直链直播仍只输出房间和独立播放器，停止后不回消息", async () => {
+  const signals = []
+  const replies = []
+  const room = "https://live.bilibili.com/42"
+  const lease = new AbortController()
+  let abort = false
+  const module = createBilibiliVideoCommands({ settings: async () => ({ parseVideoLink: false }),
+    async fetch(input, options) {
+      const url = new URL(input)
+      expect(url.hostname).toBe("api.live.bilibili.com")
+      expect(url.searchParams.get("room_id")).toBe("42")
+      expect(options.credentials).toBe("omit")
+      expect(options.redirect).toBe("error")
+      signals.push(options.signal)
+      if (abort) lease.abort()
+      return Response.json({ code: 0, data: { title: "合成直播间", uname: "合成主播", live_status: 1, online: 1 } })
+    },
+  })
+  const context = { message_type: "private", self_id: 99, user_id: 42,
+    privateCredentialSignal: lease.signal,
+    reply: async message => { replies.push(message); return false } }
+  const invoke = message => module.fallback(message, { ...context, normalizedMessage: message })
+  try {
+    expect(await invoke("#B站下载")).toContain("请输入要下载的")
+    expect(await invoke("#b站下视频")).toContain("请输入要下载的")
+    expect(await invoke(link + "?redirect=" + room)).toBeUndefined()
+    expect(await invoke("https://b23.tv/example")).toBeUndefined()
+    expect(signals).toEqual([])
+    expect(await invoke(room)).toEqual([])
+    expect(replies[0]).toMatchObject({ type: "image" })
+    expect(replies.slice(1)).toEqual(["[media] B站解析完成。",
+      "[media] 独立播放器：https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=42"])
+    expect(signals[0].aborted).toBe(false)
+    abort = true
+    const previous = replies.length
+    expect(await invoke(room)).toEqual([])
+    expect(signals[1].aborted).toBe(true)
+    expect(replies).toHaveLength(previous)
+  } finally {
+    await module.dispose()
+  }
+})
+
 test("B 站桌面、手机与短链保留 TuneWeave 的明确分 P，错集不会下载", async () => {
   const workDir = await mkdtemp(join(tmpdir(), "lotus-bili-part-"))
   const calls = []

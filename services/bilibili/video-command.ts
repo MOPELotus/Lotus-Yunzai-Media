@@ -15,7 +15,7 @@ import { biliCommentTarget, createBiliComments, type BiliComment, type BiliComme
 import { createBiliCommentWriter } from "./comment-write.ts"
 import { parseBiliPgcLink, type createBiliPgcPreview } from "./pgc.ts"
 import {
-  BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, isBiliVideoPage, normalizeDownloadConfig,
+  BilibiliService, biliDynamicId, biliLiveRoomId, formatBilibiliPreviewText, formatNumber, isBiliVideoPage, normalizeDownloadConfig,
   quotedBiliCardLink, resolveCommandPath,
 } from "./service.ts"
 
@@ -29,7 +29,7 @@ const pageCommand = /^#(?:b|哔)站(上一页|下一页)$/iu
 const pickCommand = /^#看(\d+)$/u
 const tukuPickCommand = /^#看(?:b|哔)站视频([\s\S]*)$/iu
 const watchCommand = /^#看视频([\s\S]*)$/u
-const downloadCommand = /^#b站(?:下载|下视频)\s+([\s\S]+)$/iu
+const downloadCommand = /^#b站(?:下载|下视频)(?:\s+([\s\S]*))?$/iu
 const quotedLinkCommand = /^#?(?:解析|解)$/u
 const quotedCoverCommand = /^#?(?:下载封面|封面下载|获取封面|封面)$/u
 const quotedDescriptionCommand = /^#?简介$/u
@@ -99,7 +99,7 @@ function videoAction(message: string, context: MessageFallbackContext): VideoAct
   const watch = watchCommand.exec(message)
   if (watch) return { kind: "watch", keyword: watch[1]!.trim() }
   const download = downloadCommand.exec(message)
-  if (download) return { kind: "download", target: download[1]!.trim() }
+  if (download) return { kind: "download", target: download[1]?.trim() || "" }
   const expand = expandCommentCommand.exec(message)
   if (expand) {
     return context.message_type !== "terminal" && !context.isDelegated && context.reply_id !== undefined && context.lookupReply
@@ -371,8 +371,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         id: `直播间 ${info.roomId}`, liveStatus: info.liveStatus, online: info.online, stat: {},
       } : { id: info.bvid, duration: info.duration, stat: info.stat || {} }),
     }, { saveId: `media-bilibili-${context.user_id || "user"}` }).catch(error => {
-      if (info.type !== "video") throw error
-      console.warn("[media] B 站视频图卡生成失败：" + error.message)
+      console.warn("[media] B 站解析图卡生成失败：" + error.message)
     })
     const discussion = info.type === "video" && info.stat.reply !== 0
       ? await discussionFor(biliCommentTarget(info.aid, 1), context) : undefined
@@ -455,6 +454,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (action.kind === "pick" && !session) {
       return action.tuku ? "[media] 搜索结果已过期，请发送 #点B站视频 关键词。" : undefined
     }
+    if (action.kind === "download" && !action.target) return "[media] 请输入要下载的 B站链接、BV号或 av号。"
     const config = await loadGlobalConfig()
     const service = new BilibiliService({ fetch, tuneweaveConfig: config.tuneweave, searchLimit: (config.bilibili as BiliConfig).search_limit })
     switch (action.kind) {
@@ -466,7 +466,6 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         if (!action.next && session.page === 1) return "[media] 当前已经是第一页。"
         return showSearch(context, service, key, session.keyword, session.page + (action.next ? 1 : -1), true)
       case "download":
-        if (!action.target) return "[media] 请输入要下载的 B站链接、BV号或 av号。"
         await runDownload(context, service, action.target, "B站下载")
         return []
     }
@@ -495,7 +494,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         }
         if (!target) return
         const url = URL.parse(target)
-        if (url?.hostname !== "live.bilibili.com") {
+        if (!url || !biliLiveRoomId(url)) {
           options ??= await settings("bilibili")
           if (!options.parseVideoLink || signal?.aborted) return
           const active = commentSignal(context)
@@ -510,16 +509,17 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
           const id = resolved && biliDynamicId(resolved)
           if (id) {
             const provider = createBiliProvider({ fetch })
-            const post = await provider.fetchPost(id, signal)
+            const post = await provider.fetchPost(id, active)
+            if (active?.aborted) return
             if (!post) return "[media] 这条 B 站动态不可用。"
             if (action.kind === "quote" && action.action === "images") {
-              return sendOriginals(context, [...post.images, ...(post.forwarded?.images ?? [])], service.fetch)
+              return sendOriginals(context, [...post.images, ...(post.forwarded?.images ?? [])], service.fetch, active)
             }
             if (action.kind === "quote" && action.action !== "preview") return
             const discussion = post.activity?.comments !== "0" ? await discussionFor(post.commentTarget, context) : undefined
             const preview = { target: resolved.href, discussion }
             const messages = await makeDynamicMessages(provider, post, options,
-              { signal, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
+              { signal: active, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
             for (const message of messages) await reply(context, message, undefined, previewReceipt(context, preview))
             if (discussion) await showDiscussion(context, preview, "B 站评论")
             return []
@@ -544,7 +544,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       }
       await renderInfo(context, service, info, action.kind !== "quote")
     } catch (error) {
-      await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
+      if (!commentSignal(context)?.aborted) await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
     }
     return []
   }

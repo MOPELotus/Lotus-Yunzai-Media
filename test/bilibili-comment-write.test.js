@@ -52,7 +52,8 @@ function fixture() {
       }
       if (path === "/x/web-interface/view") {
         expect(headers.has("Cookie")).toBe(false)
-        expect(url.searchParams.get("bvid")).toBe(video)
+        if (url.searchParams.has("aid")) expect(url.searchParams.get("aid")).toBe("170001")
+        else expect(url.searchParams.get("bvid")).toBe(video)
         return Response.json({ code: 0, data: { bvid: auth.metadata ? video : "BV1qS411m73i", aid: "170001" } })
       }
       expect(url.origin).toBe("https://api.bilibili.com")
@@ -101,9 +102,13 @@ test("B 站主人评论按经验证的引用视频发单次表单，原消息重
     expect(await f.call("评论 另一个正文")).toContain("已经处理")
     expect(f.calls).toHaveLength(3)
     expect([...f.db].filter(([key]) => key.startsWith(commentKey)).map(([, value]) => value)).toEqual(["claimed"])
-    expect(await f.call("#评论 不同协议", { adapter: "milky" })).toContain("已发送")
+    const avReply = { user_id: 7, message: [{ type: "json", data: { meta: { news: {
+      jumpUrl: "https://www.bilibili.com/video/av000170001",
+    } } } }] }
+    expect(await f.call("#评论 不同协议", { adapter: "milky", lookupReply: async () => avReply })).toContain("已发送")
     expect(f.postCalls()).toHaveLength(2)
     expect(f.calls[0].query).toContain(video)
+    expect(f.calls[3].query).toBe("?aid=170001")
     expect(f.calls[2].query).toBe("")
   } finally { await f.command.dispose() }
 })

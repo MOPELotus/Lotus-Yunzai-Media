@@ -10,6 +10,8 @@ import { loadGlobalConfig, loadPublicShareConfig, publicShareSiteNames, type Pub
 import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
+import { loadBiliPgcSettings } from "./services/bilibili/pgc.ts"
+import { biliPgcQualities } from "./services/bilibili/pgc-playback.ts"
 import { createOfficialLinkSettings, officialLinkToggles, parseTrustedTelegramUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
 import { createJikeSettings, jikeFields } from "./services/jike/settings.ts"
 import { createKuaishouSettings, kuaishouFields } from "./services/kuaishou/settings.ts"
@@ -245,6 +247,13 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             : max !== undefined ? { min: min ?? 0, max, step: 1 } : undefined,
         })),
       ]),
+      { component: "SOFT_GROUP_BEGIN", label: "B 站番剧" },
+      { field: "bilibili.biliPgcAuto", label: "自动发送公开可下载分集", component: "Switch",
+        bottomHelpMessage: "关闭时仍可显式播放。平台下载授权和 B 站下载权限同时生效。" },
+      { field: "bilibili.biliPgcQuality", label: "番剧画质上限", component: "Select",
+        componentProps: { options: biliPgcQualities.map(([value, label]) => ({ label, value })) } },
+      { field: "bilibili.biliPgcDuration", label: "番剧最长时长（秒）", component: "InputNumber",
+        componentProps: { min: 1, max: 86_400, step: 1 } },
       ...publicShareSites.flatMap(site => [
         { component: "SOFT_GROUP_BEGIN", label: site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site] },
         ...publicShareToggles.map(([key, label, bottomHelpMessage]) => ({
@@ -268,7 +277,12 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
-          return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
+          const values = Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))
+          if (id === "bilibili") {
+            const pgc = await loadBiliPgcSettings(root, async () => settings)
+            Object.assign(values, { biliPgcAuto: pgc.automatic, biliPgcQuality: pgc.quality, biliPgcDuration: pgc.duration })
+          }
+          return [id, values]
         }))
         const [videos, shareSettings, tools, officialLinkSettings] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
           const settings = await loadPublicShareConfig(site, root)
@@ -316,6 +330,17 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           if (!users) return Result.error("请填写有效的 Telegram 信任 QQ。", 422)
           officialLinkPatch.trustedTelegramUsers = users
         }
+        const pgcPatch: Record<string, boolean | number> = {}
+        for (const key of ["biliPgcAuto", "biliPgcQuality", "biliPgcDuration"] as const) {
+          const field = `bilibili.${key}`
+          if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
+          const value = values[field]
+          const valid = key === "biliPgcAuto" ? typeof value === "boolean"
+            : typeof value === "number" && Number.isSafeInteger(value) &&
+              (key === "biliPgcQuality" ? biliPgcQualities.some(([quality]) => quality === value) : value >= 1 && value <= 86_400)
+          if (!valid) return Result.error("请填写有效的 B 站番剧播放设置。", 422)
+          pgcPatch[key] = value as number | boolean
+        }
         const changes = new Map<SubscriptionPlatform, { field: SettingsField; value: FieldInput }[]>()
         for (const { id, label, fields } of platforms) {
           const selected = []
@@ -335,6 +360,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             .filter(({ field, value }) => changed(field, value, settings))
             .map(({ field, value }) => [field.key, value])))
         }
+        if (Object.keys(pgcPatch).length) await config.editSettings("bilibili", () => pgcPatch)
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
         for (const [site, patch] of sharePatches) await savePublicShare(root, site, patch)
         for (const [store, patch] of publicSharePatches) await store.save(patch)

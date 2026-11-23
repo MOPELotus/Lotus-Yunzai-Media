@@ -7,6 +7,8 @@ import { CommandRegistry } from "../../../lib/commands.ts"
 import type { MessageEvent } from "../../../lib/messages.ts"
 import { lockFile } from "../../../lib/file-lock.ts"
 import { createModule } from "../index.ts"
+import { supportGuoba } from "../guoba-settings.ts"
+import { playbackQuality, publicBiliPgcTracks } from "../services/bilibili/pgc-playback.ts"
 import { fetchBiliPgc, loadBiliPgcSettings, parseBiliPgcLink, parseBiliPgcResponse, type BiliPgcFetch } from "../services/bilibili/pgc.ts"
 import { createSubscriptionConfig } from "../services/subscriptions/config.ts"
 
@@ -62,7 +64,7 @@ test("番剧由 Media 先识别，权限及关闭开关不落到普通视频，�
   const control = new AbortController()
   const module = await createModule({ lockFile, signal: control.signal,
     biliPgc: {
-      options: async () => ({ enable: enabled, private: false }),
+      options: async () => ({ enable: enabled, private: false, automatic: false, quality: 32, duration: 1800 }),
       fetcher: async () => { count++; return Response.json(body) },
       render: async (name, data) => {
         expect(name).toBe("bilibili-info")
@@ -103,12 +105,60 @@ test("番剧使用现有 B 站视频链接面板开关和旧 R 的私聊、禁�
   const source = join(directory, "backup/plugins/rconsole-plugin/config")
   const store = createSubscriptionConfig(join(directory, "data"), lockFile)
   try {
-    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: true, private: false })
+    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: true, private: false, automatic: false, quality: 32, duration: 1800 })
     await mkdir(source, { recursive: true })
     await writeFile(join(source, "tools.yaml"), "globalBlackList: [哔哩哔哩]\nprivateResolve: true\n")
-    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: false, private: true })
+    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: false, private: true, automatic: false, quality: 32, duration: 1800 })
     await writeFile(join(source, "tools.yaml"), "globalBlackList: []\nprivateResolve: true\n")
     await store.editSettings("bilibili", () => ({ parseVideoLink: 0 }))
-    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: false, private: true })
+    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: false, private: true, automatic: false, quality: 32, duration: 1800 })
+    await writeFile(join(source, "tools.yaml"), "privateResolve: true\nbiliBangumiDirect: true\nbiliBangumiResolution: 5\nbiliBangumiDuration: 999\n")
+    const panel = supportGuoba(join(directory, "data"), undefined, root).configInfo
+    expect(await panel.getConfigData()).toMatchObject({ bilibili: { biliPgcAuto: true, biliPgcQuality: 112, biliPgcDuration: 999 } })
+    const context = { Result: { ok: () => true, error: () => false } }
+    expect(await panel.setConfigData({ "bilibili.biliPgcAuto": false, "bilibili.biliPgcQuality": 64, "bilibili.biliPgcDuration": 120 },
+      context)).toBe(true)
+    expect(await loadBiliPgcSettings(root, store.settings)).toEqual({ enable: false, private: true, automatic: false, quality: 64, duration: 120 })
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("分集播放器拒绝试看、付款、加密、未知权限或同 CID 之外的轨道", () => {
+  const data = parseBiliPgcResponse(sample, parseBiliPgcLink(episode)!)!
+  const cid = data.episode!.cid!
+  const track = (type: "audio" | "video", id: number, url = `https://upos-test.bilivideo.com/upgcxcode/53/16/${cid}/${cid}_p1-1-30216.m4s`) => ({
+    id, codecid: type === "video" ? 7 : 0, mimeType: `${type}/mp4`, codecs: type === "video" ? "avc1.64001F" : "mp4a.40.2",
+    size: 11231, md5: "0123456789abcdef0123456789abcdef", baseUrl: url,
+  })
+  const result = { code: 0, error_code: 0, can_watch_reason: 0, bp: 0, status: 2, has_paid: false, is_drm: false,
+    is_preview: 0, timelength: 109781, dash: { video: [track("video", 64), track("video", 32)], audio: [track("audio", 30280)] } }
+  const parse = (raw: unknown) => publicBiliPgcTracks({ code: 0, result: raw }, data.episode!, 32)
+  expect(playbackQuality(undefined, 5)).toBe(112)
+  expect(parse(result)).toMatchObject({ video: { id: 32 }, audio: { id: 30280 }, duration: 109.781 })
+  for (const patch of [{ is_preview: 1 }, { error_code: -10403 }, { can_watch_reason: 1 }, { bp: 1 }, { has_paid: true },
+    { status: 13 }, { is_drm: true }, { bp: undefined }, { timelength: 1000 },
+    { dash: { ...result.dash, audio: [track("audio", 30280, `https://upos-test.bilivideo.com/upgcxcode/53/22/789/789_p1-1-30216.m4s`)] } },
+    { dash: { ...result.dash, audio: [track("audio", 30280, `https://upos-test.bilivideo.com.evil.test/upgcxcode/53/16/${cid}/${cid}_p1-1-30216.m4s`)] } },
+  ]) expect(parse({ ...result, ...patch })).toBeUndefined()
+})
+
+test("新版播放命令和旧 B 站下载形式识别 ep，未有授权不触碰播放器或 CDN", async () => {
+  const control = new AbortController()
+  const calls: string[] = []
+  const module = await createModule({ lockFile, signal: control.signal, biliPgc: {
+    options: async () => ({ enable: true, private: false, automatic: false, quality: 32, duration: 1800 }),
+    fetcher: async url => { calls.push(url.pathname); return Response.json(sample) },
+    playback: { cdnFetch: async () => { throw new Error("不应该触碰媒体 CDN") } },
+  } })
+  const commands = new CommandRegistry()
+  commands.registerModule({ name: "@lotus-yunzai/media", ...module })
+  try {
+    for (const prefix of ["#播放 ", "#B站下载 "]) {
+      const result = await commands.dispatchFallback(groupEvent(prefix + episode), () => true, () => false)
+      expect(result).toMatch(/未提供可验证的公开下载权限.*\n.*ep2395158/u)
+    }
+    expect(calls).toEqual(["/pgc/view/web/season", "/pgc/view/web/season"])
+  } finally {
+    control.abort()
+    await module.dispose()
+  }
 })

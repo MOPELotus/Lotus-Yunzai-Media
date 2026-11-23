@@ -26,7 +26,7 @@ const defaults = {
   isSplit: 1, splitHeight: 8000, noSplitHeight: 7500, boxGrid: 1, pushTaskLog: 1,
 }
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAtAllCD: 1800,
-  liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1 }
+  liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1, biliPgcAuto: false, biliPgcQuality: 32, biliPgcDuration: 1800 }
 const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0 }
 const shareDefaults = { enable: true, private_preview: false }
 const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults }

@@ -6,6 +6,7 @@ import { dataPath } from "../../core/path.ts"
 import { renderTemplate } from "../../core/render/service.ts"
 import { buildMediaMessageText } from "../media/message.ts"
 import { createSubscriptionConfig } from "../subscriptions/config.ts"
+import { biliPgcDefaultDuration, createBiliPgcPlayback, playbackQuality } from "./pgc-playback.ts"
 
 const site = "https://www.bilibili.com"
 const api = "https://api.bilibili.com/pgc/view/web/season"
@@ -13,6 +14,7 @@ const maxResponse = 2 * 1024 * 1024
 const feature = "B 站番剧预览"
 const link = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:https?:\/\/|(?=www\.bilibili\.com\/))[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
 const hosts = new Set(["www.bilibili.com", "bilibili.com", "m.bilibili.com"])
+const playCommand = /^#(?:播放|b站(?:下载|下视频))\s+(\S+)\s*$/iu
 const idPattern = /^[1-9]\d{0,15}$/u
 const config = createSubscriptionConfig(dataPath, lockFile)
 const deployment = new URL("../../../../", import.meta.url)
@@ -103,7 +105,9 @@ export function parseBiliPgcResponse(raw: unknown, target: BiliPgcTarget): BiliP
   const selected = target.kind === "ss" ? episode(fields(rows[0])) :
     rows.map(fields).filter(row => id(row.ep_id) === target.id || id(row.id) === target.id).map(episode)
   const match = Array.isArray(selected) ? selected[0] : selected
-  if (Array.isArray(selected) && (!match || selected.some(row => !row || row.cid !== match.cid || row.title !== match.title))) return
+  if (Array.isArray(selected) && (!match || selected.some(row => !row || row.cid !== match.cid || row.title !== match.title ||
+      row.status !== match.status || row.badge !== match.badge || row.duration !== match.duration ||
+      row.rights.area_limit !== match.rights.area_limit || row.rights.allow_download !== match.rights.allow_download))) return
   const rating = fields(result.rating)
   const progress = fields(result.new_ep)
   const score = number(rating.score)
@@ -143,18 +147,28 @@ export async function loadBiliPgcSettings(root = deployment, video = config.sett
   const [rules, old] = await Promise.all([video("bilibili"),
     (async () => await readOptionalConfigFile(root, "plugins/rconsole-plugin/config/tools.yaml") ??
       await readOptionalConfigFile(root, "backup/plugins/rconsole-plugin/config/tools.yaml"))()])
+  const duration = rules.biliPgcDuration ?? old?.biliBangumiDuration
   return { enable: rules.parseVideoLink && !(Array.isArray(old?.globalBlackList) && old.globalBlackList.includes("哔哩哔哩")),
-    private: old?.privateResolve === true }
+    private: old?.privateResolve === true, automatic: rules.biliPgcAuto ?? (old?.biliBangumiDirect === true),
+    quality: playbackQuality(rules.biliPgcQuality, old?.biliBangumiResolution),
+    duration: typeof duration === "number" && Number.isSafeInteger(duration) && duration > 0 ? duration : biliPgcDefaultDuration,
+  }
 }
 
-export function createBiliPgcPreview({ signal, fetcher = fetch, options = loadBiliPgcSettings, render = renderTemplate }: {
+export function createBiliPgcPreview({ signal, fetcher = fetch, options = loadBiliPgcSettings, render = renderTemplate, playback }: {
   readonly signal?: AbortSignal
   readonly fetcher?: BiliPgcFetch
-  readonly options?: typeof loadBiliPgcSettings
+  readonly options?: () => ReturnType<typeof loadBiliPgcSettings>
   readonly render?: typeof renderTemplate
+  readonly playback?: Omit<NonNullable<Parameters<typeof createBiliPgcPlayback>[0]>, "fetcher">
 }) {
+  const play = createBiliPgcPlayback({ ...playback, fetcher })
+
   function target(message: string, context: MessageFallbackContext) {
-    if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private") || /^\s*[#＃]/u.test(message)) return
+    if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private")) return
+    const command = playCommand.exec(message)
+    if (command?.[1]) return parseBiliPgcLink(command[1])
+    if (/^\s*[#＃]/u.test(message)) return
     const contents = buildMediaMessageText({ ...context, msg: message }).replaceAll("\\/", "/")
     for (const [value] of contents.matchAll(link)) {
       const target = parseBiliPgcLink(value.replace(/[.,!;]+$/u, ""))
@@ -172,13 +186,15 @@ export function createBiliPgcPreview({ signal, fetcher = fetch, options = loadBi
         .filter((scope): scope is AbortSignal => !!scope)
       const active = AbortSignal.any(scopes)
       if (active.aborted) return
+      const explicit = playCommand.test(message)
       const rules = await options().catch(() => undefined)
-      if (!rules?.enable || (context.message_type === "private" && !rules.private) || active.aborted) return
+      if (!rules?.enable || (!explicit && context.message_type === "private" && !rules.private) || active.aborted) return
       const unavailable = `暂无法读取 B 站番剧公开信息。\n${input.url}`
       try {
         const data = await fetchBiliPgc(input, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)]))
         if (active.aborted) return
         if (!data) return unavailable
+        if (explicit) return play(input, data, context, rules, active, readBiliPgcJson)
         const selected = input.kind === "ep" ? data.episode : undefined
         const duration = selected?.duration ? `时长 ${Math.floor(selected.duration / 60)} 分 ${Math.floor(selected.duration % 60)} 秒` : ""
         const stat = data.stats
@@ -194,8 +210,12 @@ export function createBiliPgcPreview({ signal, fetcher = fetch, options = loadBi
         let image = await render("bilibili-info", card).catch(() => undefined)
         if (image && image.byteLength > limit && !active.aborted) image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)
         if (active.aborted) return
-        if (image && image.byteLength <= limit) return [{ type: "image", file: image }, { type: "text", text: input.url }]
-        return [data.title, info, input.url].filter(Boolean).join("\n")
+        const preview: MessageReply = image && image.byteLength <= limit
+          ? [{ type: "image", file: image }, { type: "text", text: input.url }]
+          : [data.title, info, input.url].filter(Boolean).join("\n")
+        if (!rules.automatic || !data.episode) return preview
+        if (await context.reply(preview) && !active.aborted) return play(input, data, context, rules, active, readBiliPgcJson)
+        return []
       } catch { if (!active.aborted) return unavailable }
     },
   }

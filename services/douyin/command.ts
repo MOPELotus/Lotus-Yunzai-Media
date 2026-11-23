@@ -78,14 +78,14 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
           return
         }
         const items = [
+          { label: "房间标题", value: room.title },
           ...(room.host ? [{ label: "主播", value: room.host }] : []),
           ...(room.viewers === undefined ? [] : [{ label: "页面显示观看人数", value: String(room.viewers) }]),
         ]
         const cardItems = items.map(({ label, value }) => ({ label, value: liveCardText(value) || "见原页面" }))
         await replyImage(reply, active, maxBytes, renderScale => renderLiveCard({
-          title: liveCardText(room.title) || "抖音直播间", subtitle: "抖音直播",
-          message: room.status, items: cardItems, userId: context.user_id,
-        }, { saveId, renderScale }), [`抖音直播 · ${room.title}`, room.status,
+          title: room.status, subtitle: "抖音", items: cardItems, userId: context.user_id,
+        }, { saveId, renderScale }), [`抖音 · ${room.status}`,
           ...items.map(({ label, value }) => `${label} ${value}`)].join("\n"))
         await reply(showInfo ? share.url : `抖音直播仅提供房间预览。\n${share.url}`)
         return

@@ -45,8 +45,8 @@ test("抖音官方直播分享仅走同房间的公开页面，跳转参数不�
     enabled = true
     expect(await registry.dispatchFallback(event, () => true, () => false)).toEqual([])
     expect(requests).toEqual([[short, "manual"], [url, "error"]])
-    expect(cards[0]).toMatchObject({ title: "公开测试房间", subtitle: "抖音直播", message: "直播已结束",
-      items: [{ label: "主播", value: "测试主播" }, { label: "页面显示观看人数", value: "0" }] })
+    expect(cards[0]).toMatchObject({ title: "直播已结束", subtitle: "抖音",
+      items: [{ label: "房间标题", value: "公开测试房间" }, { label: "主播", value: "测试主播" }, { label: "页面显示观看人数", value: "0" }] })
     expect(replies).toEqual([{ type: "image", file: Buffer.from("image") }, url])
     expect(await registry.dispatchFallback({ ...event, msg: "#抖音下载 " + url }, () => true, () => false)).toEqual([])
     expect(replies.at(-1)).toBe("抖音直播仅提供房间预览。\n" + url)
@@ -70,4 +70,24 @@ test("抖音直播状态与同房间有效资料核验，含误导分享正文�
   }
   await expect(resolveDouyinShare("分享口令 ##synthetic## 打开抖音", { fetch: async input => { requests.push(input) } })).rejects.toThrow("链接")
   expect(requests).toEqual([short, short])
+})
+
+test("抖音公开房间状态放在表头，保留房间原题和文字回退", async () => {
+  const staleTitle = "🇨🇳戈壁...正在直播"
+  const service = new DouyinService({ fetch: async () => new Response(
+    "<title>抖音</title>" + markup({ title: staleTitle })) })
+  const cards = [], replies = []
+  const commands = createDouyinCommands({}, { makeService: () => service,
+    loadConfig: async () => ({ douyin: { enable: true }, permissions: {} }),
+    renderLiveCard: async card => { cards.push(card); return undefined },
+  })
+  try {
+    expect(await commands.fallback(url, { message_type: "private", user_id: 42,
+      reply: async value => { replies.push(value); return true },
+    })).toEqual([])
+    expect(cards[0]).toMatchObject({ title: "直播已结束", items: [{ label: "房间标题", value: "戈壁...正在直播" },
+      { label: "主播", value: "测试主播" }, { label: "页面显示观看人数", value: "0" }],
+    })
+    expect(replies).toEqual([`抖音 · 直播已结束\n房间标题 ${staleTitle}\n主播 测试主播\n页面显示观看人数 0`, url])
+  } finally { await commands.dispose() }
 })

@@ -8,6 +8,7 @@ import { createMusicCommands } from "../services/music/command.ts"
 import { readMusicAccounts, saveMusicAccount } from "../services/music/accounts.ts"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.ts"
 import { TuneWeaveService } from "../services/tuneweave/service.ts"
+import { NeteaseCloudLibrary } from "../services/music/cloud-service.ts"
 
 const temp = []
 async function directory() {
@@ -171,6 +172,73 @@ test("扫码核实平台和别名，合伙人偏好仍按原网易云 UID 保存
   const partner = YAML.parse(await readFile(partnerAccountsFile,"utf8")).accounts
   expect(partner).toHaveLength(1)
   expect(partner[0]).toMatchObject({uid:"1042",qq:"42",extraCount:6,comment:false,tuneweave_account:"lotus-nep-42"})
+})
+
+test("音乐登录与云盘复用同一网易云身份，补全合伙人关联且不申请二维码", async () => {
+  const root = await directory()
+  const accountsFile = join(root, "music.yaml"), partnerAccountsFile = join(root, "partner.yaml")
+  const calls = []
+  let uid = "1042"
+  let selected = true
+  const endpoint = "http://127.0.0.1:7832"
+  const signal = new AbortController()
+  const service = new MusicService({ accountsFile, partnerAccountsFile,
+    tuneweave: { config: { api_url: endpoint }, async request(route, options) {
+      const url = new URL(route, endpoint)
+      calls.push([url.pathname, url.searchParams.get("account")])
+      if (url.pathname === "/v1/capabilities") return [{ platform: "netease", registered: true, capabilities: ["qr_login"] }]
+      expect(url.pathname).toBe("/v1/account")
+      const alias = url.searchParams.get("account")
+      expect(options.accountSelection).toEqual({ platform: "netease", alias })
+      expect(options.credentials).toBeUndefined()
+      return { accountSelected: selected, data: { platform: "netease", account: alias, authenticated: true, user_id: uid, nickname: "新昵称" } }
+    } },
+  })
+  await saveMusicAccount("netease", { alias: "lotus-nep-42", uid, owner: 42, credential: "twc1_test" }, { file: accountsFile })
+  const library = new NeteaseCloudLibrary()
+  expect(await library.verify(service, 42, signal.signal)).toMatchObject({ uid, alias: "lotus-nep-42", owner: 42 })
+  await expect(library.verify(service, 43, signal.signal)).rejects.toThrow("自己的网易云账号")
+  const command = createMusicCommands({ openMusic: async () => ({ api: service, defaultPlatform: "netease", timeoutMs: 120_000 }) })
+  const messages = []
+  const friend = { message_type: "private", self_id: 99, user_id: 42, canManagePackages: true,
+    privateCredentialSignal: signal.signal, reply: async value => { messages.push(value); return true } }
+  try {
+    expect(await command.fallback("#音乐登录", friend)).toContain("云盘共用登录")
+    expect(await command.fallback("1", friend)).toEqual([])
+    expect(messages).toEqual([expect.stringContaining("已使用当前网易云登录")])
+    expect(await service.partner.loadAccounts()).toMatchObject([{ uid, qq: "42", tuneweave_account: "lotus-nep-42" }])
+    expect((await readMusicAccounts(accountsFile)).netease.credential).toBe("twc1_test")
+    expect(calls.every(([path]) => path !== "/v1/auth/qr")).toBe(true)
+    uid = "2020"
+    await expect(service.reuseMusicLogin("netease", 42, signal.signal, true)).rejects.toThrow("账号不一致")
+    selected = false
+    await expect(service.reuseMusicLogin("netease", 42, signal.signal, true)).rejects.toThrow("未确认")
+    expect((await readMusicAccounts(accountsFile)).netease.uid).toBe("1042")
+  } finally { await command.dispose() }
+})
+
+test("旧合伙人只复用已登录且同 UID 的 TuneWeave 默认别名，不上传明文 Cookie", async () => {
+  const root = await directory()
+  const accountsFile = join(root, "music.yaml"), partnerAccountsFile = join(root, "partner.yaml")
+  const account = { uid: "1042", qq: "42", extraCount: 6, comment: false, cookie: "MUSIC_U=fixture-not-a-secret" }
+  await writeFile(partnerAccountsFile, YAML.stringify({ accounts: [account] }))
+  let uid = "1000"
+  const service = new MusicService({ accountsFile, partnerAccountsFile, tuneweave: { async request(route, options) {
+    expect(route).toBe("/v1/account?platform=netease&account=default")
+    expect(options.credentials).toBeUndefined()
+    expect(options.body).toBeUndefined()
+    return { accountSelected: true, data: { platform: "netease", account: "default", authenticated: true, user_id: uid } }
+  } } })
+  const signal = new AbortController().signal
+  expect(await service.reuseMusicLogin("netease", 43, signal, true)).toBe(false)
+  await expect(service.reuseMusicLogin("netease", 42, signal, true)).rejects.toThrow("账号不一致")
+  expect((await service.partner.loadAccounts())[0].cookie).toBe(account.cookie)
+  uid = "1042"
+  expect(await service.reuseMusicLogin("netease", 42, signal, true)).toBe(true)
+  const [linked] = await service.partner.loadAccounts()
+  expect(linked).toMatchObject({ uid, qq: "42", tuneweave_account: "default", extraCount: 6, comment: false })
+  expect(linked.cookie).toBeUndefined()
+  expect((await readMusicAccounts(accountsFile)).netease).toMatchObject({ uid, alias: "default", owner: 42, credential: "" })
 })
 
 test("取消与串号确认保留原音乐身份和凭据", async () => {

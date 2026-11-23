@@ -16,6 +16,7 @@ import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type
 import type { PublicMusicTarget } from "./share-link.ts"
 import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
+import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner, verifyNeteaseAccount } from "./netease-account.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -131,7 +132,77 @@ export class MusicService {
     if ((await readMusicAccounts(this.accountsFile)).netease) return
     const linked = (await this.partner.loadAccounts()).filter(a => a.tuneweave_account)
     const [account] = linked
-    if (account && linked.length === 1) await saveMusicAccount("netease", { alias: account.tuneweave_account, uid: account.uid, nickname: account.nickname, credential: "" }, { file: this.accountsFile, expected: null })
+    if (linked.length !== 1 || !account?.tuneweave_account || !musicAccountAlias.test(account.tuneweave_account) ||
+        !neteaseAccountId.test(String(account.uid ?? ""))) return
+    const owner = Number(account.qq)
+    await saveMusicAccount("netease", { alias: account.tuneweave_account, uid: account.uid, nickname: account.nickname, credential: "",
+      ...(Number.isSafeInteger(owner) && owner > 0 && { owner }) }, { file: this.accountsFile, expected: null })
+  }
+  async reuseNeteaseLogin(owner: number, signal: AbortSignal, selectPublic: boolean) {
+    const currentBinding = await findOwnedNeteaseAccount(this, owner, signal)
+    const oldAccounts = currentBinding ? [] : (await this.partner.loadAccounts()).filter(account =>
+      !account.tuneweave_account && Boolean(account.cookie) && String(account.qq) === String(owner) &&
+      neteaseAccountId.test(String(account.uid ?? "")))
+    const legacy = oldAccounts.length === 1 ? oldAccounts[0] : undefined
+    // The old partner used the TuneWeave default alias. It may already be
+    // authenticated, so check its UID without resending the old raw cookie.
+    const account = currentBinding ?? (legacy ? { owner, alias: "default", uid: String(legacy.uid) } : undefined)
+    if (!account) return false
+    if (legacy) {
+      const music = (await readMusicAccounts(this.accountsFile)).netease
+      if (music?.alias === "default" && (!recordedNeteaseOwner(music, owner) || String(music.uid) !== account.uid)) return false
+    }
+    let profile
+    try { profile = await verifyNeteaseAccount(this, account, signal) }
+    catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "authentication_required") return false
+      throw error
+    }
+    const latest = await findOwnedNeteaseAccount(this, owner, signal)
+    if (currentBinding ? latest?.alias !== account.alias || latest.uid !== account.uid : Boolean(latest)) {
+      throw new Error("网易云绑定已变更，请重试。")
+    }
+    const existing = (await this.partner.loadAccounts()).find(row => String(row.uid) === account.uid)
+    if (legacy && (!existing || existing.cookie !== legacy.cookie || existing.tuneweave_account !== legacy.tuneweave_account)) {
+      throw new Error("网易云绑定已变更，请重试。")
+    }
+    if (existing?.qq && String(existing.qq) !== String(owner)) throw new Error("此网易云账号已绑定其他主人。")
+    if (existing?.tuneweave_account && existing.tuneweave_account !== account.alias) {
+      throw new Error("网易云绑定已变更，请重试。")
+    }
+    if (!existing?.tuneweave_account || !existing.qq) {
+      await this.partner.saveAccount({ uid: account.uid, nickname: profile.nickname, qq: owner, tuneweave_account: account.alias },
+        { signal, expectedBinding: existing ?? null })
+    }
+    const music = (await readMusicAccounts(this.accountsFile)).netease
+    const same = music && recordedNeteaseOwner(music, owner) && music.alias === account.alias && String(music.uid) === account.uid
+    if (!music || same || selectPublic) {
+      const saved = await saveMusicAccount("netease", { alias: account.alias, uid: account.uid, nickname: profile.nickname || (same ? music.nickname : ""),
+        credential: same ? music.credential ?? "" : "", owner }, { file: this.accountsFile, expected: music ?? null, signal })
+      if (!saved) throw new Error("网易云绑定已变更，请重试。")
+    }
+    return true
+  }
+  async reuseMusicLogin(platform: string, owner: number, signal: AbortSignal, selectPublic: boolean) {
+    if (platform === "netease") return this.reuseNeteaseLogin(owner, signal, selectPublic)
+    const saved = (await readMusicAccounts(this.accountsFile))[platform]
+    if (!saved?.alias || !musicAccountAlias.test(saved.alias) || saved.owner !== owner || !saved.uid) return false
+    const alias = saved.alias
+    try {
+      const { data, accountSelected } = await this.tuneweave.request<TuneWeaveQrProfile>(
+        "/v1/account?" + new URLSearchParams({ platform, account: alias }), { signal, redirect: "error", accountSelection: { platform, alias } })
+      signal.throwIfAborted()
+      if (!accountSelected || data?.platform !== platform || data.account !== alias) throw new Error("平台登录账号未确认，请使用 #音乐重新登录 核实。")
+      if (data.authenticated === false) return false
+      if (data.authenticated !== true || String(data.user_id) !== String(saved.uid)) throw new Error("平台登录账号不一致，请使用 #音乐重新登录 核实。")
+      const current = (await readMusicAccounts(this.accountsFile))[platform]
+      if (current?.owner !== owner || current.alias !== alias || current.uid !== saved.uid) throw new Error("音乐账号绑定已变更，请重试。")
+      signal.throwIfAborted()
+      return true
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "authentication_required") return false
+      throw error
+    }
   }
   async platforms() {
     const items = await this.tuneweave.request<Capability[]>("/v1/capabilities")
@@ -339,7 +410,7 @@ export class MusicService {
   async cleanup(result: { taskDir: string }) { await releaseMediaTask(this.tasksDir, result.taskDir) }
   async createLogin(platform: string, owner: number | undefined, loginType?: string, { signal }: { signal?: AbortSignal } = {}): Promise<MusicLogin> {
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform)) throw new Error("不支持的音乐平台")
-    const alias = platform === "netease" ? `lotus-nep-${String(owner).replace(/[^a-zA-Z0-9_-]/g, "_")}` : `lotus-music-${platform}`
+    const alias = platform === "netease" && owner !== undefined ? neteaseOwnerAlias(owner) : `lotus-music-${platform}`
     const qr = await this.tuneweave.request<QrCode>("/v1/auth/qr", {
       method: "POST", body: { platform, account: alias, credential_mode: "both", ...(loginType ? { login_type: loginType } : {}) },
       signal, redirect: "error",

@@ -1,11 +1,9 @@
 import { isChatFileName, maxChatFileBytes, type ChatFile } from "../../../../lib/chat-files.ts"
-import type { TuneWeaveQrProfile } from "../tuneweave/auth.ts"
 import type { TuneWeaveRequestOptions } from "../tuneweave/service.ts"
+import { findOwnedNeteaseAccount, verifyNeteaseAccount } from "./netease-account.ts"
 import type { MusicService, MusicStream, MusicTrack } from "./service.ts"
 
 const trackReference = /^netease:[1-9]\d{0,21}$/u
-const numericId = /^[1-9]\d{0,21}$/u
-const accountAlias = /^[a-zA-Z0-9_-]{1,128}$/u
 const pageSize = 100
 const refreshInterval = 5 * 60_000
 
@@ -52,18 +50,9 @@ export class NeteaseCloudLibrary {
   constructor(readonly now = Date.now) {}
 
   private async binding(api: MusicService, owner: number, signal: AbortSignal): Promise<Binding> {
-    signal.throwIfAborted()
-    const candidates = (await api.partner.loadAccounts()).filter(item => String(item.qq) === String(owner) &&
-      typeof item.tuneweave_account === "string" && accountAlias.test(item.tuneweave_account) && numericId.test(String(item.uid)))
-    const [account] = candidates
-    const expectedAlias = `lotus-nep-${owner}`
-    const intended = candidates.find(item => item.tuneweave_account === expectedAlias) ?? (candidates.length === 1 ? account : undefined)
-    if (!intended?.tuneweave_account) throw new Error("请先在当前好友私聊使用 #音乐登录 绑定自己的网易云账号。")
-    const alias = intended.tuneweave_account
-    const uid = String(intended.uid)
-    const key = JSON.stringify([api.tuneweave.config.api_url, owner, alias, uid])
-    signal.throwIfAborted()
-    return { owner, alias, uid, key }
+    const account = await findOwnedNeteaseAccount(api, owner, signal)
+    if (!account) throw new Error("请先在当前好友私聊使用 #音乐登录 绑定自己的网易云账号。")
+    return { ...account, key: JSON.stringify([api.tuneweave.config.api_url, owner, account.alias, account.uid]) }
   }
 
   private async request<T>(api: MusicService, binding: Binding, path: string, params: Record<string, string>,
@@ -79,13 +68,10 @@ export class NeteaseCloudLibrary {
 
   async verify(api: MusicService, owner: number, signal: AbortSignal) {
     const binding = await this.binding(api, owner, signal)
-    const { data } = await this.request<TuneWeaveQrProfile>(api, binding, "account", { platform: "netease" }, signal).catch(error => {
+    await verifyNeteaseAccount(api, binding, signal).catch(error => {
       if (error?.code === "authentication_required") throw new Error("网易云登录已过期，请在当前好友私聊重新扫码。")
       throw error
     })
-    if (data?.platform !== "netease" || data.account !== binding.alias || data.authenticated !== true || String(data.user_id) !== binding.uid) {
-      throw new Error("网易云登录已过期或账号不一致，请在当前好友私聊重新扫码。")
-    }
     await this.assertCurrent(api, binding, signal)
     return binding
   }

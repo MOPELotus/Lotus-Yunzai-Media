@@ -68,11 +68,12 @@ type SearchSession = SessionBase & { readonly stage: "search"; readonly platform
   episodes?: Awaited<ReturnType<MusicService["searchEpisodes"]>>; cloud?: CloudSearch; loading?: boolean }
 type PublicSelection = { readonly track: MusicTrack } | { readonly episode: VoiceSearchSelection }
 type ReissueSelection = { readonly source: PublicSelection; readonly controller: AbortController; expires: number; busy: boolean }
-type Scan = { readonly api: MusicService; readonly platform: string; readonly partner?: true; readonly timeoutMs?: number; readonly pollMs?: number }
+type Scan = { readonly api: MusicService; readonly platform: string; readonly partner?: true; readonly force?: boolean;
+  readonly timeoutMs?: number; readonly pollMs?: number }
 type ScanSession = SessionBase & Scan & { readonly stage: "polling"; readonly controller: AbortController }
 type Session = SearchSession | ScanSession |
-  (SessionBase & { readonly stage: "platform"; readonly platforms: readonly Menu[] }) |
-  (SessionBase & { readonly stage: "type"; readonly platform: string; readonly types: readonly ScanType[] })
+  (SessionBase & { readonly stage: "platform"; readonly platforms: readonly Menu[]; readonly force?: boolean }) |
+  (SessionBase & { readonly stage: "type"; readonly platform: string; readonly types: readonly ScanType[]; readonly force?: boolean })
 type PartnerJob = { readonly controller: AbortController;
   promise?: ReturnType<NeteasePartnerTask["execute"]> }
 
@@ -628,6 +629,18 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     return []
   }
 
+  async function partnerLoginDone(context: Context, active: AbortSignal, reused: boolean) {
+    let done = reused ? "已使用当前网易云登录，合伙人定时任务已启用。" : "网易云合伙人账号已登录，定时任务已启用。"
+    try {
+      await enablePartnerAfterLogin(root, active, config => ownerPermission(context, config))
+    } catch {
+      if (active.aborted) return
+      done = "网易云合伙人账号已登录，定时任务启用未确认。请检查合伙人配置。"
+    }
+    const image = await renderStatusCard({ title: "合伙人登录", subtitle: "音乐合伙人", message: done }).catch(() => undefined)
+    if (!active.aborted) await imageReply(context, image, done)
+  }
+
   async function scan(context: Context, key: string, scanOptions: Scan, type?: string) {
     const friend = credentialScope(context)
     if (!friend) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
@@ -642,6 +655,13 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     const active = AbortSignal.any([friend, moduleSignal, controller.signal])
     try {
       active.throwIfAborted()
+      if (!scanOptions.force && context.user_id !== undefined && await api.reuseMusicLogin(platform, context.user_id, active, !session.partner)) {
+        active.throwIfAborted()
+        if (session.partner) await partnerLoginDone(context, active, true)
+        else await reply(context, platform === "netease" ? "已使用当前网易云登录，点歌、云盘和合伙人共用此账号。换号请用 #音乐重新登录。"
+          : `已使用当前${musicNames[platform]}登录。换号请用 #音乐重新登录。`)
+        return
+      }
       if (session.partner) await api.tuneweave.requireReady("netease", active)
       const login = await api.createLogin(platform, context.user_id, type, { signal: active })
       active.throwIfAborted()
@@ -659,17 +679,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       session.expires = Date.now() + timeoutMs
       await api.waitLogin(login, { signal: active, timeoutMs, pollMs: session.pollMs })
       if (active.aborted) return
-      if (session.partner) {
-        let done = "网易云合伙人账号已登录，定时任务已启用。"
-        try {
-          await enablePartnerAfterLogin(root, active, config => ownerPermission(context, config))
-        } catch {
-          if (active.aborted) return
-          done = "网易云合伙人账号已登录，定时任务启用未确认。请检查合伙人配置或重试登录。"
-        }
-        const image = await renderStatusCard({ title: "合伙人登录", subtitle: "音乐合伙人", message: done }).catch(() => undefined)
-        if (!active.aborted) await imageReply(context, image, done)
-      } else await reply(context, musicNames[platform] + "公共音乐账号已登录。")
+      if (session.partner) await partnerLoginDone(context, active, false)
+      else await reply(context, musicNames[platform] + "公共音乐账号已登录。")
     } catch (error) {
       if (!active.aborted) throw error
     } finally {
@@ -767,10 +778,10 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           if (!selected) throw new Error("请选择列表中的平台序号")
           const types = scanTypes[selected.platform]
           if (types) {
-            sessions.set(key, { stage: "type", api: session.api, expires: session.expires, platform: selected.platform, types })
+            sessions.set(key, { stage: "type", api: session.api, expires: session.expires, platform: selected.platform, types, force: session.force })
             return "请选择扫码方式：\n" + types.map((item, index) => `${index + 1}. ${item.name}`).join("\n")
           }
-          await scan(context, key, { api: session.api, platform: selected.platform })
+          await scan(context, key, { api: session.api, platform: selected.platform, force: session.force })
         } else if (session.stage === "type") {
           const type = session.types[index]
           if (!type) throw new Error("请选择列表中的扫码方式序号")
@@ -790,6 +801,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     if (partnerManualCommand.test(message)) return "partnerManual"
     switch (message) {
       case "#音乐登录": return "login"
+      case "#音乐重新登录": return "login"
       case "#音乐帮助": return "help"
       case "#合伙人登录": return "partnerLogin"
       case "#合伙人日志": return "partnerLog"
@@ -901,9 +913,10 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const { api, timeoutMs } = await openMusic()
         const platforms = (await api.platforms()).filter(item => item.capabilities.includes("qr_login"))
         if (!platforms.length) throw new Error("当前 TuneWeave 没有可扫码的平台。")
-        replace(key, { stage: "platform", api, platforms, expires: Date.now() + timeoutMs })
+        const force = message === "#音乐重新登录"
+        replace(key, { stage: "platform", api, platforms, force, expires: Date.now() + timeoutMs })
         return "请选择扫码平台：\n" + platforms.map((item, index) => `${index + 1}. ${item.name}`).join("\n") +
-          "\n输入数字继续，#取消 退出。网易云与合伙人登录共用。"
+          "\n输入数字继续，#取消 退出。网易云与合伙人、云盘共用登录。"
       } catch (error) { return "[media] 音乐：" + errorText(error) }
     }
 

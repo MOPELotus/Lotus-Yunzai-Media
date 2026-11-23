@@ -41,7 +41,9 @@ export class NeteasePartnerAccounts {
     return readAccounts(file)
   }
 
-  saveAccount(account: PartnerAccount, { signal, onlyIfLegacy = false }: { signal?: AbortSignal; onlyIfLegacy?: boolean } = {}) {
+  saveAccount(account: PartnerAccount, { signal, onlyIfLegacy = false, expectedBinding }: {
+    signal?: AbortSignal; onlyIfLegacy?: boolean; expectedBinding?: PartnerAccount | null
+  } = {}) {
     const file = path.resolve(this.accountsFile)
     const task = (accountWrites.get(file) || Promise.resolve()).catch(() => {}).then(async () => {
       signal?.throwIfAborted()
@@ -50,6 +52,14 @@ export class NeteasePartnerAccounts {
       // Preferences belong to the authenticated UID, not to the QR alias. An
       // owner can reuse an alias to log in to a different NetEase account.
       const existing = accounts.find(item => uid && String(item.uid) === uid)
+      if (expectedBinding !== undefined && (expectedBinding === null ? Boolean(existing) :
+          !existing || existing.qq !== expectedBinding.qq || existing.tuneweave_account !== expectedBinding.tuneweave_account ||
+          existing.cookie !== expectedBinding.cookie)) {
+        throw new Error("网易云绑定已变更，请重试。")
+      }
+      if (expectedBinding !== undefined && accounts.some(item => item !== existing && item.tuneweave_account === account.tuneweave_account)) {
+        throw new Error("网易云绑定已变更，请重试。")
+      }
       if (onlyIfLegacy && existing?.tuneweave_account) return existing
       const normalized = {
         uid,

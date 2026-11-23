@@ -5,11 +5,19 @@ import { PermissionService } from "../../core/permissions/service.ts"
 import { renderTemplate, renderStatusCard } from "../../core/render/service.ts"
 import { sendMediaFile, mediaFailureMessage } from "../media/files.ts"
 import { buildMediaMessageText, articlePages, isMediaCommandText } from "../media/message.ts"
+import { extractDouyinTarget } from "./links.ts"
 import { DouyinService, normalizeDouyinDownloadConfig } from "./service.ts"
 
 const downloadCommand = /^#抖音(?:下载|下视频)\s+([\s\S]+)$/u
 const shareHost = /(?:douyin|iesdouyin)\.com/iu
 const featureNames = ["[media] 抖音解析"] as const
+const graphemes = new Intl.Segmenter()
+
+// The media card fonts do not include color emoji. Keep the original in text.
+function liveCardText(value: string) {
+  return Array.from(graphemes.segment(value), ({ segment }) => /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(segment) ? "" : segment)
+    .join("").trim()
+}
 
 type Config = Awaited<ReturnType<typeof loadGlobalConfig>>
 type Reply = MessageFallbackContext["reply"]
@@ -22,12 +30,13 @@ interface Services {
 function sharedText(message: string, context: MessageFallbackContext): string | undefined {
   if (context.message_type === "terminal" || isMediaCommandText(message)) return
   const text = buildMediaMessageText({ ...context, msg: message })
-  if (shareHost.test(text)) return text
+  if (shareHost.test(text) || extractDouyinTarget(text)) return text
 }
 
 export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Services, {
   makeService = (requestTimeoutMs?: number) => new DouyinService({ timeoutMs: requestTimeoutMs }),
   loadConfig = loadGlobalConfig,
+  renderLiveCard = renderStatusCard,
 } = {}) {
   const stopped = new AbortController()
   const signal = lifecycle ? AbortSignal.any([lifecycle, stopped.signal]) : stopped.signal
@@ -55,7 +64,26 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
     try {
       await recovery
       if (signal.aborted) return
-      const info = await service.getInfo(target, { signal })
+      const share = await service.resolveShare(target, signal)
+      if (share.kind === "live") {
+        const room = await service.getLiveInfo(share, signal).catch(() => undefined)
+        if (signal.aborted) return
+        if (!room) {
+          await reply(`抖音直播间的公开资料暂时无法核实。\n${share.url}`)
+          return
+        }
+        const items = [
+          ...(room.host ? [{ label: "主播", value: room.host }] : []),
+          ...(room.viewers === undefined ? [] : [{ label: "页面显示观看人数", value: String(room.viewers) }]),
+        ]
+        const cardItems = items.map(({ label, value }) => ({ label, value: liveCardText(value) || "见原页面" }))
+        const image = await renderLiveCard({ title: liveCardText(room.title) || "抖音直播间", subtitle: "抖音直播",
+          message: room.status, items: cardItems, userId: context.user_id }, { saveId }).catch(() => undefined)
+        await replyImage(reply, image, [`抖音直播 · ${room.title}`, room.status, ...items.map(({ label, value }) => `${label} ${value}`)].join("\n"))
+        await reply(showInfo ? share.url : `抖音直播仅提供房间预览。\n${share.url}`)
+        return
+      }
+      const info = await service.getInfo(share.target, { signal })
       if (signal.aborted) return
       if (showInfo) {
         try {

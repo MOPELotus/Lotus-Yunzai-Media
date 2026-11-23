@@ -5,7 +5,8 @@ import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/t
 import { packMediaFiles, safeMediaName, mediaLimitFailure } from "../media/files.ts"
 import { downloadMedia } from "../media/download.ts"
 import { prepareVideo } from "../media/video.ts"
-import { extractDouyinTarget, resolveDouyinTarget, type DouyinTarget } from "./links.ts"
+import { extractDouyinTarget, resolveDouyinShare, resolveDouyinTarget, type DouyinLiveTarget, type DouyinTarget } from "./links.ts"
+import { readDouyinLive } from "./live.ts"
 import { fetchWebDetail, type DetailSigner } from "./api.ts"
 import { fetchSsrDetail } from "./ssr.ts"
 import { DouyinVisitor, getDefaultVisitor, type VisitorSession, type VisitorRequest } from "./visitor.ts"
@@ -100,6 +101,13 @@ export class DouyinService {
 
   extractTarget(message: unknown) { return extractDouyinTarget(message) }
   resolveTarget(input: string) { return resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: this.timeoutMs }) }
+
+  resolveShare(input: string, signal?: AbortSignal) {
+    return resolveDouyinShare(input, { fetch: this.fetch, timeoutMs: this.timeoutMs, signal })
+  }
+  getLiveInfo(target: DouyinLiveTarget, signal?: AbortSignal) {
+    return readDouyinLive(target, { fetch: this.fetch, timeoutMs: this.timeoutMs, signal })
+  }
 
   async getInfo(input: string | WorkTarget, { deadline = Infinity, signal }: { deadline?: number; signal?: AbortSignal } = {}): Promise<DouyinWork> {
     const fetch: DouyinFetch = signal ? (url, options) => this.fetch(url, {

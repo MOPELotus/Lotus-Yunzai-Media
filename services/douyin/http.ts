@@ -15,7 +15,7 @@ export async function requestText(fetchImpl: DouyinFetch, url: string, options: 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetchImpl(url, { ...options, signal: controller.signal })
+    const response = await fetchImpl(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal })
     if (headersOnly) {
       await response.body?.cancel()
       return { response, text: "" }

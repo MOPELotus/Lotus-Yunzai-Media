@@ -5,6 +5,7 @@ import { createKuaishouCommands } from "./services/kuaishou/command.ts"
 import { createPipixiaCommands } from "./services/pipixia/command.ts"
 import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
 import { createBilibiliVideoCommands } from "./services/bilibili/video-command.ts"
+import { createBiliPgcPreview } from "./services/bilibili/pgc.ts"
 import { createDouyinCommands } from "./services/douyin/command.ts"
 import { createMusicCommands } from "./services/music/command.ts"
 import { createMcWikiCommand } from "./services/mcwiki/command.ts"
@@ -19,7 +20,10 @@ import { createOfficialLinkPreview } from "./services/official-links/command.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
-  { readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal"> }
+  {
+    readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal">
+    readonly biliPgc?: Omit<Parameters<typeof createBiliPgcPreview>[0], "signal">
+  }
 
 type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<void> }
 
@@ -27,6 +31,7 @@ export default { commands: {} } satisfies Pick<CommandModule, "commands">
 
 export async function createModule(services: MediaServices): Promise<MediaCommandModule> {
   const biliVideo = createBilibiliVideoCommands(services)
+  const biliPgc = createBiliPgcPreview({ ...services.biliPgc, signal: services.signal })
   const subscriptions = await createSubscriptionModule({ ...services, quotedBilibiliAuthor: biliVideo.quotedAuthor })
   const maintenance = startMediaMaintenance(services)
   const music = createMusicCommands(services)
@@ -59,6 +64,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (subscriptionFeatures.length) return subscriptionFeatures
       if (officialVideo.matches(context.normalizedMessage)) return ["[media] 米游社官号视频"]
       if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return ["[media] B 站解析"]
+      if (biliPgc.matches(context.normalizedMessage, context)) return biliPgc.features
       const features = biliVideo.features(context)
       if (features.length) return features
       const acfunFeatures = acfun.features(context)
@@ -83,6 +89,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (message.startsWith("#mcwiki") && /^\S/u.test(message.slice(7))) return mcwiki(message.slice(7))
       if (message === biliLogin.command) return biliLogin.fallback(message, context)
       if (environment.matches(message)) return environment.fallback(message, context)
+      if (biliPgc.matches(message, context)) return biliPgc.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await music.fallback(message, context) ??
         await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ??

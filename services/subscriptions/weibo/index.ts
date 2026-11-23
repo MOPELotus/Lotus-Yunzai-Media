@@ -26,6 +26,7 @@ interface WeiboPost {
   longText?: { longTextContent?: unknown }
   text?: unknown
   user?: WeiboUser
+  visible?: { type?: unknown }
   pics?: unknown
   pic_num?: unknown
   isLongText?: unknown
@@ -166,6 +167,11 @@ function postOf(post: WeiboPost | undefined, depth = 0): DynamicPost | undefined
   }
 }
 
+export interface WeiboPostIdentity {
+  readonly id: string
+  readonly uid?: string
+}
+
 function detailNeeds(raw: WeiboPost | undefined, post: DynamicPost | undefined): DetailNeeds | undefined {
   if (!raw || !post) return
   const inline = raw.longText?.longTextContent
@@ -179,15 +185,55 @@ function samePost(raw: WeiboPost | undefined, post: DynamicPost) {
   return postId(raw) === post.id && authorId(raw) === post.uid
 }
 
-function detailStatus(html: string, post: DynamicPost) {
+function detailStatus(html: string, matches: (post: WeiboPost) => boolean) {
   const $ = load(html)
   for (const script of $("script").toArray()) {
     const match = $(script).text().match(/"status"\s*:\s*(\{[\s\S]*?\})\s*,\s*"call"\s*:/u)
     if (!match?.[1]) continue
     try {
       const raw: WeiboPost = JSON.parse(match[1])
-      if (samePost(raw, post)) return raw
+      if (raw && matches(raw)) return raw
     } catch { /* The detail format is optional. */ }
+  }
+}
+
+function publicPost(raw: WeiboPost, depth = 0): WeiboPost | undefined {
+  const visibility = raw.visible?.type
+  if (visibility !== undefined && visibility !== 0 && visibility !== "0") return
+  if (!raw.retweeted_status) return raw
+  return { ...raw, retweeted_status: depth < 2 ? publicPost(raw.retweeted_status, depth + 1) : undefined }
+}
+
+export async function fetchPublicWeiboPost({ id, uid }: WeiboPostIdentity, signal?: AbortSignal,
+  request: NonNullable<WeiboProviderOptions["fetch"]> = globalThis.fetch) {
+  if (!/^[A-Za-z0-9]{1,24}$/u.test(id) || (uid !== undefined && !decimalId(uid))) return
+  const timeout = AbortSignal.timeout(10_000)
+  const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
+  const matches = (post: WeiboPost) => (!uid || authorId(post) === uid) && (postId(post) === id || post.bid === id)
+  const page = new URL(detailRoot + id)
+  const api = new URL("https://m.weibo.cn/statuses/show")
+  api.searchParams.set("id", id)
+  const options: RequestInit = { method: "GET", credentials: "omit", redirect: "manual", signal: deadline }
+  for (const [endpoint, json] of [[page, false], [api, true]] as const) {
+    try {
+      deadline.throwIfAborted()
+      const response = await request(endpoint, { ...options, headers: json
+        ? { Accept: "application/json", Referer: page.href, "X-Requested-With": "XMLHttpRequest", "User-Agent": "Lotus-Yunzai" }
+        : { Accept: "text/html", "User-Agent": "Lotus-Yunzai" } })
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => {})
+        continue
+      }
+      const body = await readText(response)
+      deadline.throwIfAborted()
+      const envelope = json ? JSON.parse(body) as { ok?: unknown; data?: WeiboPost } | null : null
+      const raw = json ? envelope?.ok === 1 && envelope.data && matches(envelope.data) ? envelope.data : undefined
+        : detailStatus(body, matches)
+      const post = postOf(raw && publicPost(raw))
+      if (post) return post
+    } catch {
+      signal?.throwIfAborted()
+    }
   }
 }
 
@@ -280,7 +326,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
         void response.body?.cancel().catch(() => {})
         return post
       }
-      const detail = detailStatus(await readText(response), post)
+      const detail = detailStatus(await readText(response), raw => samePost(raw, post))
       if (!detail) return post
       const completed = completePost(post, detail, needs)
       if (!originalNeeds || !post.forwarded) return completed

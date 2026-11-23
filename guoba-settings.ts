@@ -79,7 +79,12 @@ const platforms: readonly { id: SubscriptionPlatform; label: string; fields: rea
     { key: "sharedBiliLogin", setting: "sharedBiliLogin", label: "视频与动态共用 B 站登录", options: ["关闭", "开启"],
       help: "开启后，动态可使用 TuneWeave 中已登录且支持动态读取的 B 站会话。" },
   ] },
-  { id: "weibo", label: "微博", fields: sharedFields },
+  { id: "weibo", label: "微博", fields: [...sharedFields,
+    { key: "parseWeiboLink", setting: "parseWeiboLink", label: "公开动态链接预览", options: ["关闭", "开启"],
+      help: "自动预览聊天中分享的公开微博。站点要求登录时提示打开原文。" },
+    { key: "parseWeiboPrivate", setting: "parseWeiboPrivate", label: "私聊预览公开微博", options: ["关闭", "开启"],
+      help: "主开关开启后，允许在私聊自动预览。" },
+  ] },
 ]
 
 function fieldValue(field: SettingsField, settings: SubscriptionSettings) {

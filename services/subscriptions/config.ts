@@ -173,6 +173,8 @@ export function settingsFor(value: Mapping, platform?: SubscriptionPlatform) {
     liveCooldown:number(value.liveAtAllCD,1800,1,86400),
     liveFailureNotice:flag(value.liveAtAllErrMsg,true),
     parseVideoLink:flag(value.parseVideoLink,true),
+    parseWeiboLink:flag(value.parseWeiboLink,true),
+    parseWeiboPrivate:flag(value.parseWeiboPrivate,false),
     sharedBiliLogin:flag(value.sharedBiliLogin,true),
     log:flag(value.pushTaskLog,true),
   }

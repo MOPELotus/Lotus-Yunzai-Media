@@ -24,7 +24,7 @@ const defaults = {
 }
 const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAtAllCD: 1800,
   liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1 }
-const weiboDefaults = { ...defaults, getDataRandomDelay: 4000 }
+const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0 }
 const videoDefaults = { forwardMsg: true, cover: false, bh3: false, by: false, xbgd: false, groups: [], group_config: [] }
 
 test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主配置优先", async () => {
@@ -218,7 +218,7 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
 
     const { configInfo: form } = supportGuoba(data)
     expect(form.schemas.filter(({ field }) => field?.startsWith("weibo.")).map(({ field }) => field)).toEqual(
-      Object.keys(defaults).map((key) => `weibo.${key}`),
+      Object.keys(weiboDefaults).map((key) => `weibo.${key}`),
     )
     expect(await form.getConfigData()).toEqual({ bilibili: biliDefaults, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, forwardSendDynamic: 0, banWords: ["样例"],
@@ -240,10 +240,13 @@ test("微博面板沿用旧覆盖文件并与 B 站独立保存", async () => {
     const nodes = [{ payloads: ["四个字啦"] }]
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(true)
     expect(useDynamicForward(nodes, await store.settings("bilibili"))).toBe(false)
+    expect(await form.setConfigData({ "weibo.parseWeiboLink": 0, "weibo.parseWeiboPrivate": 1 }, { Result })).toEqual({ ok: true })
+    expect(await store.settings("weibo")).toMatchObject({ parseWeiboLink: false, parseWeiboPrivate: true })
     expect(await form.setConfigData({ "bilibili.mergeTextPic": 0, "weibo.maxTextLengthForSingleMsg": 4 }, { Result }))
       .toEqual({ ok: true })
     expect(await form.getConfigData()).toEqual({ bilibili: { ...biliDefaults, mergeTextPic: 0 }, weibo: {
       ...weiboDefaults, pushMsgMode: 0, mergeTextPic: 0, maxTextLengthForSingleMsg: 4, banWords: ["样例"],
+      parseWeiboLink: 0, parseWeiboPrivate: 1,
     }, officialVideo: videoDefaults })
     expect(useDynamicForward(nodes, await store.settings("weibo"))).toBe(false)
   } finally {

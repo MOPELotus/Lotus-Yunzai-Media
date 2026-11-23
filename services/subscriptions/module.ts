@@ -7,6 +7,7 @@ import { createBiliProvider } from "./bilibili/index.ts"
 import { biliSharedSession } from "./bilibili/shared.ts"
 import { weiboSubscriptionLogin } from "./weibo/login.ts"
 import { createWeiboProvider } from "./weibo/index.ts"
+import { createWeiboPreview } from "./weibo/preview.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionRoute, type SubscriptionDestination } from "./config.ts"
 import { createSubscriptionDelivery, type SubscriptionGroups } from "./delivery.ts"
 import { profileText } from "./profile.ts"
@@ -36,6 +37,7 @@ interface SubscriptionOptions {
   render?: typeof makeDynamicMessages
   now?: () => number
   renderHelp?: () => Promise<MessageReply>
+  fetchWeiboPost?: Parameters<typeof createWeiboPreview>[0]["fetchPost"]
 }
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -91,7 +93,7 @@ function display(provider: SubscriptionProvider, items: readonly SubscriptionRou
 
 export async function createSubscriptionModule(services: SubscriptionServices, { providers, directory=dataDirectory, shared,
   getRedis=()=>(globalThis as { redis?: SubscriptionRedis }).redis, render, now,
-  renderHelp=renderSubscriptionHelp }: SubscriptionOptions = {}) {
+  renderHelp=renderSubscriptionHelp, fetchWeiboPost }: SubscriptionOptions = {}) {
   const weiboSession = subscriptionSession("weibo", directory, getRedis)
   const config = createSubscriptionConfig(directory,services.lockFile)
   shared ??= biliSharedSession({ enabled: async () => (await config.settings("bilibili")).sharedBiliLogin })
@@ -103,6 +105,7 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
     directory, lockFile: services.lockFile, shared,
     setShared: (enabled: boolean, signal?: AbortSignal) => config.editSettings("bilibili", () => ({ sharedBiliLogin: enabled }), signal) })
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
+  const weiboPreview = createWeiboPreview({ settings: () => config.settings("weibo"), signal: services.signal, fetchPost: fetchWeiboPost, render })
   const dispatch = createSubscriptionDelivery({ providers:sources,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
   const authorVideos = sources.bilibili && createAuthorVideoModule({
@@ -121,6 +124,8 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
     if (help.test(message.trim())) return renderHelp()
     const author = await authorVideos?.fallback(message, context)
     if (author !== undefined) return author
+    const weibo = await weiboPreview.fallback(message, context)
+    if (weibo !== undefined) return weibo
     if (!prefix.test(message)) return
     const command=message.replace(prefix,"").trim()
     const match=edit.exec(command)
@@ -196,7 +201,7 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
   }
   return {
     commands:{}, fallback,
-    features: (context: MessageFallbackContext) => authorVideos?.features(context) ?? [],
+    features: (context: MessageFallbackContext) => [...(authorVideos?.features(context) ?? []), ...weiboPreview.features(context)],
     async dispose() {
       cancelReady?.()
       await Promise.all([dispatch.dispose(), authorVideos?.dispose()])

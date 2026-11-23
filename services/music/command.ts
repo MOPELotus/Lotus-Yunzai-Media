@@ -27,12 +27,15 @@ const searchCommand = /^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|�
 const typedSearch = /^#点歌\s*(\S(?:[\s\S]*?\S)?)\s+([12])$/u
 const playCommand = /^#播放\s*([\s\S]*?)(?:\s+([12]))?$/u
 const naturalMusic = /^(#)?(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(点播音乐|点播|点歌|播放|放一?首|来一?首)([^\r\n]*)$/u
+const multipleMusic = /^#?(?:多选(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?|(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)多选)(?:点播音乐|点播|点歌|播放|放一?首|来一?首)([^\r\n]*)$/u
+const multiplePageSize = 20
+const maxMultipleResults = 500
 const nextPage = /^#?(?:音乐)?下一页$/u
 const unrelatedMedia = /^(?:[#/]|https?:\/\/|[a-z]:[\\/]|(?:B站|哔哩哔哩|抖音|视频|电影|直播|文件|附件|图片|录像|歌曲链接|音频链接)(?:$|\s|[：:]))|\.(?:mp[34]|mkv|mov|wav|flac|avi)(?:[?#].*)?$/iu
 const choiceCommand = /^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$/u
 const reissueCommand = /^#?(歌词|语音|高清语音)(?:\s*([1-9][0-9]{0,2}))?$/u
 const partnerManualCommand = /^#合伙人测试(?:[（(]执行[）)])?$/u
-const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客，或 #点歌 关键词 2 列出节目后选择。\n选曲后可发 #歌词 或 #语音。在当前列表可加序号。"
+const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客，或 #点歌 关键词 2 列出节目后选择。\n#多选点歌 关键词 保留跨页编号，回复一个数字选一首，可反复选择。选曲后可发 #歌词 或 #语音。在列表中可加序号。"
 const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
 const searchNotes: Readonly<Record<string, string>> = {
   selected: "本次搜索已选用公共音乐账号。",
@@ -48,7 +51,8 @@ type ScanType = { readonly name: string; readonly type: string }
 type SessionBase = { readonly api: MusicService; expires: number }
 type CloudSearch = NonNullable<Awaited<ReturnType<ReturnType<typeof createCloudCommands>["search"]>>>
 type SearchSession = SessionBase & { readonly stage: "search"; readonly platform: string; readonly keyword: string;
-  readonly timeoutMs: number; readonly podcast: boolean; page: number; tracks?: readonly MusicTrack[];
+  readonly timeoutMs: number; readonly podcast: boolean; readonly multiple?: true; page: number; tracks?: readonly MusicTrack[];
+  exhausted?: boolean;
   episodes?: Awaited<ReturnType<MusicService["searchEpisodes"]>>; cloud?: CloudSearch; loading?: boolean }
 type PublicSelection = { readonly track: MusicTrack } | { readonly episode: VoiceSearchSelection }
 type ReissueSelection = { readonly source: PublicSelection; readonly controller: AbortController; expires: number; busy: boolean }
@@ -62,6 +66,13 @@ type PartnerJob = { readonly controller: AbortController;
 
 function legacyMusicRequest(message: string, context: Context) {
   if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private")) return
+  const multiple = multipleMusic.exec(message)
+  if (multiple) {
+    const provider = multiple[1] ?? multiple[2]
+    const keyword = (multiple[3] ?? "").replace(/^\s*[:：]?\s*/u, "").trim()
+    if (keyword.length > 150 || unrelatedMedia.test(keyword)) return
+    return { action: "search" as const, keyword, platform: provider ? aliases[provider] : undefined, multiple: true as const }
+  }
   const match = naturalMusic.exec(message)
   if (!match?.[3]) return
   const [, prefix, provider, phrase, rest = ""] = match
@@ -403,8 +414,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     session.loading = true
     try {
       const api = session.api
-      if (session.platform === "netease" && session.page === 1) session.cloud = await cloud.search(context, api, session.keyword)
-      const limit = api.config.search_limit
+      if (!session.multiple && session.platform === "netease" && session.page === 1) session.cloud = await cloud.search(context, api, session.keyword)
+      const limit = session.multiple ? multiplePageSize : api.config.search_limit
       const start = (session.page - 1) * limit
       const matching = session.cloud?.tracks ?? []
       const requestedCloud = matching.slice(start, start + limit)
@@ -415,24 +426,40 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const episodes = session.podcast && remaining > 0 ? await api.searchEpisodes(session.keyword,
         { limit: remaining, offset, signal: moduleSignal }) : []
       if (sessions.get(key) !== session || moduleSignal.aborted) return
-      const tracks = [...requestedCloud.map(item => item.track), ...search?.tracks ?? []]
-      session.tracks = tracks
+      const previous = session.multiple ? session.tracks ?? [] : []
+      let tracks = [...requestedCloud.map(item => item.track), ...search?.tracks ?? []]
+      if (session.multiple) {
+        const known = new Set(previous.map(track => track.ref))
+        session.exhausted = tracks.length === 0
+        tracks = tracks.filter(track => {
+          if (track.platform !== session.platform || !track.ref || known.has(track.ref)) return false
+          known.add(track.ref)
+          return true
+        }).slice(0, maxMultipleResults - previous.length)
+        session.exhausted ||= previous.length + tracks.length >= maxMultipleResults
+      }
+      session.tracks = [...previous, ...tracks]
       session.episodes = episodes
       session.expires = Date.now() + session.timeoutMs
       const results = [
         ...tracks.map((track, index) => `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}${index < requestedCloud.length ? " · 云盘" : ""}`),
         ...episodes.map(episode => `${episode.name} · ${episode.creator || "未知主播"} · 播客`),
       ]
-      const choiceHint = session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。" :
+      const choiceHint = session.multiple ? "回复任一已显示的数字选一首，可反复选择。#下一页 翻页，#取消 结束。"
+        : session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。" :
         "两分钟内回复数字选歌。#下一页 翻页，#取消 结束。公开曲目播放时自动尝试完整备用音源。" + (search ? searchNotes[search.accountStatus] : "")
-      const message = results.length ? choiceHint : "没有搜索结果，可更换关键词或平台。"
-      const image = await renderStatusCard({ title: session.podcast ? "网易云播客" : musicNames[session.platform] + "点歌", subtitle: session.keyword,
+      const message = results.length ? choiceHint : session.multiple && previous.length
+        ? session.exhausted ? "没有更多歌曲，仍可选择之前的编号。" : "本页没有新的歌曲，可继续翻页或选择之前的编号。"
+        : "没有搜索结果，可更换关键词或平台。"
+      const title = session.multiple ? `${musicNames[session.platform]}多选点歌 · 第 ${session.page} 页`
+        : session.podcast ? "网易云播客" : musicNames[session.platform] + "点歌"
+      const image = await renderStatusCard({ title, subtitle: session.keyword,
         badge: `第 ${session.page} 页`, userId: context.user_id, message,
-        items: results.map((value, index) => ({ label: String(index + 1), value })),
+        items: results.map((value, index) => ({ label: String(previous.length + index + 1), value })),
       }, requestedCloud.length ? undefined : { saveId: `media-music-search-${context.user_id}` }).catch(() => undefined)
       if (sessions.get(key) === session) {
         if (requestedCloud.length && session.cloud) await cloud.assertVisible(context, api, session.cloud.binding)
-        await imageReply(context, image, [message, ...results.map((value, index) => `${index + 1}. ${value}`)].join("\n"))
+        await imageReply(context, image, [message, ...results.map((value, index) => `${previous.length + index + 1}. ${value}`)].join("\n"))
       }
     } finally {
       session.loading = false
@@ -491,6 +518,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
 
   async function choose(message: string, context: Context, key: string) {
     let session = sessions.get(key)
+    if (session?.stage === "search" && session.multiple && context.isDelegated) return
     if (session && session.expires <= Date.now()) {
       drop(key, session)
       session = undefined
@@ -506,8 +534,9 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     if (!session) return
     try {
       if (session.stage === "search") {
-        if (session.loading) return "正在搜索，请稍候。"
+        if (session.loading) return session.multiple ? "正在处理点歌，请稍候。" : "正在搜索，请稍候。"
         if (nextPage.test(message)) {
+          if (session.multiple && session.exhausted) return "没有更多歌曲，仍可选择之前的编号。"
           session.page++
           try { await showResults(context, key, session) }
           catch (error) { session.page--; throw error }
@@ -517,7 +546,24 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const trackCount = session.tracks?.length ?? 0
         const track = session.tracks?.[index]
         const episode = session.episodes?.[index - trackCount]
+        if (session.multiple && !trackCount) return "当前没有可选择的歌曲。"
         if (!track && !episode) return `请输入 1–${trackCount + (session.episodes?.length ?? 0)} 的序号。`
+        if (session.multiple && track) {
+          session.loading = true
+          session.expires = Date.now() + session.timeoutMs
+          const selection = remember(key, { track }, session.timeoutMs)
+          const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+          const active = AbortSignal.any([moduleSignal, selection.controller.signal, ...(connection ? [connection] : [])])
+          try {
+            const { api } = await openMusic()
+            await playMedia(context, api, track, undefined, active)
+          } catch (error) {
+            if (!active.aborted) throw error
+          } finally {
+            session.loading = false
+          }
+          return []
+        }
         sessions.delete(key)
         if (episode) {
           remember(key, { episode }, session.timeoutMs)
@@ -635,7 +681,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const platform = aliases[match?.[1] ?? ""] || legacy?.platform || defaultPlatform
         const podcast = mode?.[2] === "2"
         if (podcast && platform !== "netease") return "当前默认音乐平台未接入播客播放。"
-        const session: SearchSession = { stage: "search", api, platform, timeoutMs, keyword, podcast, page: 1, expires: Date.now() + timeoutMs }
+        const session: SearchSession = { stage: "search", api, platform, timeoutMs, keyword, podcast, page: 1,
+          ...((legacy && "multiple" in legacy) && { multiple: legacy.multiple }), expires: Date.now() + timeoutMs }
         replace(key, session)
         try { await showResults(context, key, session) }
         catch (error) {

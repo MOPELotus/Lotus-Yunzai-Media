@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, stat, truncate, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -11,7 +11,7 @@ import { normalizeDouyinWork } from "../services/douyin/model.ts"
 import { createDouyinCommands } from "../services/douyin/command.ts"
 import { DouyinService } from "../services/douyin/service.ts"
 import { fetchCdn } from "../services/media/cdn.ts"
-import { mediaDeliveryUnknown, sendMediaFile } from "../services/media/files.ts"
+import { mediaDeliveryTooLarge, mediaDeliveryUnknown, sendMediaFile } from "../services/media/files.ts"
 import { articlePages, buildMediaMessageText, isMediaCommandText } from "../services/media/message.ts"
 import { CommandRegistry } from "../../../lib/commands.ts"
 
@@ -328,6 +328,19 @@ test("同一账号的相同媒体发送串行，另一账号没有等待", async
   block.resolve()
   await Promise.all([head,sameBot])
   expect(trace).toEqual(["第一份","另一账号","本账号下一份"])
+})
+
+test("整文件传输明确拒收且超出内联限制时，报告大小错误而不分片或重复调用", async () => {
+  const file = await fixtureFile("作品 15%.zip")
+  await truncate(file, 16 * 1024 * 1024 + 1)
+  const attempts = []
+  await expect(sendMediaFile({
+    self_id: 99,
+    deliverMedia: async entry => { attempts.push(entry); return "rejected" },
+    uploadFile: async () => { throw new Error("不应改用分片") },
+    reply: async () => { throw new Error("不应改用二次媒体发送") },
+  }, file)).rejects.toMatchObject({ code: mediaDeliveryTooLarge })
+  expect(attempts).toEqual([{ path: file, name: "作品 15%.zip", type: "file" }])
 })
 
 test("Bun 中访客签名与原 Node SM3 的固定输入一致", () => {

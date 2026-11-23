@@ -40,6 +40,7 @@ interface ProcessOptions {
 
 const mediaUploadQueues = new Map<string, Promise<void>>()
 export const mediaDeliveryUnknown = "MEDIA_DELIVERY_UNKNOWN"
+export const mediaDeliveryTooLarge = "MEDIA_DELIVERY_TOO_LARGE"
 
 function deliveryUnknown(message: string) {
   return Object.assign(new Error(message), { code: mediaDeliveryUnknown })
@@ -82,7 +83,9 @@ async function sendIsolatedMediaFile(e: MediaSendContext, file: string, config: 
   }
 
   // The byte transport remains available for hosts without file-backed delivery.
-  if (stat.size > 16 * 1024 * 1024) throw new Error("当前会话无法发送此大小的媒体文件。")
+  if (stat.size > 16 * 1024 * 1024) {
+    throw Object.assign(new Error("当前会话无法发送此大小的媒体文件。"), { code: mediaDeliveryTooLarge })
+  }
   const bytes = await fs.readFile(file, { signal: config.signal })
   config.signal?.throwIfAborted()
   if (type === "file" && e.uploadFile) {

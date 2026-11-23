@@ -4,7 +4,7 @@ import { loadGlobalConfig } from "../../core/config/global.ts"
 import { dataPath } from "../../core/path.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.ts"
-import { sendMediaFile, mediaDeliveryUnknown, mediaFailureMessage } from "../media/files.ts"
+import { sendMediaFile, mediaDeliveryTooLarge, mediaDeliveryUnknown, mediaFailureMessage } from "../media/files.ts"
 import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
 import { createBiliProvider } from "../subscriptions/bilibili/index.ts"
 import { createSubscriptionConfig } from "../subscriptions/config.ts"
@@ -308,15 +308,18 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     const error = cause as Error & { code?: string }
     const message = error instanceof Error ? error.message : "请求失败，请稍后重试。"
     const diskFull = error?.code === "ENOSPC" || error?.code === "EDQUOT" || /No space left on device|Disk quota exceeded/iu.test(message)
+    const detail = diskFull ? "服务器磁盘空间不足，暂时无法下载或合并视频。" : message
+    const unconfirmed = error?.code === mediaDeliveryUnknown
+    const fallback = unconfirmed || diskFull || error?.code === mediaDeliveryTooLarge ? detail : `${title}失败。`
     const image = await renderStatusCard({
-      title, subtitle: "Lotus-Yunzai · B 站", badge: "失败",
-      message: diskFull ? "服务器磁盘空间不足，暂时无法下载或合并视频。" : message,
+      title, subtitle: "Lotus-Yunzai · B 站", badge: unconfirmed ? "未确认" : "失败",
+      message: detail,
       userId: context.user_id,
-      items: error?.code === mediaDeliveryUnknown ? [] : [
+      items: unconfirmed ? [] : [
         { label: "建议", value: diskFull ? "请联系机器人主人清理磁盘空间后重试。" : "检查链接是否有效，或稍后重试。" },
       ],
     }, { saveId: `media-bilibili-error-${context.user_id || "user"}` }).catch(() => undefined)
-    await imageReply(context, image, `[media] ${title}失败。`)
+    await imageReply(context, image, `[media] ${fallback}`)
   }
 
   function currentSession(key: string) {

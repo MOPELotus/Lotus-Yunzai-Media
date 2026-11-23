@@ -54,8 +54,9 @@ export function createWeiboPreview({ settings, signal, fetchPost = fetchPublicWe
       const items = rows.slice(index, index + 5)
       const title = `微博热评 · ${index + 1}–${index + items.length} / ${rows.length}`
       let file: Uint8Array | undefined
-      const scale = nativeImageRasterScale()
-      for (const renderScale of picture ? (scale === 4 ? [4, 2] : [scale]) : []) {
+      // The shared renderer already applies the low preset to the requested canvas size.
+      const scales = nativeImageRasterScale() === 4 ? [4, 2] : [4]
+      for (const renderScale of picture ? scales : []) {
         if (active?.aborted) break
         try {
           const png = await renderCommentCard("status", { title, items }, { renderScale })

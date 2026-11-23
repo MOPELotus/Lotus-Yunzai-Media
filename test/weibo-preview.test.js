@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { setImageRenderPreset } from "@lotus-yunzai/skia"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -112,17 +113,26 @@ test("微博热评附加到原会话预览，关闭、不可读、限额和取�
     type: "forward", nodes: [["原帖内容", url], { type: "text", text: expect.stringMatching(/热评内容\n赞 0 · .*09:20 · 来自 广东/u) }],
   })
   expect(renderScales).toEqual([4, 4, 2, 4, 2])
+  setImageRenderPreset("low")
+  try {
+    expect(await preview.fallback(url, { ...context, inlineImageByteLimit: 32 })).toMatchObject({
+      type: "forward", nodes: [["原帖内容", url], { type: "text" }],
+    })
+    expect(renderScales).toEqual([4, 4, 2, 4, 2, 4])
+  } finally {
+    setImageRenderPreset("standard")
+  }
   expect(await preview.fallback(url, { ...context, message_type: "private" })).toBeUndefined()
   expect(await preview.fallback(url, { ...context, isDelegated: true })).toBeUndefined()
   settings = settingsFor({ weiboComments: false })
   expect(await preview.fallback(url, context)).toEqual(["原帖内容", url])
-  expect(calls).toBe(3)
+  expect(calls).toBe(4)
   settings = settingsFor({})
   results = new Error("上游公开热评不可读")
   expect(await preview.fallback(url, context)).toEqual(["原帖内容", url])
   signal = new AbortController()
   expect(await preview.fallback(url, { ...context, groupActivitySignal: signal.signal })).toBeUndefined()
-  expect(calls).toBe(5)
+  expect(calls).toBe(6)
 })
 
 test("动态模块接出微博桌面和分享卡直链，上游登录限制保留原文，面板开关即时生效", async () => {

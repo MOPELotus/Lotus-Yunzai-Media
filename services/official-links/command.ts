@@ -2,7 +2,7 @@ import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { renderTemplate } from "../../core/render/service.ts"
 import { buildMediaMessageText } from "../media/message.ts"
-import { createOfficialLinkSettings } from "./settings.ts"
+import { createOfficialLinkSettings, officialLinkTrustFields } from "./settings.ts"
 import { getOfficialLink, parseOfficialLink, officialLinkNames, type OfficialLinkFetch } from "./source.ts"
 
 const link = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
@@ -45,23 +45,27 @@ export function createOfficialLinkPreview({
       const platform = officialLinkNames[input.platform]
       let enabled = false
       try {
-        const options = await settings(input.platform === "telegram" && !context.isMaster)
-        enabled = options[input.platform] &&
-          (context.message_type !== "private" || options.private) &&
-          (input.platform !== "telegram" || context.isMaster || options.trustedTelegramUsers.includes(String(context.user_id)))
+        const trust = input.platform === "telegram" || input.platform === "x" ? input.platform : undefined
+        const options = await settings(context.isMaster ? false : trust ?? false)
+        enabled = options[input.platform] && (context.message_type !== "private" || options.private)
         if (!enabled || active.aborted) return
+        if (trust && !context.isMaster && !options[officialLinkTrustFields[trust]].includes(String(context.user_id))) {
+          if (trust === "x") return "你没有权限使用此命令。"
+          return
+        }
         const preview = await getOfficialLink(input, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)]))
         if (active.aborted) return
         if (!preview) return `${platform} 暂无法读取公开预览。\n${input.link}`
-        const card = { ...preview, id: `${platform} · ${input.id}`, type: "public-link", showStats: false }
+        const { link = input.link, ...content } = preview
+        const card = { ...content, id: `${platform} · ${input.id}`, type: "public-link", showStats: false }
         const limit = context.inlineImageByteLimit ?? Infinity
         let image = await render("bilibili-info", card).catch(() => undefined)
         if (image && image.byteLength > limit && !active.aborted) {
           image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)
         }
         if (active.aborted) return
-        if (image && image.length <= limit) return [{ type: "image", file: image }, { type: "text", text: input.link }]
-        return [preview.title, preview.owner, preview.desc, input.link].filter(Boolean).join("\n")
+        if (image && image.length <= limit) return [{ type: "image", file: image }, { type: "text", text: link }]
+        return [preview.title, preview.owner, preview.desc, link].filter(Boolean).join("\n")
       } catch {
         if (enabled && !active.aborted) return `${platform} 暂无法读取公开预览。\n${input.link}`
       }

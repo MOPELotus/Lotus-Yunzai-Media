@@ -1,12 +1,14 @@
 import { load } from "cheerio"
+import { parseXLink, xPreview, type OfficialXLink } from "./x.ts"
 
 export type OfficialLink =
   | { readonly platform: "youtube" | "youtubeMusic"; readonly id: string; readonly link: string }
+  | OfficialXLink
   | { readonly platform: "v2ex"; readonly id: string; readonly link: string }
   | { readonly platform: "telegram"; readonly username: string; readonly id: string; readonly link: string }
 
 export const officialLinkNames = {
-  youtube: "YouTube", youtubeMusic: "YouTube Music", telegram: "Telegram", v2ex: "V2EX",
+  youtube: "YouTube", youtubeMusic: "YouTube Music", telegram: "Telegram", v2ex: "V2EX", x: "X",
 } as const
 
 interface PublicPreview {
@@ -14,6 +16,7 @@ interface PublicPreview {
   readonly owner: string
   readonly desc?: string
   readonly cover?: Buffer
+  readonly link?: string
 }
 
 export type OfficialLinkFetch = (url: URL, request: RequestInit) => Promise<Response>
@@ -46,6 +49,8 @@ export function parseOfficialLink(value: string): OfficialLink | undefined {
     if (["joinchat", "share", "addstickers", "proxy"].includes(username)) return
     return { platform: "telegram", username, id: post[2], link: `https://t.me/${username}/${post[2]}` }
   }
+  const x = parseXLink(url, true)
+  if (x) return x
   const short = url.hostname === "youtu.be"
   if (!short && (!videoHosts.has(url.hostname) || url.pathname !== "/watch" || url.searchParams.getAll("v").length !== 1)) return
   const id = short ? url.pathname.slice(1) : url.searchParams.get("v")
@@ -169,5 +174,6 @@ export async function getOfficialLink(input: OfficialLink, fetcher: OfficialLink
     return { title, owner: [author, node].filter(Boolean).join(" · "),
       desc: chars.length > 1200 ? chars.slice(0, 1200).join("") + "…" : body }
   }
+  if (input.platform === "x") return xPreview(input, url => bounded(fetcher, url, signal, "application/json", 32 * 1024), publicUrl, text)
   return input.platform === "telegram" ? telegram(input, fetcher, signal) : youtube(input, fetcher, signal)
 }

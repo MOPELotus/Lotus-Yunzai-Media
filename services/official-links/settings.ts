@@ -7,18 +7,19 @@ import { dataPath, rootPath } from "../../core/path.ts"
 
 export const officialLinkToggles = [
   ["youtube", "YouTube 链接预览"], ["youtubeMusic", "YouTube Music 链接预览"],
-  ["telegram", "Telegram 公开消息预览"], ["v2ex", "V2EX 主题预览"], ["private", "允许在私聊预览"],
+  ["telegram", "Telegram 公开消息预览"], ["x", "X 公开帖预览"], ["v2ex", "V2EX 主题预览"], ["private", "允许在私聊预览"],
 ] as const
 export type OfficialLinkToggle = typeof officialLinkToggles[number][0]
-export type OfficialLinkSettings = Readonly<Record<OfficialLinkToggle, boolean>> & {
-  readonly trustedTelegramUsers: readonly string[]
-}
-export type OfficialLinkPatch = Partial<Record<OfficialLinkToggle, boolean>> & { trustedTelegramUsers?: readonly string[] }
+export const officialLinkTrustFields = { telegram: "trustedTelegramUsers", x: "trustedXUsers" } as const
+type TrustPlatform = keyof typeof officialLinkTrustFields
+type TrustField = typeof officialLinkTrustFields[TrustPlatform]
+export type OfficialLinkSettings = Readonly<Record<OfficialLinkToggle, boolean> & Record<TrustField, readonly string[]>>
+export type OfficialLinkPatch = Partial<Record<OfficialLinkToggle, boolean> & Record<TrustField, readonly string[]>>
 const legacyTrustKey = "Yz:rconsole:tools:whitelist"
 const maxTrustUsers = 1000
 const qqId = /^[1-9]\d{0,18}$/u
 
-export function parseTrustedTelegramUsers(value: unknown, allowLegacy = false): readonly string[] | undefined {
+export function parseTrustedOfficialLinkUsers(value: unknown, allowLegacy = false): readonly string[] | undefined {
   if (!Array.isArray(value) || value.length > maxTrustUsers) return
   const users = new Set<string>()
   for (const raw of value) {
@@ -47,26 +48,29 @@ export function createOfficialLinkSettings(directory = dataPath, root = pathToFi
   async function legacyTrust(): Promise<readonly string[]> {
     try {
       const raw = await getRedis()?.get(legacyTrustKey)
-      return raw && raw.length <= 64 * 1024 ? parseTrustedTelegramUsers(JSON.parse(raw), true) ?? [] : []
+      return raw && raw.length <= 64 * 1024 ? parseTrustedOfficialLinkUsers(JSON.parse(raw), true) ?? [] : []
     } catch { return [] }
   }
 
-  async function settings(includeTrusted = true): Promise<OfficialLinkSettings> {
+  async function settings(includeTrusted: boolean | TrustPlatform = true): Promise<OfficialLinkSettings> {
     const raw = await read()
-    const legacy = officialLinkToggles.some(([key]) => typeof raw[key] !== "boolean") ||
-        (includeTrusted && !Object.hasOwn(raw, "trustedTelegramUsers"))
+    const selected = includeTrusted === true ? Object.values(officialLinkTrustFields)
+      : includeTrusted === false ? [] : [officialLinkTrustFields[includeTrusted]]
+    const inheritTrust = selected.some(key => !Object.hasOwn(raw, key))
+    const legacy = officialLinkToggles.some(([key]) => typeof raw[key] !== "boolean") || inheritTrust
       ? await readOptionalConfigFile(root, "plugins/rconsole-plugin/config/tools.yaml") ??
         await readOptionalConfigFile(root, "backup/plugins/rconsole-plugin/config/tools.yaml")
       : undefined
     const blocked = Array.isArray(legacy?.globalBlackList) ? legacy.globalBlackList : []
     const flag = (key: OfficialLinkToggle, inherited: boolean) => typeof raw[key] === "boolean" ? raw[key] as boolean : inherited
-    const trustedTelegramUsers = !includeTrusted ? [] : Object.hasOwn(raw, "trustedTelegramUsers")
-      ? parseTrustedTelegramUsers(raw.trustedTelegramUsers) ?? [] : legacy ? await legacyTrust() : []
+    const inherited = inheritTrust && legacy ? await legacyTrust() : []
+    const trust = (key: TrustField) => !selected.includes(key) ? [] : Object.hasOwn(raw, key)
+      ? parseTrustedOfficialLinkUsers(raw[key]) ?? [] : inherited
     return {
       youtube: flag("youtube", !blocked.includes("YouTube")), youtubeMusic: flag("youtubeMusic", !blocked.includes("YouTube")),
-      telegram: flag("telegram", !blocked.includes("小飞机")), v2ex: flag("v2ex", !blocked.includes("AI总结")),
-      private: flag("private", legacy?.privateResolve === true),
-      trustedTelegramUsers,
+      telegram: flag("telegram", !blocked.includes("小飞机")), x: flag("x", !blocked.includes("Twitter")),
+      v2ex: flag("v2ex", !blocked.includes("AI总结")), private: flag("private", legacy?.privateResolve === true),
+      trustedTelegramUsers: trust("trustedTelegramUsers"), trustedXUsers: trust("trustedXUsers"),
     }
   }
 

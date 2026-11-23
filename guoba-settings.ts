@@ -12,7 +12,7 @@ import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
 import { loadBiliPgcSettings } from "./services/bilibili/pgc.ts"
 import { biliPgcQualities } from "./services/bilibili/pgc-playback.ts"
-import { createOfficialLinkSettings, officialLinkToggles, parseTrustedTelegramUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
+import { createOfficialLinkSettings, officialLinkToggles, officialLinkTrustFields, parseTrustedOfficialLinkUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
 import { createJikeSettings, jikeFields } from "./services/jike/settings.ts"
 import { createKuaishouSettings, kuaishouFields } from "./services/kuaishou/settings.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
@@ -274,8 +274,10 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       ]),
       { component: "SOFT_GROUP_BEGIN", label: "公开链接预览" },
       ...officialLinkToggles.map(([key, label]) => ({ field: `officialLinks.${key}`, label, component: "Switch" })),
-      { field: "officialLinks.trustedTelegramUsers", label: "Telegram 信任 QQ", component: "Select",
-        componentProps: { mode: "tags" }, bottomHelpMessage: "只有主人和信任 QQ 可以触发公开 Telegram 预览。留空将只允许主人。" }],
+      ...([[officialLinkTrustFields.telegram, "Telegram"], [officialLinkTrustFields.x, "X"]] as const).map(([key, label]) => ({
+        field: `officialLinks.${key}`, label: `${label} 信任 QQ`, component: "Select",
+        componentProps: { mode: "tags" }, bottomHelpMessage: "留空将只允许主人使用此来源。"
+      }))],
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
@@ -326,11 +328,12 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           if (typeof value !== "boolean") return Result.error("请填写有效的公开链接预览设置。", 422)
           officialLinkPatch[key] = value
         }
-        const trustedField = "officialLinks.trustedTelegramUsers"
-        if (Object.hasOwn(values, trustedField) && (!edited || edited.has(trustedField))) {
-          const users = parseTrustedTelegramUsers(values[trustedField])
-          if (!users) return Result.error("请填写有效的 Telegram 信任 QQ。", 422)
-          officialLinkPatch.trustedTelegramUsers = users
+        for (const key of Object.values(officialLinkTrustFields)) {
+          const field = `officialLinks.${key}`
+          if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
+          const users = parseTrustedOfficialLinkUsers(values[field])
+          if (!users) return Result.error("请填写有效的公开链接信任 QQ。", 422)
+          officialLinkPatch[key] = users
         }
         const pgcPatch: Record<string, boolean | number> = {}
         for (const key of ["biliPgcAuto", "biliPgcQuality", "biliPgcDuration"] as const) {

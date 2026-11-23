@@ -58,9 +58,9 @@ export function neteaseEpisodePage(episodeId: string) {
   return `https://music.163.com/#/dj?id=${encodeURIComponent(episodeId)}`
 }
 
-type Selection = NonNullable<ReturnType<typeof voiceSearchSelection>>
+export type VoiceSearchSelection = NonNullable<ReturnType<typeof voiceSearchSelection>>
 
-export function verifiedEpisodePlayback(selection: Selection, response: EpisodeResult | undefined): { track: MusicTrack; stream: MusicStream } {
+export function verifiedEpisodePlayback(selection: VoiceSearchSelection, response: EpisodeResult | undefined): { track: MusicTrack; stream: MusicStream } {
   const episode = response?.extensions?.episode
   const stream = response?.stream
   if (response?.ref !== selection.ref || response.audio_ref !== selection.audioRef || episode?.ref !== selection.ref ||

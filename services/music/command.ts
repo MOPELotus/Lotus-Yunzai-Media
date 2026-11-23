@@ -19,10 +19,11 @@ const aliases: Readonly<Record<string, string>> = {
 const featureNames = ["[media] 点歌"] as const
 const maxInlineBytes = 16 * 1024 * 1024
 const searchCommand = /^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(?:点歌|搜歌)\s*([\s\S]*)$/u
+const typedSearch = /^#点歌\s*(\S(?:[\s\S]*?\S)?)\s+([12])$/u
 const playCommand = /^#播放\s*([\s\S]*?)(?:\s+([12]))?$/u
 const choiceCommand = /^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$/u
 const partnerManualCommand = /^#合伙人测试(?:[（(]执行[）)])?$/u
-const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客。"
+const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客，或 #点歌 关键词 2 列出节目后选择。"
 const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
 const searchNotes: Readonly<Record<string, string>> = {
   selected: "本次搜索已选用公共音乐账号。",
@@ -38,7 +39,8 @@ type ScanType = { readonly name: string; readonly type: string }
 type SessionBase = { readonly api: MusicService; expires: number }
 type CloudSearch = NonNullable<Awaited<ReturnType<ReturnType<typeof createCloudCommands>["search"]>>>
 type SearchSession = SessionBase & { readonly stage: "search"; readonly platform: string; readonly keyword: string;
-  readonly timeoutMs: number; page: number; tracks?: readonly MusicTrack[]; cloud?: CloudSearch; loading?: boolean }
+  readonly timeoutMs: number; readonly podcast: boolean; page: number; tracks?: readonly MusicTrack[];
+  episodes?: Awaited<ReturnType<MusicService["searchEpisodes"]>>; cloud?: CloudSearch; loading?: boolean }
 type Scan = { readonly api: MusicService; readonly platform: string; readonly partner?: true; readonly timeoutMs?: number; readonly pollMs?: number }
 type ScanSession = SessionBase & Scan & { readonly stage: "polling"; readonly controller: AbortController }
 type Session = SearchSession | ScanSession |
@@ -231,23 +233,30 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const matching = session.cloud?.tracks ?? []
       const requestedCloud = matching.slice(start, start + limit)
       const offset = Math.max(0, start - matching.length)
-      const search = requestedCloud.length < limit ? await api.search(session.platform, session.keyword, session.page,
-        { limit: limit - requestedCloud.length, offset }) : undefined
+      const remaining = limit - requestedCloud.length
+      const search = !session.podcast && remaining > 0 ? await api.search(session.platform, session.keyword, session.page,
+        { limit: remaining, offset }) : undefined
+      const episodes = session.podcast && remaining > 0 ? await api.searchEpisodes(session.keyword,
+        { limit: remaining, offset, signal: moduleSignal }) : []
       if (sessions.get(key) !== session || moduleSignal.aborted) return
       const tracks = [...requestedCloud.map(item => item.track), ...search?.tracks ?? []]
       session.tracks = tracks
+      session.episodes = episodes
       session.expires = Date.now() + session.timeoutMs
-      const message = tracks.length ?
-        "两分钟内回复数字选歌。#下一页 翻页，#取消 结束。公开曲目播放时自动尝试完整备用音源。" + (search ? searchNotes[search.accountStatus] : "") :
-        "没有搜索结果，可更换关键词或平台。"
-      const image = await renderStatusCard({ title: musicNames[session.platform] + "点歌", subtitle: session.keyword,
+      const results = [
+        ...tracks.map((track, index) => `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}${index < requestedCloud.length ? " · 云盘" : ""}`),
+        ...episodes.map(episode => `${episode.name} · ${episode.creator || "未知主播"} · 播客`),
+      ]
+      const choiceHint = session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。" :
+        "两分钟内回复数字选歌。#下一页 翻页，#取消 结束。公开曲目播放时自动尝试完整备用音源。" + (search ? searchNotes[search.accountStatus] : "")
+      const message = results.length ? choiceHint : "没有搜索结果，可更换关键词或平台。"
+      const image = await renderStatusCard({ title: session.podcast ? "网易云播客" : musicNames[session.platform] + "点歌", subtitle: session.keyword,
         badge: `第 ${session.page} 页`, userId: context.user_id, message,
-        items: tracks.map((track, index) => ({ label: String(index + 1),
-          value: `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}${index < requestedCloud.length ? " · 云盘" : ""}` })),
+        items: results.map((value, index) => ({ label: String(index + 1), value })),
       }, requestedCloud.length ? undefined : { saveId: `media-music-search-${context.user_id}` }).catch(() => undefined)
       if (sessions.get(key) === session) {
         if (requestedCloud.length && session.cloud) await cloud.assertVisible(context, api, session.cloud.binding)
-        await imageReply(context, image, [message, ...tracks.map((track, index) => `${index + 1}. ${track.name}`)].join("\n"))
+        await imageReply(context, image, [message, ...results.map((value, index) => `${index + 1}. ${value}`)].join("\n"))
       }
     } finally {
       session.loading = false
@@ -321,9 +330,18 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           catch (error) { session.page--; throw error }
           return []
         }
-        const track = session.tracks?.[Number(message.replace(/^#听/u, "")) - 1]
-        if (!track) return `请输入 1–${session.tracks?.length || 0} 的序号。`
+        const index = Number(message.replace(/^#听/u, "")) - 1
+        const trackCount = session.tracks?.length ?? 0
+        const track = session.tracks?.[index]
+        const episode = session.episodes?.[index - trackCount]
+        if (!track && !episode) return `请输入 1–${trackCount + (session.episodes?.length ?? 0)} 的序号。`
         sessions.delete(key)
+        if (episode) {
+          const { track, stream } = await session.api.playEpisode(episode, moduleSignal)
+          await playMedia(context, session.api, track, stream)
+          return []
+        }
+        if (!track) return
         const cloudTrack = session.cloud?.tracks.find(item => item.track === track)
         if (cloudTrack && session.cloud) {
           await cloud.play(context, session.api, session.cloud.binding, cloudTrack)
@@ -407,10 +425,13 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const { api, defaultPlatform, timeoutMs } = await openMusic()
         await recovery
         const match = searchCommand.exec(message)!
-        const keyword = match[2]!.trim()
+        const mode = typedSearch.exec(message)
+        const keyword = (mode?.[1] ?? match[2]!).trim()
         if (!keyword) return help
         const platform = aliases[match[1] || ""] || defaultPlatform
-        const session: SearchSession = { stage: "search", api, platform, timeoutMs, keyword, page: 1, expires: Date.now() + timeoutMs }
+        const podcast = mode?.[2] === "2"
+        if (podcast && platform !== "netease") return "当前默认音乐平台未接入播客播放。"
+        const session: SearchSession = { stage: "search", api, platform, timeoutMs, keyword, podcast, page: 1, expires: Date.now() + timeoutMs }
         replace(key, session)
         try { await showResults(context, key, session) }
         catch (error) {

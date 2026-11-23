@@ -7,7 +7,7 @@ import { createMusicCommands } from "../services/music/command.ts"
 import { MusicService } from "../services/music/service.ts"
 import { TuneWeaveService } from "../services/tuneweave/service.ts"
 
-test("公开直放分别查询首条歌曲与首期网易云播客，核实两种 ID 和完整音源", async () => {
+test("公开直放及播客列表选择核实节目和音轨 ID，播放完整音源", async () => {
   const root = await mkdtemp(join(tmpdir(), "lotus-music-direct-"))
   const audio = Bun.spawnSync(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "1", "-f", "wav", "pipe:1"])
   expect(audio.exitCode).toBe(0)
@@ -19,6 +19,7 @@ test("公开直放分别查询首条歌曲与首期网易云播客，核实两�
     artists: [{ name: "示例歌手" }], album: { cover_url: "https://p2.music.126.net/song.jpg" } }
   const episode = { platform: "netease", ref: "netease:200", id: "200", name: "测试播客", duration_ms: 1000,
     creator: { name: "播客作者" }, cover_url: "https://p2.music.126.net/episode.jpg", audio: { ...song, ref: "netease:300", id: "300" } }
+  const secondEpisode = { ...episode, ref: "netease:202", id: "202", name: "第二期播客", audio: { ...episode.audio, ref: "netease:302", id: "302" } }
   let defaults = "netease"
   let mode = "good"
   const json = data => Response.json({ ok: true, data, meta: { platform: "netease" } })
@@ -31,8 +32,8 @@ test("公开直放分别查询首条歌曲与首期网易云播客，核实两�
       requests.push(url)
       if (url.pathname === "/v1/search") {
         expect(url.searchParams.get("platform")).toBe("netease")
-        expect(url.searchParams.get("limit")).toBe("1")
         if (url.searchParams.get("type") === "track") {
+          expect(url.searchParams.get("limit")).toBe("1")
           expect(url.searchParams.get("variant")).toBe("cloud")
           expect(url.searchParams.get("q")).toBe("歌曲")
           return json([{ type: "track", data: song }])
@@ -41,6 +42,14 @@ test("公开直放分别查询首条歌曲与首期网易云播客，核实两�
         expect(url.searchParams.get("variant")).toBe("legacy")
         expect(url.searchParams.get("q")).toBe("播客")
         expect(init.redirect).toBe("error")
+        if (mode === "list") {
+          expect(url.searchParams.get("limit")).toBe("10")
+          const offset = url.searchParams.get("offset")
+          expect(["0", "10"]).toContain(offset)
+          const entries = offset === "0" ? [episode] : [episode, secondEpisode]
+          return json(entries.map(data => ({ type: "podcast_episode", data })))
+        }
+        expect(url.searchParams.get("limit")).toBe("1")
         if (mode === "empty") return json([])
         if (mode === "badSearch") return json([{ type: "podcast", data: { platform: "netease", id: "201" } }])
         return json([{ type: "opaque", data: { platform: "netease", kind: "voice", extensions: {
@@ -50,6 +59,10 @@ test("公开直放分别查询首条歌曲与首期网易云播客，核实两�
       if (decodeURIComponent(url.pathname) === "/v1/tracks/netease:100/stream") {
         expect(url.searchParams.get("unblock")).toBe("false")
         return json(stream(100))
+      }
+      if (mode === "list") {
+        expect(decodeURIComponent(url.pathname)).toBe("/v1/episodes/netease:202/stream")
+        return json({ ref: secondEpisode.ref, audio_ref: secondEpisode.audio.ref, extensions: { episode: secondEpisode }, stream: stream(302) })
       }
       expect(decodeURIComponent(url.pathname)).toBe("/v1/episodes/netease:200/stream")
       expect(url.searchParams.get("fallback")).toBe("false")
@@ -86,6 +99,17 @@ test("公开直放分别查询首条歌曲与首期网易云播客，核实两�
     expect(messages.at(-2)).toMatchObject({ type: "image" })
     expect(messages.at(-1)).toBe("https://music.163.com/#/dj?id=200")
 
+    mode = "list"
+    expect(await run("#点歌 播客 2")).toEqual([])
+    expect(messages.at(-1)).toMatchObject({ type: "image" })
+    expect(await run("2")).toContain("1–1")
+    expect(await run("#下一页")).toEqual([])
+    expect(await run("3")).toContain("1–2")
+    expect(await run("#听2")).toEqual([])
+    expect(await run("2")).toBeUndefined()
+    expect(cards.at(-1)?.url).toBe("https://music.163.com/#/dj?id=202")
+    expect(relays.at(-1)).toBe("第二期播客.wav")
+
     mode = "trial"
     expect(await run("#播放 播客 2")).toContain("完整播客音源")
     mode = "mismatched"
@@ -94,8 +118,8 @@ test("公开直放分别查询首条歌曲与首期网易云播客，核实两�
     expect(await run("#播放 播客 2")).toContain("节目资料")
     mode = "empty"
     expect(await run("#播放 播客 2")).toContain("未找到")
-    expect(relays).toHaveLength(4)
-    expect(cards).toHaveLength(3)
+    expect(relays).toHaveLength(5)
+    expect(cards).toHaveLength(4)
     defaults = "qq"
     const before = requests.length
     expect(await run("#播放 播客 2")).toContain("未接入播客播放")

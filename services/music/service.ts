@@ -12,7 +12,7 @@ import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/t
 import { runMediaProcess } from "../media/files.ts"
 import { resolveData } from "../../core/path.ts"
 import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accounts.ts"
-import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeResult, type VoiceSearchItem } from "./episode.ts"
+import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeResult, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -144,21 +144,31 @@ export class MusicService {
     const accountStatus = alias || credential ? accountSelected ? "selected" : "unverified" : "unconfigured"
     return { tracks: items.filter(i => i.type === "track").map(i => i.data), accountStatus }
   }
-  async firstEpisode(keyword: string, signal?: AbortSignal) {
+  async searchEpisodes(keyword: string, { limit = this.config.search_limit, offset, signal }: {
+    limit?: number; offset?: number; signal?: AbortSignal
+  } = {}) {
     signal?.throwIfAborted()
     const account = (await readMusicAccounts(this.accountsFile)).netease?.alias
-    const identity: Record<string, string> = account ? { account } : {}
-    const search = new URLSearchParams({ platform: "netease", type: "voice", variant: "legacy", limit: "1", q: keyword, ...identity })
+    const search = new URLSearchParams({ platform: "netease", type: "voice", variant: "legacy", limit: String(limit), q: keyword,
+      ...(offset !== undefined && { offset: String(offset) }), ...(account && { account }) })
     const items = await this.tuneweave.request<VoiceSearchItem[]>(`/v1/search?${search}`, { signal, redirect: "error" })
     if (!Array.isArray(items)) throw new Error("网易云播客搜索结果无法核实。")
-    if (!items.length) return
-    const episode = voiceSearchSelection(items[0])
-    if (!episode) throw new Error("网易云播客搜索结果缺少可核实的节目资料。")
-    const controls = new URLSearchParams({ quality: this.config.quality, fallback: "false", unblock: "false", ...identity })
+    const episodes = items.map(voiceSearchSelection).filter(episode => episode !== undefined)
+    if (items.length && !episodes.length) throw new Error("网易云播客搜索结果缺少可核实的节目资料。")
+    return episodes
+  }
+  async playEpisode(episode: VoiceSearchSelection, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const account = (await readMusicAccounts(this.accountsFile)).netease?.alias
+    const controls = new URLSearchParams({ quality: this.config.quality, fallback: "false", unblock: "false", ...(account && { account }) })
     const result = await this.tuneweave.request<EpisodeResult>(`/v1/episodes/${encodeURIComponent(episode.ref)}/stream?${controls}`,
       { signal, redirect: "error" })
     signal?.throwIfAborted()
     return verifiedEpisodePlayback(episode, result)
+  }
+  async firstEpisode(keyword: string, signal?: AbortSignal) {
+    const [episode] = await this.searchEpisodes(keyword, { limit: 1, signal })
+    if (episode) return this.playEpisode(episode, signal)
   }
   async resolve(track: MusicTrack) {
     const accounts = await readMusicAccounts(this.accountsFile), account = accounts[track.platform]

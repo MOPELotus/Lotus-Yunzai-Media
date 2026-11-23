@@ -102,13 +102,13 @@ export class MusicService {
     this.accountsFile = options.accountsFile
     this.partner = new NeteasePartnerAccounts(options.partnerAccountsFile)
   }
-  private request<T>(route: string, accounts?: MusicAccounts): Promise<T>
+  private request<T>(route: string, accounts?: MusicAccounts, accountSelection?: undefined, signal?: AbortSignal): Promise<T>
   private request<T>(route: string, accounts: MusicAccounts, accountSelection: TuneWeaveAccountSelection):
     Promise<{ data: T; accountSelected: boolean }>
-  private async request<T>(route: string, accounts?: MusicAccounts, accountSelection?: TuneWeaveAccountSelection) {
+  private async request<T>(route: string, accounts?: MusicAccounts, accountSelection?: TuneWeaveAccountSelection, signal?: AbortSignal) {
     accounts ??= await readMusicAccounts(this.accountsFile)
     const accountSnapshot = accounts
-    return this.tuneweave.request<T>(route, { credentials: Object.values(accounts).map(a => a?.credential).filter((credential): credential is string => Boolean(credential)), accountSelection,
+    return this.tuneweave.request<T>(route, { credentials: Object.values(accounts).map(a => a?.credential).filter((credential): credential is string => Boolean(credential)), accountSelection, signal,
       onCredentialUpdates: async updates => {
         await Promise.all(updates.filter(u => accountSnapshot[u.platform]?.credential).map(u =>
           saveMusicAccount(u.platform, { credential: u.credential }, { file: this.accountsFile, expected: accountSnapshot[u.platform] })))
@@ -188,12 +188,19 @@ export class MusicService {
     }
     return { kind: "track" as const, track }
   }
-  async resolve(track: MusicTrack, { exact = false }: { exact?: boolean } = {}) {
+  async publicLyrics(track: MusicTrack, signal?: AbortSignal) {
+    const data = await this.tuneweave.request<{ track_ref?: unknown; plain?: unknown; translated?: unknown }>(
+      `/v1/tracks/${encodeURIComponent(track.ref)}/lyrics`, { signal, redirect: "error" })
+    if (data?.track_ref !== track.ref) throw new Error("平台返回的歌词与此歌曲不一致。")
+    const text = (value: unknown) => typeof value === "string" && value.length <= 32_000 ? value.trim() : ""
+    return { original: text(data.plain), translated: text(data.translated) }
+  }
+  async resolve(track: MusicTrack, { exact = false, signal }: { exact?: boolean; signal?: AbortSignal } = {}) {
     const accounts = await readMusicAccounts(this.accountsFile), account = accounts[track.platform]
     const params = new URLSearchParams({ quality: this.config.quality, fallback: String(!exact), unblock: "false",
       ...(!exact && { fallback_platforms: Object.keys(MUSIC_PLATFORMS).filter(p => p !== track.platform).join(",") }),
       ...(account?.alias && !account.credential ? { account: account.alias } : {}) })
-    const stream = await this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, accounts)
+    const stream = await this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, accounts, undefined, signal)
     if (!stream?.url || stream.trial) throw new Error("没有可用的完整音源，建议主人扫码登录音乐平台")
     if (exact && (stream.resolved_platform !== track.platform || stream.origin_track !== track.ref || stream.resolved_track !== track.ref)) {
       throw new Error("平台返回的完整音源与链接中的歌曲不一致。")
@@ -202,7 +209,7 @@ export class MusicService {
   }
   async prepare(track: MusicTrack, { signal }: { signal?: AbortSignal } = {}) {
     signal?.throwIfAborted()
-    const stream = await this.resolve(track)
+    const stream = await this.resolve(track, { signal })
     return this.prepareStream(track, stream, { signal })
   }
   async prepareStream(track: MusicTrack, stream: MusicStream,

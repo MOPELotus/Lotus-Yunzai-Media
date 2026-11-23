@@ -60,6 +60,14 @@ export function neteaseEpisodePage(episodeId: string) {
 
 export type VoiceSearchSelection = NonNullable<ReturnType<typeof voiceSearchSelection>>
 
+export function episodeSelectionFromTrack(track: MusicTrack): VoiceSearchSelection | undefined {
+  const episode = id(track.episode_id)
+  const audio = id(track.id)
+  if (track.platform !== "netease" || !episode || !audio || track.ref !== "netease:" + audio) return
+  return { id: episode, ref: "netease:" + episode, audioRef: track.ref, audioId: audio,
+    name: track.name, creator: track.artists?.[0]?.name, cover: track.album?.cover_url, duration: track.duration_ms }
+}
+
 export function verifiedEpisodePlayback(selection: VoiceSearchSelection, response: EpisodeResult | undefined): { track: MusicTrack; stream: MusicStream } {
   const episode = response?.extensions?.episode
   const stream = response?.stream

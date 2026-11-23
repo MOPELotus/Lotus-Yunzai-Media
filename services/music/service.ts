@@ -15,6 +15,7 @@ import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accou
 import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeData, type EpisodeResult, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
 import type { PublicMusicTarget } from "./share-link.ts"
 import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
+import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -39,6 +40,7 @@ export interface MusicStream {
   duration_ms?: number
   origin_track?: string
   resolved_track?: string
+  bilibili_part_ref?: string
 }
 
 type MusicMv = { readonly ref: string; readonly id: string | number; readonly platform: "netease" | "kuwo" | "qq" | "kugou"; readonly title: string;
@@ -113,7 +115,7 @@ export class MusicService {
     this.partner = new NeteasePartnerAccounts(options.partnerAccountsFile)
   }
   private request<T>(route: string, accounts?: MusicAccounts, accountSelection?: undefined, signal?: AbortSignal): Promise<T>
-  private request<T>(route: string, accounts: MusicAccounts, accountSelection: TuneWeaveAccountSelection):
+  private request<T>(route: string, accounts: MusicAccounts, accountSelection: TuneWeaveAccountSelection, signal?: AbortSignal):
     Promise<{ data: T; accountSelected: boolean }>
   private async request<T>(route: string, accounts?: MusicAccounts, accountSelection?: TuneWeaveAccountSelection, signal?: AbortSignal) {
     accounts ??= await readMusicAccounts(this.accountsFile)
@@ -136,9 +138,12 @@ export class MusicService {
     return Object.entries(MUSIC_PLATFORMS).map(([platform, name]) => ({ platform, name, capabilities: items.find(i => i.platform === platform && i.registered)?.capabilities || [] })).filter(i => i.capabilities.length)
   }
   async search(platform: string, keyword: string, page = 1,
-    { limit = this.config.search_limit, offset = (page - 1) * this.config.search_limit, variant }: {
-      limit?: number; offset?: number; variant?: "cloud"
+    { limit = this.config.search_limit, offset = (page - 1) * this.config.search_limit, variant, signal }: {
+      limit?: number; offset?: number; variant?: "cloud"; signal?: AbortSignal
     } = {}) {
+    if (platform === "bilibili" && keyword.trim()) {
+      return { tracks: await searchBilibiliAudio(this.tuneweave, keyword.trim(), limit, offset, signal), accountStatus: "unconfigured" }
+    }
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error("请选择有效平台并输入歌曲关键词")
     const accounts = await readMusicAccounts(this.accountsFile)
     const { alias, credential } = accounts[platform] || {}
@@ -151,7 +156,7 @@ export class MusicService {
     })
     const { data: items, accountSelected } = await this.request<SearchItem[]>(`/v1/search?${params}`, accounts, {
       platform, alias, hasCredential: Boolean(credential),
-    })
+    }, signal)
     // Search can succeed with a stale login, so account selection alone cannot
     // confirm that the music provider still considers the account signed in.
     const accountStatus = alias || credential ? accountSelected ? "selected" : "unverified" : "unconfigured"
@@ -253,6 +258,7 @@ export class MusicService {
     return { original: text(data.plain), translated: text(data.translated) }
   }
   async resolve(track: MusicTrack, { exact = false, signal }: { exact?: boolean; signal?: AbortSignal } = {}) {
+    if (track.platform === "bilibili") return resolveBilibiliAudio(this.tuneweave, track, signal)
     const accounts = await readMusicAccounts(this.accountsFile), account = accounts[track.platform]
     const params = new URLSearchParams({ quality: this.config.quality, fallback: String(!exact), unblock: "false",
       ...(!exact && { fallback_platforms: Object.keys(MUSIC_PLATFORMS).filter(p => p !== track.platform).join(",") }),
@@ -272,6 +278,7 @@ export class MusicService {
   async prepareStream(track: MusicTrack, stream: MusicStream,
     { signal, allowMediaUrl }: { signal?: AbortSignal; allowMediaUrl?: (url: URL) => boolean } = {}) {
     signal?.throwIfAborted()
+    const biliAudio = track.platform === "bilibili"
     const task = await createMediaTask(this.tasksDir)
     try {
       const file = path.join(task.dir, "source.audio"), voice = path.join(task.dir, "voice.wav")
@@ -283,6 +290,7 @@ export class MusicService {
         let headers = current.origin === url.origin ? { ...options.headers } : stripPrivate(options.headers)
         for (let i = 0; i < 6; i++) {
           if (!["http:", "https:"].includes(current.protocol) || current.username || current.password ||
+              (biliAudio && !isBilibiliAudioCdn(current, stream.bilibili_part_ref)) ||
               (allowMediaUrl && !allowMediaUrl(current))) throw new Error("音频地址无效")
           const response = await this.fetch(current, { ...options, headers, redirect: "manual" })
           if (![301, 302, 303, 307, 308].includes(response.status)) return response
@@ -304,8 +312,17 @@ export class MusicService {
       if (!info.streams?.some(s => s.codec_type === "audio") || !Number.isFinite(duration) || duration <= 0) throw new Error("下载结果不是有效音频")
       const expected = Math.max(Number(stream.duration_ms) || 0, Number(track.duration_ms) || 0)
       if (expected && duration * 1000 < expected - Math.max(3000, expected * 0.02)) throw new Error("音频时长不足，未按完整歌曲发送")
+      if (biliAudio && (!expected || info.streams.some(s => s.codec_type === "video"))) throw new Error("B 站未返回独立完整音轨")
       const encodeOptions = { cwd: task.dir, timeoutMs: this.config.download_timeout_ms, signal }
-      await runMediaProcess(ffmpeg, ["-nostdin", "-y", "-i", file, "-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", voice], encodeOptions)
+      await runMediaProcess(ffmpeg, ["-nostdin", "-y", ...(biliAudio ? ["-xerror"] : []), "-i", file, "-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", voice], encodeOptions)
+      if (biliAudio) {
+        // Check decoded samples as well as the DASH container's declared duration.
+        const decoded: ProbeResult = JSON.parse((await runMediaProcess(ffprobe, ["-v", "error", "-show_entries",
+          "format=duration", "-of", "json", voice], probeOptions)).output)
+        const milliseconds = Number(decoded.format?.duration) * 1000
+        if (!Number.isFinite(milliseconds) || Math.abs(milliseconds - expected) > Math.max(1500, expected * 0.01) ||
+            Math.abs(milliseconds - duration * 1000) > 1000) throw new Error("B 站音轨未完整解码，未发送语音")
+      }
       return { taskDir: task.dir, taskId: task.id, voiceFile: voice, duration, stream, track }
     } catch (error) { await releaseMediaTask(this.tasksDir, task.dir);throw error }
   }

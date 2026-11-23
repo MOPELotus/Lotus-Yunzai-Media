@@ -22,15 +22,16 @@ import { externalMusicLabels, readExternalMusicShare } from "./external-share.ts
 const aliases: Readonly<Record<string, string>> = {
   网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq",
   酷狗: "kugou", 酷我: "kuwo", 咪咕: "migu", 汽水: "soda",
+  哔哩哔哩: "bilibili", 哔哩: "bilibili", B站: "bilibili", b站: "bilibili",
 }
 const featureNames = ["[media] 点歌"] as const
 const maxInlineBytes = 16 * 1024 * 1024
 const mvByteLimit = 100 * 1024 * 1024
-const searchCommand = /^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(?:点歌|搜歌)\s*([\s\S]*)$/u
+const searchCommand = /^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水|哔哩哔哩|哔哩|[Bb]站)?(?:点歌|搜歌)\s*([\s\S]*)$/u
 const typedSearch = /^#点歌\s*(\S(?:[\s\S]*?\S)?)\s+([12])$/u
 const playCommand = /^#播放\s*([\s\S]*?)(?:\s+([12]))?$/u
-const naturalMusic = /^(#)?(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(点播音乐|点播|点歌|播放|放一?首|来一?首)([^\r\n]*)$/u
-const multipleMusic = /^#?(?:多选(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?|(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)多选)(?:点播音乐|点播|点歌|播放|放一?首|来一?首)([^\r\n]*)$/u
+const naturalMusic = /^(#)?(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水|哔哩哔哩|哔哩|[Bb]站)?(点播音乐|点播|点歌|播放|放一?首|来一?首)([^\r\n]*)$/u
+const multipleMusic = /^#?(?:多选(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水|哔哩哔哩|哔哩|[Bb]站)?|(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水|哔哩哔哩|哔哩|[Bb]站)多选)(?:点播音乐|点播|点歌|播放|放一?首|来一?首)([^\r\n]*)$/u
 const multiplePageSize = 20
 const maxMultipleResults = 500
 const defaultMultipleTimeoutMs = 180_000
@@ -40,7 +41,7 @@ const choiceCommand = /^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|�
 const reissueCommand = /^#?(歌词|语音|高清语音)(?:\s*([1-9][0-9]{0,2}))?$/u
 const partnerManualCommand = /^#合伙人测试(?:[（(]执行[）)])?$/u
 const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客，或 #点歌 关键词 2 列出节目后选择。\n#多选点歌 关键词 保留跨页编号，回复一个数字选一首，可反复选择。选曲后可发 #歌词 或 #语音。在列表中可加序号。"
-const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
+const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#B站点歌 关键词 搜索公开视频的音轨。#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
 const recommendation = /^#?(?:来|放)(?:一)?首歌$/u
 const favorite = /^#?(?:我的收藏|我喜欢的歌)(?:\s*([0-9]{1,4}))?$/u
 const accountStatus = /^#?(?:音乐登录状态|(?:点歌|音乐)(?:ck|cookie)(?:检查|状态))$/iu
@@ -102,7 +103,7 @@ interface Services {
   readonly renderMusicShare?: typeof renderStatusCard
 }
 
-const musicNames: Readonly<Record<string, string>> = MUSIC_PLATFORMS
+const musicNames: Readonly<Record<string, string>> = { ...MUSIC_PLATFORMS, bilibili: "B 站" }
 const root = new URL("../../../../", import.meta.url)
 const scanTypes: Readonly<Record<string, readonly ScanType[]>> = MUSIC_QR_TYPES
 const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请稍后重试。"
@@ -330,8 +331,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     throw new Error("语音发送失败。")
   }
 
-  async function sendTrackInfo(context: Context, track: MusicTrack, media: Prepared) {
-    moduleSignal.throwIfAborted()
+  async function sendTrackInfo(context: Context, track: MusicTrack, media: Prepared, active = moduleSignal) {
+    active.throwIfAborted()
     const share = musicShare(track, media.stream)
     if (share && context.sendMusicCard) {
       const result = await context.sendMusicCard(share.data)
@@ -342,13 +343,17 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       }
     }
     const artists = track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"
-    const program = track.episode_id ? neteaseEpisodePage(track.episode_id) : undefined
+    const program = track.episode_id ? neteaseEpisodePage(track.episode_id) : track.platform === "bilibili" ? track.extensions?.url : undefined
     const fallback = `《${track.name}》 · ${artists}${program ? `\n${program}` : ""}`
     const image = await renderStatusCard({ title: track.name, subtitle: artists,
       message: `完整音频 · ${Math.round(media.duration)} 秒`,
       items: [{ label: "实际音源", value: musicNames[media.stream.resolved_platform ?? ""] || media.stream.resolved_platform || musicNames[track.platform] }],
     }).catch(() => undefined)
-    if (program && image && await reply(context, { type: "image", file: image })) await reply(context, program)
+    active.throwIfAborted()
+    if (program && image && await reply(context, { type: "image", file: image })) {
+      active.throwIfAborted()
+      await reply(context, program)
+    }
     else if (program) await reply(context, fallback)
     else await imageReply(context, image, fallback)
   }
@@ -361,7 +366,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     try {
       active.throwIfAborted()
       await verify?.()
-      await sendTrackInfo(context, track, media)
+      await sendTrackInfo(context, track, media, active)
       await verify?.()
       await sendVoice(context, media, active)
     } finally { await api.cleanup(media) }
@@ -463,6 +468,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       active.throwIfAborted()
       if (request.mode === "歌词") {
         if (!("track" in source)) return "这条播客没有通过曲目歌词入口提供歌词。"
+        if (source.track.platform === "bilibili") return "B 站视频音轨没有曲目歌词。"
         const lyric = await api.publicLyrics(source.track, active)
         if (active.aborted) return
         const original = lyricPages(lyric.original), translated = lyricPages(lyric.translated)
@@ -504,7 +510,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const offset = Math.max(0, start - matching.length)
       const remaining = limit - requestedCloud.length
       const search = !session.podcast && remaining > 0 ? await api.search(session.platform, session.keyword, session.page,
-        { limit: remaining, offset }) : undefined
+        { limit: remaining, offset, signal: moduleSignal }) : undefined
       const episodes = session.podcast && remaining > 0 ? await api.searchEpisodes(session.keyword,
         { limit: remaining, offset, signal: moduleSignal }) : []
       if (sessions.get(key) !== session || moduleSignal.aborted) return
@@ -528,7 +534,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         ...episodes.map(episode => `${episode.name} · ${episode.creator || "未知主播"} · 播客`),
       ]
       const choiceHint = session.multiple ? "回复任一已显示的数字选一首，可反复选择。#下一页 翻页，#取消 结束。"
-        : session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。" :
+        : session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。"
+        : session.platform === "bilibili" ? "两分钟内回复数字播放所选视频的完整音轨。#下一页 翻页，#取消 结束。" :
         "两分钟内回复数字选歌。#下一页 翻页，#取消 结束。公开曲目播放时自动尝试完整备用音源。" + (search ? searchNotes[search.accountStatus] : "")
       const message = results.length ? choiceHint : session.multiple && previous.length
         ? session.exhausted ? "没有更多歌曲，仍可选择之前的编号。" : "本页没有新的歌曲，可继续翻页或选择之前的编号。"
@@ -729,8 +736,12 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           await cloud.play(context, session.api, session.cloud.binding, cloudTrack)
           return []
         }
-        remember(key, { track }, session.timeoutMs)
-        await playMedia(context, session.api, track)
+        const selection = remember(key, { track }, session.timeoutMs)
+        const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+        const active = track.platform === "bilibili"
+          ? AbortSignal.any([moduleSignal, selection.controller.signal, ...(connection ? [connection] : [])]) : moduleSignal
+        try { await playMedia(context, session.api, track, undefined, active) }
+        catch (error) { if (!active.aborted) throw error }
       } else {
         if (!credentialScope(context)) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
         const index = Number(message) - 1
@@ -814,10 +825,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           await playMedia(context, api, episode.track, episode.stream)
         } else {
           const variant = platform === "netease" ? "cloud" : undefined
-          const { tracks: [track] } = await api.search(platform, keyword, 1, { limit: 1, variant })
+          const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+          const active = platform === "bilibili" && connection ? AbortSignal.any([moduleSignal, connection]) : moduleSignal
+          const { tracks: [track] } = await api.search(platform, keyword, 1, { limit: 1, variant, signal: active })
           if (!track) return "未找到相关歌曲。"
-          remember(key, { track }, timeoutMs)
-          await playMedia(context, api, track)
+          const selection = remember(key, { track }, timeoutMs)
+          const playing = platform === "bilibili" ? AbortSignal.any([active, selection.controller.signal]) : active
+          try { await playMedia(context, api, track, undefined, playing) }
+          catch (error) { if (!playing.aborted) throw error }
         }
       } catch (error) {
         if (!moduleSignal.aborted) return "[media] 播放：" + errorText(error)

@@ -1,8 +1,7 @@
 import { fetchCdn, type CdnKind, type MediaFetch } from "./cdn.ts"
 import fs from "node:fs/promises"
-import { createWriteStream } from "node:fs"
-import { Readable, Transform } from "node:stream"
-import { pipeline } from "node:stream/promises"
+import { randomUUID } from "node:crypto"
+import { discardBody, readStream, writeChunk } from "./transfer.ts"
 
 export type MediaKind = "image" | "video"
 
@@ -37,31 +36,42 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   const controller = new AbortController()
   const active = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
   const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const temp = `${targetBase}.part`
+  const temp = `${targetBase}.${randomUUID()}.part`
   let length = 0
-  let expected = 0
   let prefix = Buffer.alloc(0)
   const sniffBytes = cdn === "acfun-video" ? 377 : 64
-  const requireFullFile = cdn?.endsWith("-mv") || cdn === "acfun-video" || cdn === "weishi-video" ||
-    cdn === "zuiyou-video" || cdn === "pipixia-video" || cdn === "kuaishou-video"
   try {
     active.throwIfAborted()
     const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active }, cdn)
-    if (!response.ok || !response.body || requireFullFile && (response.status !== 200 || response.headers.has("content-range"))) {
-      await response.body?.cancel().catch(() => {})
+    if (response.status !== 200 || !response.body || response.headers.has("content-range")) {
+      discardBody(response)
       throw new Error(`媒体下载失败 HTTP ${response.status}`)
     }
-    expected = Number(response.headers.get("content-length")) || 0
-    if (maxBytes > 0 && expected > maxBytes) throw new Error("媒体大小超过下载限制")
-    const guard = new Transform({ transform(chunk: Buffer, _encoding, callback) {
-      length += chunk.length
-      if (prefix.length < sniffBytes) prefix = Buffer.concat([prefix, chunk.subarray(0, sniffBytes - prefix.length)])
-      if (maxBytes > 0 && length > maxBytes) callback(new Error("媒体大小超过下载限制"))
-      else callback(null, chunk)
-    } })
-    await pipeline(Readable.from(response.body.values(), { objectMode: false }), guard, createWriteStream(temp, { flags: "wx" }), { signal: active })
+    const declared = response.headers.get("content-length")
+    const expected = declared === null ? undefined : Number(declared)
+    if (expected !== undefined && (!/^\d+$/u.test(declared!) || !Number.isSafeInteger(expected) || expected < 1)) {
+      discardBody(response)
+      throw new Error("媒体下载不完整")
+    }
+    if (maxBytes > 0 && expected !== undefined && expected > maxBytes) {
+      discardBody(response)
+      throw new Error("媒体大小超过下载限制")
+    }
+    const output = await fs.open(temp, "wx").catch(error => { discardBody(response); throw error })
+    try {
+      for await (const chunk of readStream(response.body, active)) {
+        const next = length + chunk.length
+        if (maxBytes > 0 && next > maxBytes) throw new Error("媒体大小超过下载限制")
+        if (expected !== undefined && next > expected) throw new Error("媒体下载不完整")
+        if (prefix.length < sniffBytes) prefix = Buffer.concat([prefix, chunk.subarray(0, sniffBytes - prefix.length)])
+        await writeChunk(output, chunk, length)
+        length = next
+      }
+    } finally {
+      await output.close()
+    }
     active.throwIfAborted()
-    if (length === 0 || expected > 0 && length !== expected) throw new Error("媒体下载不完整")
+    if (length === 0 || expected !== undefined && length !== expected) throw new Error("媒体下载不完整")
     const detected = sniffMedia(prefix)
     if (!detected || kind && detected.kind !== kind) throw new Error("返回内容不是预期媒体，可能为错误页面或无效 CDN 响应")
     const file = `${targetBase}${detected.ext}`

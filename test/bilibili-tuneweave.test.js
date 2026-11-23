@@ -129,6 +129,29 @@ test("B 站桌面、手机与短链保留 TuneWeave 的明确分 P，错集不�
   } finally { await rm(workDir, { recursive: true, force: true }) }
 })
 
+test("高清晰度不可选时，B 站最低档仍优先同档 AVC", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lotus-bili-minimum-quality-"))
+  const selected = []
+  const service = new BilibiliService({ accountFile: join(root, "account.yaml"), async fetch(input) {
+    const url = new URL(input)
+    if (url.hostname === "fixture.example") {
+      selected.push(url.pathname)
+      throw new Error("轨道选择已记录")
+    }
+    expect(url.pathname.endsWith("/playback")).toBe(true)
+    return ok({ video_ref: ref, part_ref: "bilibili:cid:101", video_tracks: [
+      { id: 16, codec_id: 12, url: "https://fixture.example/hevc" },
+      { id: 64, codec_id: 7, url: "https://fixture.example/higher" },
+      { id: 16, codec_id: 7, url: "https://fixture.example/avc" },
+    ] })
+  } })
+  try {
+    const plan = { info: { ref, bvid }, pages: [{ cid: "101", page: 1 }] }
+    await expect(service.downloadWithTuneWeave(plan, { resolution: 1, tools_path: "data/tools/bin" }, root)).rejects.toThrow("轨道选择已记录")
+    expect(selected).toEqual(["/avc"])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test("B 站视频认证失效后只续原账号一次，确认原别名与 UID 后才重试", async () => {
   const workDir = await mkdtemp(join(tmpdir(), "lotus-bili-renew-"))
   const accountFile = join(workDir, "account.yaml")

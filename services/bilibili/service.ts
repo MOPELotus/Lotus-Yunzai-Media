@@ -610,7 +610,8 @@ export class BilibiliService {
       await emitBiliEvent(hooks, { type: "download-part", message: `正在下载 P${page.page}，JS 并发 ${download.concurrency}。` })
       if (manifest.video_tracks?.length) {
         const videos = [...manifest.video_tracks].sort((a, b) => b.id - a.id || Number(a.codec_id !== 7) - Number(b.codec_id !== 7))
-        const video = videos.find(t => t.id <= download.resolution) ?? videos[videos.length - 1]!
+        const lowestQuality = videos.at(-1)!.id
+        const video = videos.find(t => t.id <= download.resolution || t.id === lowestQuality)!
         const audio = [...(manifest.audio_tracks || [])].sort((a, b) => b.bandwidth - a.bandwidth)[0]
         const videoFile = path.join(workDir, stem + ".video"), audioFile = path.join(workDir, stem + ".audio")
         const operations = [downloadRanges([video.url, ...(video.backup_urls || [])], videoFile, options)]

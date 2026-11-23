@@ -490,7 +490,8 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
           if (!options.parseVideoLink || signal?.aborted) return
           target = await quotedTarget(context, action.action === "preview") || ""
         } else {
-          target = service.extractTarget(action.target) || ""
+          // A foreign share card cannot suppress a separately typed Bilibili link.
+          target = service.extractTarget(action.target) ?? service.extractTarget(message) ?? ""
         }
         if (!target) return
         const url = URL.parse(target)

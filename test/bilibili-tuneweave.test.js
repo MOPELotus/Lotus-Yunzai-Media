@@ -4,6 +4,7 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { BilibiliService, quotedBiliCardLink } from "../services/bilibili/service.ts"
+import { createBilibiliVideoCommands } from "../services/bilibili/video-command.ts"
 
 const bvid = "BV17x411w7KC"
 const ref = "bilibili:bvid:" + bvid
@@ -90,6 +91,33 @@ test("引用 B 站分享卡保留单一合法分 P，缺省才使用无页码链
   expect(quotedBiliCardLink(card(link + "?spm_id_from=demo"))).toBe(link)
   for (const query of ["p=1&p=2", "p=0", "p=-1", "p=abc", "p="]) {
     expect(quotedBiliCardLink(card(link + "?" + query))).toBeUndefined()
+  }
+})
+
+test("可见 B 站链接与异站分享卡同条发送时，异站卡不遮蔽链接", async () => {
+  const life = new AbortController()
+  const targets = []
+  const module = createBilibiliVideoCommands({
+    signal: life.signal,
+    settings: async () => ({ parseVideoLink: true }),
+    async fetch(input) {
+      const url = new URL(input)
+      targets.push(decodeURIComponent(url.pathname))
+      life.abort()
+      return ok({ video })
+    },
+  })
+  const foreign = "https://www.douyin.com/video/11111111"
+  const probe = (message, card) => module.fallback(message, { message_type: "group", self_id: 99, group_id: 77, user_id: 42,
+    normalizedMessage: message, raw_message: message + " [CQ:json,data=" + JSON.stringify(card) + "]",
+    message: [{ type: "text", text: message }, { type: "json", data: card }], reply: async () => true })
+  try {
+    await expect(probe("", { meta: { news: { jumpUrl: foreign, description: "卡片里的引用 " + link } } })).resolves.toBeUndefined()
+    expect(targets).toEqual([])
+    await probe("直接发送 " + link, { meta: { news: { jumpUrl: foreign } } })
+    expect(targets).toEqual(["/v1/videos/" + ref])
+  } finally {
+    await module.dispose()
   }
 })
 

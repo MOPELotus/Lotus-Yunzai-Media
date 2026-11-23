@@ -1,10 +1,13 @@
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
+import { join } from "node:path"
 import { enablePartnerAfterLogin } from "../../../../lib/panel-partner.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
 import { renderStatusCard, renderTemplate } from "../../core/render/service.ts"
 import { formatLocalDateTime } from "../../core/time.ts"
-import { safeMediaName } from "../media/files.ts"
+import { safeMediaName, sendMediaFile } from "../media/files.ts"
+import { downloadMedia } from "../media/download.ts"
+import { createMediaTask, releaseMediaTask } from "../media/tasks.ts"
 import { TuneWeaveService } from "../tuneweave/service.ts"
 import { cloudHelp, createCloudCommands } from "./cloud-command.ts"
 import { episodeSelectionFromTrack, neteaseEpisodePage, type VoiceSearchSelection } from "./episode.ts"
@@ -19,6 +22,7 @@ const aliases: Readonly<Record<string, string>> = {
 }
 const featureNames = ["[media] 点歌"] as const
 const maxInlineBytes = 16 * 1024 * 1024
+const mvByteLimit = 100 * 1024 * 1024
 const searchCommand = /^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(?:点歌|搜歌)\s*([\s\S]*)$/u
 const typedSearch = /^#点歌\s*(\S(?:[\s\S]*?\S)?)\s+([12])$/u
 const playCommand = /^#播放\s*([\s\S]*?)(?:\s+([12]))?$/u
@@ -301,7 +305,19 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const item = await api.publicShare(selected, active)
       active.throwIfAborted()
       if (play) {
-        if (item.kind === "episode") {
+        if (item.kind === "mv") {
+          const stream = await api.publicMvStream(item.mv, active)
+          if (stream.size !== undefined && stream.size > mvByteLimit) throw new Error("MV 超过当前发送上限，请打开原链接。")
+          active.throwIfAborted()
+          const task = await createMediaTask(api.tasksDir)
+          try {
+            const { file, sizeBytes } = await downloadMedia(stream.url.href, join(task.dir, "mv"), {
+              fetch: api.fetch, kind: "video", cdn: "netease-mv", maxBytes: mvByteLimit, timeoutMs: 60_000, signal: active,
+            })
+            if (!file.endsWith(".mp4") || (stream.size && stream.size !== sizeBytes)) throw new Error("MV 文件与原平台回包不一致。")
+            await sendMediaFile(context, file, { file_name: safeMediaName(item.mv.title) + ".mp4", signal: active })
+          } finally { await releaseMediaTask(api.tasksDir, task.dir) }
+        } else if (item.kind === "episode") {
           remember(musicSessionKey(context), { episode: item.episode }, timeoutMs)
           const { track, stream } = await api.playEpisode(item.episode, active)
           await playMedia(context, api, track, stream, active)
@@ -312,10 +328,11 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         }
         return []
       }
-      const title = item.kind === "episode" ? item.episode.name : item.track.name
-      const author = item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
-      const platform = item.kind === "episode" ? "网易云播客" : musicNames[selected.platform]
-      const hint = "发送 #播放 加原文链接可请求完整音源。"
+      const title = item.kind === "mv" ? item.mv.title : item.kind === "episode" ? item.episode.name : item.track.name
+      const author = item.kind === "mv" ? item.mv.creators?.map(value => value.name).filter(Boolean).join(" / ")
+        : item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
+      const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : musicNames[selected.platform]
+      const hint = item.kind === "mv" ? "发送 #播放 加原文链接可请求完整 MV。" : "发送 #播放 加原文链接可请求完整音源。"
       const model = { title, subtitle: [platform, author].filter(Boolean).join(" · "), message: hint }
       const limit = context.inlineImageByteLimit ?? maxInlineBytes
       let image: Uint8Array | undefined = await renderMusicShare(model).catch(() => undefined)

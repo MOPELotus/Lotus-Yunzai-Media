@@ -1,4 +1,4 @@
-import { fetchCdn, type MediaFetch } from "./cdn.ts"
+import { fetchCdn, type CdnKind, type MediaFetch } from "./cdn.ts"
 import fs from "node:fs/promises"
 import { createWriteStream } from "node:fs"
 import { Readable, Transform } from "node:stream"
@@ -12,7 +12,7 @@ interface DownloadOptions {
   readonly timeoutMs?: number
   readonly maxBytes?: number
   readonly kind?: MediaKind
-  readonly cdn?: "miyoushe-video"
+  readonly cdn?: Extract<CdnKind, "miyoushe-video" | "netease-mv">
   readonly signal?: AbortSignal
 }
 

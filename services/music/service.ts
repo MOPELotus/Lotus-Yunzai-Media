@@ -19,7 +19,7 @@ import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
 import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner,
   verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
-import { musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
+import { canRefreshPublicMusic, musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -128,9 +128,29 @@ export class MusicService {
     return this.tuneweave.request<T>(route, { credentials: Object.values(accounts).map(a => a?.credential).filter((credential): credential is string => Boolean(credential)), accountSelection, signal,
       onCredentialUpdates: async updates => {
         await Promise.all(updates.filter(u => accountSnapshot[u.platform]?.credential).map(u =>
-          saveMusicAccount(u.platform, { credential: u.credential }, { file: this.accountsFile, expected: accountSnapshot[u.platform] })))
+          saveMusicAccount(u.platform, { credential: u.credential }, { file: this.accountsFile, expected: accountSnapshot[u.platform], signal })))
       },
     })
+  }
+  private async usePublicAccount<T>(platform: string, accounts: MusicAccounts, signal: AbortSignal | undefined,
+    request: (accounts: MusicAccounts) => Promise<T>) {
+    try {
+      return await request(accounts)
+    } catch (error) {
+      const signedIn = accounts[platform]
+      if (!canRefreshPublicMusic(platform) || !musicAuthenticationRequired(error, platform) || !signedIn?.alias ||
+          !signedIn.uid || !signedIn.credential?.startsWith("twc1_") || signedIn.owner === undefined ||
+          !Number.isSafeInteger(signedIn.owner) || signedIn.owner <= 0) throw error
+      const renewalSignal = signal ?? new AbortController().signal
+      const profile = await refreshOwnMusicAccount(this, platform, signedIn.owner, renewalSignal, {
+        alias: signedIn.alias, uid: String(signedIn.uid), credential: signedIn.credential,
+      })
+      const current = (await readMusicAccounts(this.accountsFile))[platform]
+      renewalSignal.throwIfAborted()
+      if (current?.alias !== signedIn.alias || current.uid !== signedIn.uid || current.owner !== signedIn.owner ||
+          current.credential !== profile.caller_credential?.value) throw new Error("公共音乐账号已变更，请重新点歌。")
+      return request({ ...accounts, [platform]: current })
+    }
   }
   async adoptPartnerAccount() {
     if ((await readMusicAccounts(this.accountsFile)).netease) return
@@ -244,18 +264,16 @@ export class MusicService {
       return { tracks: await searchBilibiliAudio(this.tuneweave, keyword.trim(), limit, offset, signal), accountStatus: "unconfigured" }
     }
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error("请选择有效平台并输入歌曲关键词")
-    const accounts = await readMusicAccounts(this.accountsFile)
-    const { alias, credential } = accounts[platform] || {}
-    // Use the saved identity for search as well as playback, without mixing
-    // results from other platforms or losing rotated caller credentials.
+    // Kuwo supports authenticated playback but its catalog is public only.
+    const account = platform === "kuwo" ? undefined : (await readMusicAccounts(this.accountsFile))[platform]
+    const { alias, credential } = account || {}
     const params = new URLSearchParams({
       platform, type: "track", q: keyword.trim(), limit: String(limit), offset: String(offset),
       ...(variant ? { variant } : {}),
       ...(alias && !credential ? { account: alias } : {}),
     })
-    const { data: items, accountSelected } = await this.request<SearchItem[]>(`/v1/search?${params}`, accounts, {
-      platform, alias, hasCredential: Boolean(credential),
-    }, signal)
+    const { data: items, accountSelected } = await this.usePublicAccount(platform, { [platform]: account }, signal, accounts =>
+      this.request<SearchItem[]>(`/v1/search?${params}`, accounts, { platform, alias, hasCredential: Boolean(credential) }, signal))
     // Search can succeed with a stale login, so account selection alone cannot
     // confirm that the music provider still considers the account signed in.
     const accountStatus = alias || credential ? accountSelected ? "selected" : "unverified" : "unconfigured"
@@ -376,7 +394,8 @@ export class MusicService {
     const params = new URLSearchParams({ quality: this.config.quality, fallback: String(!exact), unblock: "false",
       ...(!exact && { fallback_platforms: Object.keys(MUSIC_PLATFORMS).filter(p => p !== track.platform).join(",") }),
       ...(account?.alias && !account.credential ? { account: account.alias } : {}) })
-    const stream = await this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, accounts, undefined, signal)
+    const stream = await this.usePublicAccount(track.platform, exact ? { [track.platform]: account } : accounts, signal, current =>
+      this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, current, undefined, signal))
     if (!stream?.url || stream.trial) throw new Error("没有可用的完整音源，建议主人扫码登录音乐平台")
     if (exact && (stream.resolved_platform !== track.platform || stream.origin_track !== track.ref || stream.resolved_track !== track.ref)) {
       throw new Error("平台返回的完整音源与链接中的歌曲不一致。")

@@ -408,3 +408,108 @@ test("TuneWeave 的 B 站和网易云就绪检查使用各自已注册的能力"
   expect(endpoints).toContain("/fixture/v1/capabilities?platform=bilibili")
   expect(endpoints).toContain("/fixture/v1/capabilities?platform=netease")
 })
+
+test("点歌和完整播放仅续期同平台的公共账号，续期成功后只重试一次", async () => {
+  const file = join(await directory(), "music.yaml")
+  const foreignCredential = "twc1_unrelated-qq"
+  await saveMusicAccount("qq", { alias: "lotus-qq", uid: "23", owner: 71, credential: foreignCredential }, { file })
+  for (const platform of ["kugou", "soda", "migu", "kuwo"]) {
+    const initial = { alias: "lotus-" + platform, uid: "42", owner: 99, credential: "twc1_initial" }
+    const refreshedCredential = "twc1_refreshed"
+    const song = { ...track, ref: platform + ":1042", platform }
+    for (const action of ["search", "resolve"]) {
+      const calls = []
+      await saveMusicAccount(platform, initial, { file })
+      const service = new MusicService({ accountsFile: file, tuneweave: { config: { api_url: "http://localhost:7832" },
+        request: async (route, options) => {
+          calls.push(route)
+          const url = new URL(route, "http://localhost:7832")
+          if (url.pathname === "/v1/auth/session/refresh") {
+            expect(options.body).toEqual({ platform, account: initial.alias, credential_mode: "both" })
+            expect(options.credentials).toEqual([initial.credential])
+            return { data: { platform, account: initial.alias, authenticated: true, user_id: initial.uid,
+              caller_credential: { platform, value: refreshedCredential } }, accountSelected: true }
+          }
+          expect(url.searchParams.has("account")).toBe(false)
+          if (action === "resolve") {
+            expect(url.searchParams.get("fallback")).toBe("false")
+            expect(url.searchParams.get("unblock")).toBe("false")
+          }
+          if (platform === "kuwo" && action === "search") {
+            expect(options.credentials).toEqual([])
+          } else if (calls.length === 1) {
+            expect(options.credentials).toEqual([initial.credential])
+            throw Object.assign(new Error("合成过期"), { code: "authentication_required", platform })
+          } else {
+            expect(options.credentials).toEqual([refreshedCredential])
+          }
+          if (action === "search") return { data: [{ type: "track", data: song }], accountSelected: platform !== "kuwo" }
+          return { url: "https://example.test/sample", resolved_platform: platform, origin_track: song.ref, resolved_track: song.ref }
+        },
+      } })
+      const initialOperation = platform === "kuwo" && action === "search"
+      if (action === "search") expect((await service.search(platform, "示例")).accountStatus).toBe(initialOperation ? "unconfigured" : "selected")
+      else expect((await service.resolve(song, { exact: true })).resolved_track).toBe(song.ref)
+      expect(calls.length).toBe(initialOperation ? 1 : 3)
+      const saved = await readMusicAccounts(file)
+      expect(saved[platform]).toEqual({ ...initial, credential: initialOperation ? initial.credential : refreshedCredential })
+      expect(saved.qq.credential).toBe(foreignCredential)
+    }
+  }
+})
+
+test("音乐续期阻断跨平台错误、异 UID、并发换绑和重试后仍到期", async () => {
+  const file = join(await directory(), "music.yaml")
+  const platform = "soda", original = { alias: "lotus-soda", uid: "42", owner: 99, credential: "twc1_initial" }
+  const changed = { alias: "lotus-soda-other", uid: "83", owner: 91, credential: "twc1_unrelated" }
+  const refreshError = provider => Object.assign(new Error("合成过期"), { code: "authentication_required", platform: provider })
+  for (const failure of ["other platform", "other uid", "race", "still expired"]) {
+    let searches = 0, renewals = 0
+    await saveMusicAccount(platform, original, { file })
+    const service = new MusicService({ accountsFile: file, tuneweave: { config: { api_url: "http://localhost:7832" },
+      request: async route => {
+        if (route.startsWith("/v1/search?")) {
+          searches++
+          throw refreshError(failure === "other platform" ? "kugou" : platform)
+        }
+        renewals++
+        if (failure === "race") await saveMusicAccount(platform, changed, { file })
+        return { data: { platform, account: original.alias, authenticated: true,
+          user_id: failure === "other uid" ? "73" : original.uid, caller_credential: { platform, value: "twc1_next" } }, accountSelected: true }
+      },
+    } })
+    await expect(service.search(platform, "示例")).rejects.toThrow()
+    expect(searches).toBe(failure === "still expired" ? 2 : 1)
+    expect(renewals).toBe(failure === "other platform" ? 0 : 1)
+    expect((await readMusicAccounts(file))[platform]).toEqual(failure === "race" ? changed :
+      { ...original, credential: failure === "still expired" ? "twc1_next" : original.credential })
+  }
+})
+
+test("酷狗、汽水、酷我、咪咕只有绑定主人可在受信私聊显式刷新", async () => {
+  const file = join(await directory(), "music.yaml")
+  const requested = []
+  const api = new MusicService({ accountsFile: file, tuneweave: { config: { api_url: "http://localhost:7832" },
+    request: async (route, { body }) => {
+      expect(route).toBe("/v1/auth/session/refresh")
+      requested.push(body.platform)
+      return { data: { platform: body.platform, account: body.account, authenticated: true, user_id: "42",
+        caller_credential: { platform: body.platform, value: "twc1_next" }, extensions: { refreshed: body.platform !== "soda" } },
+        accountSelected: true }
+    },
+  } })
+  const commands = createMusicCommands({ openMusic: async () => ({ api, defaultPlatform: "netease", timeoutMs: 120_000 }) })
+  const context = { message_type: "private", self_id: 99, user_id: 42, canManagePackages: true, privateCredentialSignal: new AbortController().signal }
+  try {
+    for (const [name, platform] of [["酷狗", "kugou"], ["汽水", "soda"], ["酷我", "kuwo"], ["咪咕", "migu"]]) {
+      await saveMusicAccount(platform, { alias: "lotus-" + platform, uid: "42", owner: 42, credential: "twc1_initial" }, { file })
+      const message = `#刷新${name}音乐登录`
+      const count = requested.length
+      expect(await commands.fallback(message, { ...context, message_type: "group" })).toContain("好友私聊")
+      expect(await commands.fallback(message, { ...context, user_id: 41 })).toContain("绑定账号的主人")
+      expect(requested.length).toBe(count)
+      expect(await commands.fallback(message, context)).toBe(name + (platform === "soda" ? "登录仍有效。" : "登录已续期。"))
+      expect(requested.at(-1)).toBe(platform)
+    }
+  } finally { await commands.dispose() }
+})

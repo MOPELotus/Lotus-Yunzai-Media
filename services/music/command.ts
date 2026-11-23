@@ -15,7 +15,7 @@ import { cloudHelp, createCloudCommands } from "./cloud-command.ts"
 import { episodeSelectionFromTrack, neteaseEpisodePage, type VoiceSearchSelection } from "./episode.ts"
 import { readPartnerLog, partnerLogNodes } from "./partner-log.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
-import { openOwnQqStream, openPublicQqStream, ownMusicStatus, readQqCollection, recommendQqSong, refreshOwnMusicAccount, verifyQqSelection, type MusicCollection } from "./personal.ts"
+import { openOwnQqStream, openPublicQqStream, ownMusicStatus, readQqCollection, recommendQqSong, refreshOwnMusicAccount, verifyQqSelection, type MusicCollection, type RefreshPlatform } from "./personal.ts"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicStream, type MusicTrack, type MusicConfig } from "./service.ts"
 import { findMusicShare, parseMusicShare, resolveMusicShare } from "./share-link.ts"
 import { externalMusicLabels, readExternalMusicShare } from "./external-share.ts"
@@ -48,7 +48,7 @@ const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 �
 const recommendation = /^#?(?:来|放)(?:一)?首歌$/u
 const favorite = /^#?(?:我的收藏|我喜欢的歌)(?:\s*([0-9]{1,4}))?$/u
 const accountStatus = /^#?(?:音乐登录状态|(?:点歌|音乐)(?:ck|cookie)(?:检查|状态))$/iu
-const refreshMusic = /^#刷新(网易云|QQ)音乐登录$/iu
+const refreshMusic = /^#刷新(网易云|QQ|酷狗|汽水|酷我|咪咕)音乐登录$/iu
 const collectionName = { radio: "QQ 音乐个性电台", daily: "QQ 音乐每日推荐", favorites: "QQ 音乐收藏" } as const
 const searchNotes: Readonly<Record<string, string>> = {
   selected: "本次搜索已选用公共音乐账号。",
@@ -137,7 +137,7 @@ function personalAction(message: string) {
   if (recommendation.test(message)) return { kind: "recommend" as const }
   if (accountStatus.test(message)) return { kind: "status" as const }
   const refresh = refreshMusic.exec(message)
-  if (refresh) return { kind: "refresh" as const, platform: refresh[1] === "网易云" ? "netease" as const : "qq" as const }
+  if (refresh) return { kind: "refresh" as const, platform: aliases[refresh[1]!.toLowerCase()] as RefreshPlatform }
   const stars = favorite.exec(message)
   if (stars) return { kind: "collection" as const, collection: "favorites" as const, page: Number(stars[1] ?? 1) }
   if (/^#?个性电台$/u.test(message)) return { kind: "collection" as const, collection: "radio" as const, page: 1 }
@@ -648,8 +648,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         if (!active.aborted) return statuses.map((result, index) => `${musicNames[platforms[index]!]}：${result.status === "fulfilled" ? "登录有效" : "未绑定或登录待确认"}`).join("\n")
       } else if (selection.kind === "refresh") {
         if (activeLogins.has(selection.platform) || selection.platform === "netease" && (partnerJob || cloud.isUploading())) return "此平台已有账号操作正在进行。"
-        await refreshOwnMusicAccount(api, selection.platform, context.user_id!, active)
-        if (!active.aborted) return `${musicNames[selection.platform]}登录已续期。`
+        const status = await refreshOwnMusicAccount(api, selection.platform, context.user_id!, active)
+        if (!active.aborted) return `${musicNames[selection.platform]}${status.extensions?.refreshed === false ? "登录仍有效。" : "登录已续期。"}`
       } else {
         const session: SearchSession = { stage: "search", api, platform: "qq", keyword: "", timeoutMs, podcast: false,
           page: selection.page, collection: selection.collection, expires: Date.now() + timeoutMs }

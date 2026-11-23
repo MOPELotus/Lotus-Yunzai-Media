@@ -10,6 +10,7 @@ export interface MusicAccount {
   uid?: string | number
   nickname?: string
   credential?: string
+  owner?: number
 }
 
 export type MusicAccounts = Partial<Record<string, MusicAccount>>
@@ -25,7 +26,7 @@ interface SaveAccountOptions {
 }
 
 const writes = new Map<string, Promise<MusicAccount | null>>()
-const identity = ["alias", "uid"] as const
+const identity = ["alias", "uid", "owner"] as const
 const accountVersion = [...identity, "credential"] as const
 export async function readMusicAccounts(file = defaultFile): Promise<MusicAccounts> {
   await writes.get(file)?.catch(() => {})

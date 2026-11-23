@@ -25,7 +25,7 @@ export type MusicTrack = {
   readonly name: string
   readonly artists?: readonly { readonly name: string; readonly avatar_url?: string }[]
   readonly album?: { readonly cover_url?: string }
-  readonly extensions?: { readonly url?: string; readonly album_audio_id?: string | number; readonly hash?: string }
+  readonly extensions?: { readonly url?: string; readonly album_audio_id?: string | number; readonly hash?: string; readonly numeric_id?: string }
   readonly duration_ms?: number
   readonly episode_id?: string
 }
@@ -306,7 +306,8 @@ export class MusicService {
         if (login.platform === "netease") await this.partner.saveAccount({
           uid: profile.user_id, nickname: profile.nickname, qq: login.owner, tuneweave_account: login.alias,
         }, { signal })
-        await saveMusicAccount(login.platform, { alias: login.alias, uid: profile.user_id, nickname: profile.nickname || "", credential: result.caller_credential?.value || "" }, { file: this.accountsFile, signal })
+        await saveMusicAccount(login.platform, { alias: login.alias, uid: profile.user_id, nickname: profile.nickname || "", credential: result.caller_credential?.value || "",
+          owner: login.owner }, { file: this.accountsFile, signal })
         return { ok: true }
       }
       if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("二维码已过期或需要附加验证，请重新登录")

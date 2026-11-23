@@ -167,7 +167,7 @@ test("扫码核实平台和别名，合伙人偏好仍按原网易云 UID 保存
   const login = await service.createLogin("netease",42)
   expect(calls[0]).toEqual(["/v1/auth/qr",{platform:"netease",account:"lotus-nep-42",credential_mode:"both"}])
   await service.waitLogin(login)
-  expect((await readMusicAccounts(accountsFile)).netease).toEqual({alias:"lotus-nep-42",uid:"1042",nickname:"新昵称",credential:"twc1_test_account"})
+  expect((await readMusicAccounts(accountsFile)).netease).toEqual({alias:"lotus-nep-42",uid:"1042",nickname:"新昵称",credential:"twc1_test_account",owner:42})
   const partner = YAML.parse(await readFile(partnerAccountsFile,"utf8")).accounts
   expect(partner).toHaveLength(1)
   expect(partner[0]).toMatchObject({uid:"1042",qq:"42",extraCount:6,comment:false,tuneweave_account:"lotus-nep-42"})

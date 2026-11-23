@@ -14,6 +14,7 @@ import { cloudHelp, createCloudCommands } from "./cloud-command.ts"
 import { episodeSelectionFromTrack, neteaseEpisodePage, type VoiceSearchSelection } from "./episode.ts"
 import { readPartnerLog, partnerLogNodes } from "./partner-log.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
+import { openOwnQqStream, openPublicQqStream, ownMusicStatus, readQqCollection, recommendQqSong, refreshOwnMusicAccount, verifyQqSelection, type MusicCollection } from "./personal.ts"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicStream, type MusicTrack, type MusicConfig } from "./service.ts"
 import { findMusicShare, parseMusicShare, resolveMusicShare } from "./share-link.ts"
 import { externalMusicLabels, readExternalMusicShare } from "./external-share.ts"
@@ -40,6 +41,11 @@ const reissueCommand = /^#?(歌词|语音|高清语音)(?:\s*([1-9][0-9]{0,2}))?
 const partnerManualCommand = /^#合伙人测试(?:[（(]执行[）)])?$/u
 const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客，或 #点歌 关键词 2 列出节目后选择。\n#多选点歌 关键词 保留跨页编号，回复一个数字选一首，可反复选择。选曲后可发 #歌词 或 #语音。在列表中可加序号。"
 const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
+const recommendation = /^#?(?:来|放)(?:一)?首歌$/u
+const favorite = /^#?(?:我的收藏|我喜欢的歌)(?:\s*([0-9]{1,4}))?$/u
+const accountStatus = /^#?(?:音乐登录状态|(?:点歌|音乐)(?:ck|cookie)(?:检查|状态))$/iu
+const refreshMusic = /^#刷新(网易云|QQ)音乐登录$/iu
+const collectionName = { radio: "QQ 音乐个性电台", daily: "QQ 音乐每日推荐", favorites: "QQ 音乐收藏" } as const
 const searchNotes: Readonly<Record<string, string>> = {
   selected: "本次搜索已选用公共音乐账号。",
   unverified: "公共音乐账号的登录状态待确认。",
@@ -56,6 +62,7 @@ type SearchMenu = { retired: boolean; timer?: ReturnType<typeof setTimeout>; rec
 type CloudSearch = NonNullable<Awaited<ReturnType<ReturnType<typeof createCloudCommands>["search"]>>>
 type SearchSession = SessionBase & { readonly stage: "search"; readonly platform: string; readonly keyword: string;
   readonly timeoutMs: number; readonly podcast: boolean; readonly multiple?: true; page: number; tracks?: readonly MusicTrack[];
+  readonly collection?: MusicCollection; binding?: Awaited<ReturnType<typeof readQqCollection>>["binding"];
   exhausted?: boolean; menu?: SearchMenu;
   episodes?: Awaited<ReturnType<MusicService["searchEpisodes"]>>; cloud?: CloudSearch; loading?: boolean }
 type PublicSelection = { readonly track: MusicTrack } | { readonly episode: VoiceSearchSelection }
@@ -117,6 +124,17 @@ function ownerPermission(context: Context, config: { readonly permissions?: unkn
 function credentialScope(context: Context): AbortSignal | undefined {
   return context.message_type === "private" && context.canManagePackages && !context.isDelegated
     ? context.privateCredentialSignal : undefined
+}
+
+function personalAction(message: string) {
+  if (recommendation.test(message)) return { kind: "recommend" as const }
+  if (accountStatus.test(message)) return { kind: "status" as const }
+  const refresh = refreshMusic.exec(message)
+  if (refresh) return { kind: "refresh" as const, platform: refresh[1] === "网易云" ? "netease" as const : "qq" as const }
+  const stars = favorite.exec(message)
+  if (stars) return { kind: "collection" as const, collection: "favorites" as const, page: Number(stars[1] ?? 1) }
+  if (/^#?个性电台$/u.test(message)) return { kind: "collection" as const, collection: "radio" as const, page: 1 }
+  if (/^#?(?:每日推荐|每日30首|日推)$/u.test(message)) return { kind: "collection" as const, collection: "daily" as const, page: 1 }
 }
 
 function apiOrigin(address: unknown) {
@@ -221,7 +239,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
   }
 
   function menuReplyOptions(key: string, session: SearchSession): ReplyOptions | undefined {
-    if (!session.multiple) return
+    if (!session.multiple && !session.collection) return
     const menu: SearchMenu = { retired: false }
     session.menu = menu
     refreshMenuExpiry(key, session)
@@ -335,13 +353,16 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     else await imageReply(context, image, fallback)
   }
 
-  async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream, active = moduleSignal) {
+  async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream, active = moduleSignal,
+    verify?: () => Promise<void>) {
     active.throwIfAborted()
     await reply(context, `正在获取《${track.name}》完整音源…`)
     const media = stream ? await api.prepareStream(track, stream, { signal: active }) : await api.prepare(track, { signal: active })
     try {
       active.throwIfAborted()
+      await verify?.()
       await sendTrackInfo(context, track, media)
+      await verify?.()
       await sendVoice(context, media, active)
     } finally { await api.cleanup(media) }
   }
@@ -400,7 +421,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const title = item.kind === "mv" ? item.mv.title : item.kind === "episode" ? item.episode.name : item.track.name
       const author = item.kind === "mv" ? item.mv.creators?.map(value => value.name).filter(Boolean).join(" / ")
         : item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
-      const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : musicNames[selected.platform] ?? selected.platform
+      const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : MUSIC_PLATFORMS[selected.platform]
       const hint = item.kind === "mv" ? "发送 #播放 加原文链接可请求完整 MV。" : "发送 #播放 加原文链接可请求完整音源。"
       return await musicSharePreview(context, active, { title, author, url: selected.url }, platform, hint)
     } catch (error) {
@@ -465,6 +486,13 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
   async function showResults(context: Context, key: string, session: SearchSession) {
     session.loading = true
     try {
+      if (session.collection) {
+        const connection = credentialScope(context)
+        if (connection && context.user_id !== undefined) {
+          await showCollection(context, key, session, session.collection, context.user_id, AbortSignal.any([moduleSignal, connection]))
+        }
+        return
+      }
       const api = session.api
       if (!session.multiple && session.platform === "netease" && session.page === 1) session.cloud = await cloud.search(context, api, session.keyword)
       const limit = session.multiple ? multiplePageSize : api.config.search_limit
@@ -519,6 +547,61 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     }
   }
 
+  async function showCollection(context: Context, key: string, session: SearchSession, collection: MusicCollection, owner: number, active: AbortSignal) {
+    const result = await readQqCollection(session.api, collection, owner, session.page, active)
+    if (sessions.get(key) !== session || active.aborted) return
+    session.tracks = result.tracks
+    session.binding = result.binding
+    session.expires = Date.now() + session.timeoutMs
+    const title = collectionName[collection]
+    const items = result.tracks.map((track, index) => ({ label: String(index + 1),
+      value: `${track.name} · ${track.artists?.map(author => author.name).join(" / ") || "未知歌手"}` }))
+    const hint = items.length ? "回复序号播放。" + (collection === "favorites" && session.page > 0 ? " #下一页 查看下一页。" : "") : "当前没有可显示的曲目。"
+    const image = await renderStatusCard({ title, message: hint, items }).catch(() => undefined)
+    if (active.aborted || sessions.get(key) !== session) return
+    await verifyQqSelection(session.api, result.binding, active)
+    if (!active.aborted && sessions.get(key) === session) {
+      await imageReply(context, image, [title, hint, ...items.map(item => `${item.label}. ${item.value}`)].join("\n"), menuReplyOptions(key, session))
+    }
+  }
+
+  async function handlePersonal(selection: NonNullable<ReturnType<typeof personalAction>>, context: Context, key: string) {
+    if (context.isDelegated || context.message_type === "terminal") return
+    const friend = credentialScope(context)
+    if (selection.kind !== "recommend" && (!friend || context.user_id === undefined)) return "请由绑定账号的主人在好友私聊查询。"
+    const connection = selection.kind === "recommend" ? context.groupActivitySignal ?? context.privateCredentialSignal : friend
+    const active = connection ? AbortSignal.any([moduleSignal, connection]) : moduleSignal
+    try {
+      const { api, timeoutMs } = await openMusic()
+      await recovery
+      active.throwIfAborted()
+      if (selection.kind === "recommend") {
+        const track = await recommendQqSong(api, active)
+        if (!track) return "QQ 音乐暂未返回推荐歌曲。"
+        remember(key, { track }, timeoutMs)
+        const stream = await openPublicQqStream(api, track, active).catch(() => undefined)
+        if (active.aborted) return []
+        if (!stream) return `QQ 音乐推荐《${track.name}》。\n当前没有可核实的完整音源。\nhttps://y.qq.com/n/ryqq/songDetail/${encodeURIComponent(track.id)}`
+        await playMedia(context, api, track, stream, active)
+      } else if (selection.kind === "status") {
+        const platforms = ["qq", "netease"] as const
+        const statuses = await Promise.allSettled(platforms.map(platform => ownMusicStatus(api, platform, context.user_id!, active)))
+        if (!active.aborted) return statuses.map((result, index) => `${musicNames[platforms[index]!]}：${result.status === "fulfilled" ? "登录有效" : "未绑定或登录待确认"}`).join("\n")
+      } else if (selection.kind === "refresh") {
+        if (activeLogins.has(selection.platform) || selection.platform === "netease" && (partnerJob || cloud.isUploading())) return "此平台已有账号操作正在进行。"
+        await refreshOwnMusicAccount(api, selection.platform, context.user_id!, active)
+        if (!active.aborted) return `${musicNames[selection.platform]}登录已续期。`
+      } else {
+        const session: SearchSession = { stage: "search", api, platform: "qq", keyword: "", timeoutMs, podcast: false,
+          page: selection.page, collection: selection.collection, expires: Date.now() + timeoutMs }
+        replace(key, session)
+        try { await showResults(context, key, session) }
+        catch (error) { drop(key, session); throw error }
+      }
+    } catch (error) { if (!active.aborted) return errorText(error) }
+    return []
+  }
+
   async function scan(context: Context, key: string, scanOptions: Scan, type?: string) {
     const friend = credentialScope(context)
     if (!friend) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
@@ -571,7 +654,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
 
   async function choose(message: string, context: Context, key: string) {
     let session = sessions.get(key)
-    if (session?.stage === "search" && session.multiple && context.isDelegated) return
+    if (session?.stage === "search" && (session.multiple || session.collection) && context.isDelegated) return
     if (session && session.expires <= Date.now()) {
       drop(key, session)
       session = undefined
@@ -588,8 +671,11 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     if (!session) return
     try {
       if (session.stage === "search") {
+        const friend = session.collection ? credentialScope(context) : undefined
+        if (session.collection && (!friend || friend.aborted)) return
         if (session.loading) return session.multiple ? "正在处理点歌，请稍候。" : "正在搜索，请稍候。"
         if (nextPage.test(message)) {
+          if (session.collection && (session.collection !== "favorites" || session.page === 0)) return "当前列表没有下一页。"
           if (session.multiple && session.exhausted) return "没有更多歌曲，仍可选择之前的编号。"
           retireMenu(session)
           session.page++
@@ -603,6 +689,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const episode = session.episodes?.[index - trackCount]
         if (session.multiple && !trackCount) return "当前没有可选择的歌曲。"
         if (!track && !episode) return `请输入 1–${trackCount + (session.episodes?.length ?? 0)} 的序号。`
+        if (session.collection && track && session.binding && friend) {
+          drop(key, session)
+          const active = AbortSignal.any([moduleSignal, friend])
+          const binding = session.binding
+          const stream = await openOwnQqStream(session.api, binding, track, active)
+          await playMedia(context, session.api, track, stream, active, () => verifyQqSelection(session.api, binding, active))
+          return []
+        }
         if (session.multiple && track) {
           session.loading = true
           refreshMenuExpiry(key, session)
@@ -678,8 +772,11 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     if (moduleSignal.aborted) return
     if (cloud.matches(message)) return cloud.handle(message, context)
     const key = musicSessionKey(context)
+    const personal = personalAction(message)
+    if (personal) return handlePersonal(personal, context, key)
     const followup = reissueTarget(message, context)
-    if (followup) return reissue(context, key, followup)
+    const session = sessions.get(key)
+    if (followup && !(session?.stage === "search" && session.collection)) return reissue(context, key, followup)
     if (message === "下一页" && !context.isDelegated && sessions.get(key)?.stage === "search") return choose(message, context, key)
     const legacy = legacyMusicRequest(message, context)
     const selected = action(message) ?? legacy?.action
@@ -838,6 +935,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     fallback,
     features(context: Context) {
       if (cloud.matches(context.normalizedMessage)) return featureNames
+      if (personalAction(context.normalizedMessage)) return featureNames
       const key = musicSessionKey(context)
       const followup = reissueTarget(context.normalizedMessage, context)
       if (followup && (followup.index === undefined ? selections.has(key) : sessions.get(key)?.stage === "search")) return featureNames

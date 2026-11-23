@@ -23,7 +23,6 @@ test("旧点歌短语沿用同会话搜索和点播，优先级与非音乐播�
   const run = (msg, fields = {}, allowed = () => true) => registry.dispatchFallback({ ...event, msg, ...fields }, allowed, () => false)
   try {
     expect(await run("点歌功能设置")).toBeUndefined()
-    expect(await run("来首歌")).toBeUndefined()
     expect(await run("下一页")).toBeUndefined()
     expect(await run("播放 由上层接管")).toBe("优先模块")
     for (const input of ["播放视频", "播放 视频 BV17xxx", "播放 https://example.test/video/1", "播放 片段.mp4", "播放 /tmp/music.mp3", "播放 文件 music.wav"]) {

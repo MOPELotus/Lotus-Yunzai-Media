@@ -31,7 +31,7 @@ const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1
 const shareDefaults = { enable: true, private_preview: false }
 const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults, wxchannels: shareDefaults }
 const pipixiaDefaults = { enable: true, private: false }
-const officialLinksDefaults = { youtube: true, youtubeMusic: true, telegram: true, private: false, trustedTelegramUsers: [] }
+const officialLinksDefaults = { youtube: true, youtubeMusic: true, telegram: true, v2ex: true, private: false, trustedTelegramUsers: [] }
 const videoDefaults = { forwardMsg: true, cover: false, bh3: false, by: false, xbgd: false, groups: [], group_config: [] }
 
 test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主配置优先", async () => {

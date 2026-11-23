@@ -17,7 +17,7 @@ const video = "jNQXAC9IVRw"
 const short = `https://youtu.be/${video}?t=10`
 const music = `https://music.youtube.com/watch?v=${video}`
 const post = "https://t.me/durov/43"
-const enabled = { youtube: true, youtubeMusic: true, telegram: true, private: false, trustedTelegramUsers: ["100"] }
+const enabled = { youtube: true, youtubeMusic: true, telegram: true, v2ex: true, private: false, trustedTelegramUsers: ["100"] }
 const response = (id = video) => Response.json({
   type: "video", provider_name: "YouTube",
   html: `<iframe src="https://www.youtube.com/embed/${id}?feature=oembed"></iframe>`,
@@ -126,6 +126,45 @@ test("公开来源拒绝不同记录及非预期回包，预览失败仍交还�
   expect(renders).toBe(2)
 })
 
+test("V2EX 分享与显式正文摘录共用主题核验、权限和纯文本回退", async () => {
+  const original = "https://www.v2ex.com/t/1187622"
+  const alias = "https://fast.v2ex.com/t/1187622?p=2#reply5"
+  const normalized = original + "?p=2#reply5"
+  const topic = { id: 1187622, url: original, title: "公开主题", member: { username: "作者" },
+    node: { title: "节点" }, content: "原帖\n正文", content_rendered: '<img src="https://elsewhere.test/path">' }
+  const calls: URL[] = []
+  const controller = new AbortController()
+  let permitted = true
+  let response: typeof topic | undefined = topic
+  const probe = createOfficialLinkPreview({
+    signal: controller.signal, settings: async () => ({ ...enabled, v2ex: permitted }),
+    fetcher: async (url, options) => {
+      calls.push(url)
+      expect(options).toMatchObject({ credentials: "omit", redirect: "error" })
+      return Response.json(response ? [response] : [])
+    },
+    render: async () => { throw new Error("用文字回退核对字段") },
+  })
+  expect(parseOfficialLink(alias)).toEqual({ platform: "v2ex", id: "1187622", link: normalized })
+  for (const invalid of [original + "/12", original.replace("v2ex.com", "v2ex.com.example"), original.replace("/t/", "/api/t/")]) {
+    expect(parseOfficialLink(invalid)).toBeUndefined()
+  }
+  expect(await probe.fallback(alias, context(alias))).toBe(`公开主题\n作者 · 节点\n原帖 正文\n${normalized}`)
+  const command = "#总结一下" + alias
+  expect(probe.features(context(command))).toEqual(["[media] V2EX 预览"])
+  expect(await probe.fallback(command, context(command))).toContain("原帖 正文")
+  expect(calls.map(url => url.href)).toEqual(Array(2).fill("https://www.v2ex.com/api/topics/show.json?id=1187622"))
+  for (const wrong of [{ ...topic, id: 1187623 }, { ...topic, url: original.replace("1187622", "1187623") }, undefined]) {
+    response = wrong
+    expect(await probe.fallback(alias, context(alias))).toBe(`V2EX 暂无法读取公开预览。\n${normalized}`)
+  }
+  const count = calls.length
+  expect(await probe.fallback(alias, context(alias, { message_type: "private" }))).toBeUndefined()
+  permitted = false
+  expect(await probe.fallback(command, context(command))).toBeUndefined()
+  expect(calls).toHaveLength(count)
+})
+
 test("原生面板配置开关支持独立保存，修改后直接读取生效", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lotus-official-links-settings-"))
   try {
@@ -135,15 +174,19 @@ test("原生面板配置开关支持独立保存，修改后直接读取生效",
     const { configInfo } = supportGuoba(directory, official)
     const settings = createOfficialLinkSettings(directory)
     const context = { Result: { ok: () => 200, error: (_: string, status: number) => status } }
-    expect(await settings.settings()).toEqual({ youtube: true, youtubeMusic: true, telegram: true, private: false, trustedTelegramUsers: [] })
+    expect(await settings.settings()).toEqual({ youtube: true, youtubeMusic: true, telegram: true, v2ex: true, private: false, trustedTelegramUsers: [] })
     expect(configInfo.schemas).toContainEqual(expect.objectContaining({ field: "officialLinks.telegram", label: "Telegram 公开消息预览", component: "Switch" }))
+    expect(configInfo.schemas).toContainEqual(expect.objectContaining({ field: "officialLinks.v2ex", label: "V2EX 主题预览", component: "Switch" }))
+    expect(await configInfo.setConfigData({ "officialLinks.v2ex": false }, context)).toBe(200)
+    expect((await settings.settings()).v2ex).toBe(false)
+    expect(await configInfo.setConfigData({ "officialLinks.v2ex": true }, context)).toBe(200)
     expect(await configInfo.setConfigData({ "officialLinks.youtube": "on" }, context)).toBe(422)
     expect(await configInfo.setConfigData({ "officialLinks.youtube": false, "officialLinks.telegram": false },
       { ...context, changedFields: ["officialLinks.youtube"] })).toBe(200)
-    expect(await settings.settings()).toEqual({ youtube: false, youtubeMusic: true, telegram: true, private: false, trustedTelegramUsers: [] })
+    expect(await settings.settings()).toEqual({ youtube: false, youtubeMusic: true, telegram: true, v2ex: true, private: false, trustedTelegramUsers: [] })
     expect(await configInfo.setConfigData({ "officialLinks.telegram": true, "officialLinks.private": true,
       "officialLinks.trustedTelegramUsers": ["12345"] }, context)).toBe(200)
-    expect(await configInfo.getConfigData()).toMatchObject({ officialLinks: { youtube: false, youtubeMusic: true, telegram: true, private: true, trustedTelegramUsers: ["12345"] } })
+    expect(await configInfo.getConfigData()).toMatchObject({ officialLinks: { youtube: false, youtubeMusic: true, telegram: true, v2ex: true, private: true, trustedTelegramUsers: ["12345"] } })
     expect(await readFile(join(directory, "media", "official-links.yaml"), "utf8")).toContain("private: true")
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -159,21 +202,21 @@ test("继承旧 YouTube 黑名单、私聊和可信 Telegram QQ，显式新设�
     const keys: string[] = []
     let redis: string | null = JSON.stringify(["12345", 12346, "all", { uid: "12347" }, "12345", 8.5])
     const settings = createOfficialLinkSettings(data, root, () => ({ async get(key) { keys.push(key); return redis } }))
-    expect(await settings.settings()).toEqual({ youtube: true, youtubeMusic: true, telegram: true, private: false, trustedTelegramUsers: [] })
+    expect(await settings.settings()).toEqual({ youtube: true, youtubeMusic: true, telegram: true, v2ex: true, private: false, trustedTelegramUsers: [] })
     expect(keys).toHaveLength(0)
     await mkdir(old, { recursive: true })
-    await writeFile(join(old, "tools.yaml"), "globalBlackList: [YouTube, 小飞机]\nprivateResolve: true\n")
-    expect(await settings.settings(false)).toEqual({ youtube: false, youtubeMusic: false, telegram: false, private: true, trustedTelegramUsers: [] })
+    await writeFile(join(old, "tools.yaml"), "globalBlackList: [YouTube, 小飞机, AI总结]\nprivateResolve: true\n")
+    expect(await settings.settings(false)).toEqual({ youtube: false, youtubeMusic: false, telegram: false, v2ex: false, private: true, trustedTelegramUsers: [] })
     expect(keys).toHaveLength(0)
     expect(await settings.settings()).toEqual({
-      youtube: false, youtubeMusic: false, telegram: false, private: true, trustedTelegramUsers: ["12345", "12346"],
+      youtube: false, youtubeMusic: false, telegram: false, v2ex: false, private: true, trustedTelegramUsers: ["12345", "12346"],
     })
     expect(keys).toEqual(["Yz:rconsole:tools:whitelist"])
     redis = "invalid"
     expect((await settings.settings()).trustedTelegramUsers).toEqual([])
     redis = JSON.stringify(["12345"])
     await settings.save({ youtube: true, private: false, trustedTelegramUsers: [] })
-    expect(await settings.settings()).toEqual({ youtube: true, youtubeMusic: false, telegram: false, private: false, trustedTelegramUsers: [] })
+    expect(await settings.settings()).toEqual({ youtube: true, youtubeMusic: false, telegram: false, v2ex: false, private: false, trustedTelegramUsers: [] })
     expect(keys).toHaveLength(2)
   } finally {
     await rm(directory, { recursive: true, force: true })

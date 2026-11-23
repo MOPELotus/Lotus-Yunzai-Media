@@ -2,10 +2,11 @@ import { load } from "cheerio"
 
 export type OfficialLink =
   | { readonly platform: "youtube" | "youtubeMusic"; readonly id: string; readonly link: string }
+  | { readonly platform: "v2ex"; readonly id: string; readonly link: string }
   | { readonly platform: "telegram"; readonly username: string; readonly id: string; readonly link: string }
 
 export const officialLinkNames = {
-  youtube: "YouTube", youtubeMusic: "YouTube Music", telegram: "Telegram",
+  youtube: "YouTube", youtubeMusic: "YouTube Music", telegram: "Telegram", v2ex: "V2EX",
 } as const
 
 interface PublicPreview {
@@ -19,6 +20,7 @@ export type OfficialLinkFetch = (url: URL, request: RequestInit) => Promise<Resp
 const videoId = /^[\w-]{11}$/u
 const videoHosts = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"])
 const thumbnailHosts = new Set(["i.ytimg.com", "img.youtube.com"])
+const v2exHosts = new Set(["v2ex.com", "www.v2ex.com", "fast.v2ex.com", "global.v2ex.com"])
 
 function publicUrl(value: unknown) {
   const url = typeof value === "string" && value.length <= 2048 ? URL.parse(value) : undefined
@@ -28,6 +30,15 @@ function publicUrl(value: unknown) {
 export function parseOfficialLink(value: string): OfficialLink | undefined {
   const url = publicUrl(value)
   if (!url) return
+  if (v2exHosts.has(url.hostname)) {
+    const id = /^\/t\/([1-9]\d{0,14})\/?$/u.exec(url.pathname)?.[1]
+    if (!id) return
+    const original = new URL("https://www.v2ex.com/t/" + id)
+    const pages = url.searchParams.getAll("p")
+    if (pages.length === 1 && /^[1-9]\d{0,6}$/u.test(pages[0]!)) original.searchParams.set("p", pages[0]!)
+    if (/^#reply[1-9]\d{0,8}$/u.test(url.hash)) original.hash = url.hash
+    return { platform: "v2ex", id, link: original.href }
+  }
   if (url.hostname === "t.me") {
     const post = /^\/([A-Za-z][A-Za-z0-9_]{3,31})\/([1-9]\d{0,18})\/?$/u.exec(url.pathname)
     if (!post?.[1] || !post[2] || url.search) return
@@ -138,5 +149,25 @@ async function telegram(input: Extract<OfficialLink, { platform: "telegram" }>, 
 }
 
 export async function getOfficialLink(input: OfficialLink, fetcher: OfficialLinkFetch, signal: AbortSignal): Promise<PublicPreview | undefined> {
+  if (input.platform === "v2ex") {
+    const endpoint = new URL("https://www.v2ex.com/api/topics/show.json")
+    endpoint.searchParams.set("id", input.id)
+    const bytes = await bounded(fetcher, endpoint, signal, "application/json", 256 * 1024)
+    const items: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
+    if (!Array.isArray(items) || items.length !== 1) return
+    const topic = items[0]
+    const link = typeof topic?.url === "string" && parseOfficialLink(topic.url)
+    if (!topic || !Number.isSafeInteger(topic.id) || String(topic.id) !== input.id ||
+        !link || link.platform !== "v2ex" || link.id !== input.id) return
+    const title = text(topic.title, 300)
+    const author = text(topic.member?.username, 100)
+    const node = text(topic.node?.title, 70)
+    if (!title || !author) return
+    const content = typeof topic.content === "string" ? topic.content.replace(/^ {0,3}(?:`{3,}|~{3,})[^\r\n]*\r?$/gmu, "") : ""
+    const body = text(content, 1201)
+    const chars = Array.from(body)
+    return { title, owner: [author, node].filter(Boolean).join(" · "),
+      desc: chars.length > 1200 ? chars.slice(0, 1200).join("") + "…" : body }
+  }
   return input.platform === "telegram" ? telegram(input, fetcher, signal) : youtube(input, fetcher, signal)
 }

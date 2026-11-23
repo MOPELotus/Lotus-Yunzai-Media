@@ -7,7 +7,7 @@ import { dataPath, rootPath } from "../../core/path.ts"
 
 export const officialLinkToggles = [
   ["youtube", "YouTube 链接预览"], ["youtubeMusic", "YouTube Music 链接预览"],
-  ["telegram", "Telegram 公开消息预览"], ["private", "允许在私聊预览"],
+  ["telegram", "Telegram 公开消息预览"], ["v2ex", "V2EX 主题预览"], ["private", "允许在私聊预览"],
 ] as const
 export type OfficialLinkToggle = typeof officialLinkToggles[number][0]
 export type OfficialLinkSettings = Readonly<Record<OfficialLinkToggle, boolean>> & {
@@ -64,7 +64,8 @@ export function createOfficialLinkSettings(directory = dataPath, root = pathToFi
       ? parseTrustedTelegramUsers(raw.trustedTelegramUsers) ?? [] : legacy ? await legacyTrust() : []
     return {
       youtube: flag("youtube", !blocked.includes("YouTube")), youtubeMusic: flag("youtubeMusic", !blocked.includes("YouTube")),
-      telegram: flag("telegram", !blocked.includes("小飞机")), private: flag("private", legacy?.privateResolve === true),
+      telegram: flag("telegram", !blocked.includes("小飞机")), v2ex: flag("v2ex", !blocked.includes("AI总结")),
+      private: flag("private", legacy?.privateResolve === true),
       trustedTelegramUsers,
     }
   }

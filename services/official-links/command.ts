@@ -8,7 +8,13 @@ import { getOfficialLink, parseOfficialLink, officialLinkNames, type OfficialLin
 const link = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
 
 function identify(message: string, context: MessageFallbackContext) {
-  if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private") || /^\s*[#＃]/u.test(message)) return
+  if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private")) return
+  if (/^\s*[#＃]/u.test(message)) {
+    const explicit = /^\s*[#＃]总结一下\s*(https?:\/\/\S+)\s*$/iu.exec(message)?.[1]
+    const input = explicit && parseOfficialLink(explicit)
+    if (input && input.platform === "v2ex") return input
+    return
+  }
   const contents = buildMediaMessageText({ ...context, msg: message }).replaceAll("\\/", "/")
   for (const [value] of contents.matchAll(link)) {
     const input = parseOfficialLink(value.replace(/[.,!;]+$/u, ""))

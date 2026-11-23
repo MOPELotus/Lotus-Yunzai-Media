@@ -4,7 +4,8 @@ const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.co
 const miyousheVideoDomains = new Set(["prod-vod-sign.miyoushe.com", "prod-vod-sign.mihoyo.com"])
 const acfunVideoHosts = new Set(["tx-safety-video.acfun.cn", "ali-safety-video.acfun.cn"])
 const acfunImageHosts = new Set(["tx-free-imgs.acfun.cn"])
-export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video"
+export type MusicVideoCdn = "netease-mv" | "kuwo-mv" | "qq-mv"
+export type CdnKind = "image" | "miyoushe-video" | MusicVideoCdn | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video"
 
 function acfunCdnUrl(value: string | URL, hosts: ReadonlySet<string>) {
   const url = URL.parse(String(value))
@@ -65,6 +66,18 @@ export function neteaseMvUrl(value: string | URL) {
   }
 }
 
+export function musicVideoCdnUrl(value: string | URL, kind: MusicVideoCdn) {
+  if (kind === "netease-mv") return neteaseMvUrl(value)
+  const url = URL.parse(String(value))
+  if (!url || !["https:", "http:"].includes(url.protocol) || url.port || url.username || url.password || url.hash ||
+      !/\.mp4$/iu.test(url.pathname)) return
+  if (kind === "qq-mv" && url.hostname.endsWith(".stream.tencentmusic.com") ||
+      kind === "kuwo-mv" && /^kw-[a-z0-9-]+\.kuwo\.cn$/u.test(url.hostname)) {
+    url.protocol = "https:"
+    return url
+  }
+}
+
 function mediaUrl(value: string | URL, domains: readonly string[]) {
   const url = new URL(value)
   if (!["https:", "http:"].includes(url.protocol) || url.port || url.username || url.password ||
@@ -92,9 +105,12 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
       if (!url || kind === "acfun-video" && !/\.(?:m3u8|ts)$/u.test(url.pathname)) throw new Error("媒体地址不属于 AcFun CDN。")
       return url
     }
-    if (kind === "netease-mv") {
-      const url = neteaseMvUrl(value)
-      if (!url) throw new Error("媒体地址不属于网易云 MV CDN。")
+    if (kind === "netease-mv" || kind === "kuwo-mv" || kind === "qq-mv") {
+      const url = musicVideoCdnUrl(value, kind)
+      if (!url) {
+        const platform = kind === "netease-mv" ? "网易云" : kind === "kuwo-mv" ? "酷我" : "QQ 音乐"
+        throw new Error(`媒体地址不属于${platform} MV CDN。`)
+      }
       return url
     }
     if (kind === "image") {

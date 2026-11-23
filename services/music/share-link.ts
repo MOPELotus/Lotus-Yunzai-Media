@@ -1,16 +1,18 @@
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { buildMediaMessageText } from "../media/message.ts"
 import { neteaseEpisodePage } from "./episode.ts"
-import { parseExternalMusicShare, readQqSongMid, type ExternalMusicShare } from "./external-share.ts"
+import { parseExternalMusicShare, type ExternalMusicShare } from "./external-share.ts"
 
 export type PublicMusicTarget =
   | { platform: "netease"; kind: "track" | "episode" | "mv"; id: string; url: string }
-  | { platform: "qq"; kind: "track"; id: string; url: string }
+  | { platform: "qq"; kind: "track"; id: string; url: string; numeric?: true }
+  | { platform: "qq"; kind: "mv"; id: string; url: string }
+  | { platform: "soda"; kind: "track"; id: string; url: string }
+  | { platform: "kuwo"; kind: "track" | "mv"; id: string; url: string }
   | { platform: "kugou"; kind: "track"; id: string; hash: string; url: string }
-type ShortMusicLink = { platform: "netease"; kind: "short"; url: string }
+type ShortMusicLink = { platform: "netease" | "soda"; kind: "short"; url: string }
 type KugouSharePage = { platform: "kugou"; kind: "share-page"; url: string }
-type QqNumericShare = { platform: "qq"; kind: "numeric"; id: string; url: string }
-type StandardMusicShare = PublicMusicTarget | ShortMusicLink | KugouSharePage | QqNumericShare
+type StandardMusicShare = PublicMusicTarget | ShortMusicLink | KugouSharePage
 type ShareLink = StandardMusicShare | ExternalMusicShare
 
 const neteaseHosts = new Set(["music.163.com", "y.music.163.com", "m.music.163.com"])
@@ -45,6 +47,8 @@ export function parseMusicShare(value: string): ShareLink | undefined {
   }
   if (qqHosts.has(url.hostname)) {
     const path = url.pathname.replace(/\/$/u, "")
+    const vid = /^\/n\/ryqq(?:_v2)?\/mv\/([A-Za-z0-9]{6,32})$/u.exec(path)?.[1]
+    if (url.hostname === "y.qq.com" && vid) return { platform: "qq", kind: "mv", id: vid, url: `https://y.qq.com/n/ryqq/mv/${vid}` }
     const song = /^\/n\/ryqq(?:_v2)?\/songDetail\/([A-Za-z0-9]+)$/u.exec(path)?.[1]
     const mobile = path === "/v8/playsong.html" || path === "/n3/other/pages/playsong/index.html"
     const id = song ?? (mobile ? oneParameter(url.searchParams, "songmid") : undefined)
@@ -53,8 +57,31 @@ export function parseMusicShare(value: string): ShareLink | undefined {
     }
     const numeric = song ?? (mobile && !url.searchParams.has("songmid") ? oneParameter(url.searchParams, "songid") : undefined)
     if (numeric && neteaseId.test(numeric)) {
-      return { platform: "qq", kind: "numeric", id: numeric, url: `https://y.qq.com/n/ryqq_v2/songDetail/${numeric}` }
+      return { platform: "qq", kind: "track", numeric: true, id: numeric, url: `https://y.qq.com/n/ryqq_v2/songDetail/${numeric}` }
     }
+  }
+  const route = url.pathname.replace(/\/$/u, "")
+  if (url.hostname === "qishui.douyin.com" && /^\/s\/[A-Za-z0-9]{4,24}$/u.test(route)) {
+    return { platform: "soda", kind: "short", url: "https://qishui.douyin.com" + route + "/" }
+  }
+  if (url.hostname === "music.douyin.com" && route === "/qishui/share/track") {
+    const id = oneParameter(url.searchParams, "track_id")
+    if (id && neteaseId.test(id)) {
+      return { platform: "soda", kind: "track", id, url: "https://music.douyin.com/qishui/share/track?track_id=" + id }
+    }
+  }
+  if (url.hostname === "h5app.kuwo.cn") {
+    const video = route === "/m/bodian/play.html"
+    if (!video && route !== "/m/bodian/playMusic.html") return
+    const parameter = video ? "mvId" : "musicId"
+    const id = oneParameter(url.searchParams, parameter)
+    if (id && neteaseId.test(id)) {
+      return { platform: "kuwo", kind: video ? "mv" : "track", id, url: `https://h5app.kuwo.cn${route}?${parameter}=${id}` }
+    }
+  }
+  if (url.hostname === "www.kuwo.cn") {
+    const id = /^\/mvplay\/([1-9]\d{0,19})$/u.exec(route)?.[1]
+    if (id) return { platform: "kuwo", kind: "mv", id, url: `https://www.kuwo.cn/mvplay/${id}` }
   }
   let shareCode: string | undefined
   if (url.hostname === "www.kugou.com") shareCode = /^\/share\/([A-Za-z0-9]+)\.html$/u.exec(url.pathname)?.[1]
@@ -76,13 +103,9 @@ export function findMusicShare(message: string, context: MessageFallbackContext)
 }
 
 export async function resolveMusicShare(target: StandardMusicShare, signal?: AbortSignal, fetch = globalThis.fetch): Promise<PublicMusicTarget> {
-  if (target.kind !== "short" && target.kind !== "share-page" && target.kind !== "numeric") return target
+  if (target.kind !== "short" && target.kind !== "share-page") return target
   const timeout = AbortSignal.timeout(8000)
   const active = signal ? AbortSignal.any([signal, timeout]) : timeout
-  if (target.kind === "numeric") {
-    const id = await readQqSongMid(target.id, active, fetch)
-    return { platform: "qq", kind: "track", id, url: `https://y.qq.com/n/ryqq/songDetail/${id}` }
-  }
   if (target.kind === "share-page") {
     const response = await fetch(new URL(target.url), { credentials: "omit", redirect: "error", signal: active })
     const limit = 512 * 1024
@@ -113,14 +136,16 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
   }
   let url = new URL(target.url)
   for (let hop = 0; hop < 3; hop++) {
-    const response = await fetch(url, { method: "HEAD", credentials: "omit", redirect: "manual", signal: active })
+    const request = target.platform === "soda" ? { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 13)" } } : { method: "HEAD" }
+    const response = await fetch(url, { ...request, credentials: "omit", redirect: "manual", signal: active })
+    await response.body?.cancel().catch(() => {})
     const location = response.headers.get("Location")
     if (response.status < 300 || response.status >= 400 || !location) break
     const next = URL.parse(location, url)
     const parsed = next?.protocol === "https:" ? parseMusicShare(next.href) : undefined
-    if (!parsed || parsed.platform !== "netease") break
+    if (!parsed || parsed.platform !== target.platform) break
     if (parsed.kind !== "short") return parsed
     url = new URL(parsed.url)
   }
-  throw new Error("网易云短链未跳转到可识别的歌曲或节目。")
+  throw new Error(target.platform === "soda" ? "汽水短链未指向可核实的单曲。" : "网易云短链未跳转到可识别的歌曲或节目。")
 }

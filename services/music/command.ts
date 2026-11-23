@@ -402,7 +402,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           const task = await createMediaTask(api.tasksDir)
           try {
             const { file, sizeBytes } = await downloadMedia(stream.url.href, join(task.dir, "mv"), {
-              fetch: api.fetch, kind: "video", cdn: "netease-mv", maxBytes: mvByteLimit, timeoutMs: 60_000, signal: active,
+              fetch: api.fetch, kind: "video", cdn: stream.cdn, maxBytes: mvByteLimit, timeoutMs: 60_000, signal: active,
             })
             if (!file.endsWith(".mp4") || (stream.size && stream.size !== sizeBytes)) throw new Error("MV 文件与原平台回包不一致。")
             await sendMediaFile(context, file, { file_name: safeMediaName(item.mv.title) + ".mp4", signal: active })
@@ -421,7 +421,9 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const title = item.kind === "mv" ? item.mv.title : item.kind === "episode" ? item.episode.name : item.track.name
       const author = item.kind === "mv" ? item.mv.creators?.map(value => value.name).filter(Boolean).join(" / ")
         : item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
-      const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : MUSIC_PLATFORMS[selected.platform]
+      const source = selected.platform === "kuwo" && selected.url.startsWith("https://h5app.kuwo.cn/") ? "波点音乐"
+        : selected.platform === "soda" ? "汽水音乐" : MUSIC_PLATFORMS[selected.platform]
+      const platform = item.kind === "mv" ? source + " MV" : item.kind === "episode" ? "网易云播客" : source
       const hint = item.kind === "mv" ? "发送 #播放 加原文链接可请求完整 MV。" : "发送 #播放 加原文链接可请求完整音源。"
       return await musicSharePreview(context, active, { title, author, url: selected.url }, platform, hint)
     } catch (error) {

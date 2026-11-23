@@ -14,7 +14,7 @@ import { resolveData } from "../../core/path.ts"
 import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accounts.ts"
 import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeData, type EpisodeResult, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
 import type { PublicMusicTarget } from "./share-link.ts"
-import { neteaseMvUrl } from "../media/cdn.ts"
+import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -41,11 +41,13 @@ export interface MusicStream {
   resolved_track?: string
 }
 
-type NeteaseMv = { readonly ref: string; readonly id: string | number; readonly platform: string; readonly title: string;
-  readonly creators?: readonly { readonly name?: string }[] }
-type NeteaseMvStream = { readonly video_ref?: string; readonly platform?: string; readonly available?: boolean;
+type MusicMv = { readonly ref: string; readonly id: string | number; readonly platform: "netease" | "kuwo" | "qq"; readonly title: string;
+  readonly duration_ms?: number; readonly creators?: readonly { readonly name?: string }[] }
+type MusicMvStream = { readonly video_ref?: string; readonly platform?: string; readonly available?: boolean;
   readonly format?: string; readonly fee?: unknown; readonly source_range?: unknown; readonly platform_code?: unknown;
-  readonly url?: string; readonly size?: number; readonly extensions?: { readonly kind?: string } }
+  readonly url?: string; readonly size?: number; readonly duration_ms?: number;
+  readonly extensions?: { readonly kind?: string; readonly source_track_id?: string; readonly authorization_source?: string;
+    readonly selected_protocol?: string } }
 
 interface MusicLogin {
   platform: string
@@ -184,10 +186,10 @@ export class MusicService {
     const ref = `${target.platform}:${target.id}`
     const name = (value: unknown) => typeof value === "string" && value.trim()
     if (target.kind === "mv") {
-      const item = await this.tuneweave.request<{ kind?: string; video?: NeteaseMv }>(
+      const item = await this.tuneweave.request<{ kind?: string; video?: MusicMv }>(
         `/v1/videos/${encodeURIComponent(ref)}?kind=mv`, { signal, redirect: "error" })
       const mv = item?.video
-      if (item?.kind !== "mv" || mv?.ref !== ref || mv.platform !== "netease" || String(mv.id) !== target.id || !name(mv.title)) {
+      if (item?.kind !== "mv" || mv?.ref !== ref || mv.platform !== target.platform || String(mv.id) !== target.id || !name(mv.title)) {
         throw new Error("平台返回的 MV 与原链接不一致。")
       }
       return { kind: "mv" as const, mv }
@@ -199,7 +201,11 @@ export class MusicService {
       return { kind: "episode" as const, episode }
     }
     const track = await this.tuneweave.request<MusicTrack>(`/v1/tracks/${encodeURIComponent(ref)}`, { signal, redirect: "error" })
-    if (track?.ref !== ref || track.platform !== target.platform || String(track.id) !== target.id || !name(track.name)) {
+    const matchesIdentity = target.platform === "qq" && target.numeric
+      ? track?.extensions?.numeric_id === target.id && typeof track.id === "string" &&
+        /^[A-Za-z0-9]{14}$/u.test(track.id) && track.ref === "qq:" + track.id
+      : track?.ref === ref && String(track.id) === target.id
+    if (!matchesIdentity || track?.platform !== target.platform || !name(track.name)) {
       throw new Error("歌曲身份无法核实。")
     }
     if (target.platform === "kugou" && (String(track.extensions?.album_audio_id) !== target.id ||
@@ -208,15 +214,24 @@ export class MusicService {
     }
     return { kind: "track" as const, track }
   }
-  async publicMvStream(mv: NeteaseMv, signal?: AbortSignal) {
-    const stream = await this.tuneweave.request<NeteaseMvStream>(
+  async publicMvStream(mv: MusicMv, signal?: AbortSignal) {
+    const stream = await this.tuneweave.request<MusicMvStream>(
       `/v1/videos/${encodeURIComponent(mv.ref)}/stream?kind=mv&resolution=480`, { signal, redirect: "error" })
-    const url = stream?.url && neteaseMvUrl(stream.url)
-    if (!url || stream.video_ref !== mv.ref || stream.platform !== "netease" || stream.extensions?.kind !== "mv" ||
-        stream.available !== true || stream.format !== "mp4" || stream.fee !== 0 || stream.source_range != null || stream.platform_code !== 200) {
+    const cdn: MusicVideoCdn = `${mv.platform}-mv`
+    const url = stream?.url && musicVideoCdnUrl(stream.url, cdn)
+    if (!url || stream.video_ref !== mv.ref || stream.platform !== mv.platform || stream.available !== true ||
+        stream.format !== "mp4" || stream.source_range != null) {
       throw new Error("没有可核实的完整公开 MV，请打开原链接。")
     }
-    return { url, size: stream.size }
+    const authorized = mv.platform === "qq"
+      ? stream.platform_code === 0 && stream.extensions?.selected_protocol === "mp4" && stream.fee == null &&
+        typeof mv.duration_ms === "number" && mv.duration_ms > 0 && mv.duration_ms === stream.duration_ms
+      : stream.platform_code === 200 && stream.extensions?.kind === "mv" &&
+        (mv.platform === "netease" ? stream.fee === 0 : stream.fee == null &&
+          stream.extensions.source_track_id === String(mv.id) &&
+          stream.extensions.authorization_source === "current_metadata_and_play_url")
+    if (!authorized) throw new Error("没有可核实的完整公开 MV，请打开原链接。")
+    return { url, size: stream.size, cdn }
   }
   async publicLyrics(track: MusicTrack, signal?: AbortSignal) {
     const data = await this.tuneweave.request<{ track_ref?: unknown; plain?: unknown; translated?: unknown }>(

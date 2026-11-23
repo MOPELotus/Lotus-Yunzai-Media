@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 import { readExternalMusicShare } from "../services/music/external-share.ts"
 import { parseMusicShare, resolveMusicShare } from "../services/music/share-link.ts"
 import { createMusicCommands } from "../services/music/command.ts"
+import { MusicService } from "../services/music/service.ts"
+import { TuneWeaveService } from "../services/tuneweave/service.ts"
 
 const apple = "https://music.apple.com/cn/album/hectopascal/1468323115?i=1468323724"
 const spotify = "https://open.spotify.com/track/4PTG3Z6ehGkBFwjybzWkR8"
@@ -10,15 +12,7 @@ const soda = "https://music.douyin.com/qishui/share/track?track_id=7430806374525
 const qq = "https://y.qq.com/n/ryqq_v2/songDetail/480622732"
 const mid = "003lfH1n1uKTn4"
 const signal = new AbortController().signal
-const sodaPage = id => '<script id="modern-inline">_ROUTER_DATA = ' + JSON.stringify({ loaderData: { track_page: {
-  audioWithLyricsOption: { track_id: id, trackName: "汽水样本", artistName: "Luke Muzzic", url: "https://audio.invalid/preview" },
-} } }) + ";\n</script>"
-const qqPage = (canonical, songMids) => '<meta property="og:url" content="' + canonical +
-  '"/><script type="application/ld+json">' + JSON.stringify({ "@graph": songMids.map(value => ({
-    "@type": "MusicRecording", url: "https://y.qq.com/n/ryqq_v2/songDetail/" + value,
-  })) }) + "</script>"
-
-test("三家官方分享元数据逐号验证，屏蔽列表、跨站跳转和恶意地址", async () => {
+test("Apple 和 Spotify 官方分享逐号验证，屏蔽列表及恶意地址", async () => {
   for (const url of [apple.replace(/\?.*/u, ""), apple + "&i=1", spotify.replace("track", "album"),
     soda.replace("/track", "/playlist"), soda + "&track_id=2", spotify.replace("open.spotify.com", "open.spotify.com@localhost")]) {
     expect(parseMusicShare(url)).toBeUndefined()
@@ -40,64 +34,95 @@ test("三家官方分享元数据逐号验证，屏蔽列表、跨站跳转和�
       return Response.json({ provider_name: "Spotify", title: "Never Gonna Give You Up",
         html: '<iframe src="' + spotify.replace("/track/", "/embed/track/") + '?utm_source=oembed"></iframe>' })
     }
-    if (url.href === sodaShort) {
-      expect(options.redirect).toBe("manual")
-      return Response.redirect(soda + "&sec_sharer_id=ignored")
-    }
-    expect(url.href).toBe(soda)
-    expect(options.redirect).toBe("error")
-    return new Response(sodaPage("7430806374525323280"))
+    throw new Error("不应出站")
   }
   expect(await readExternalMusicShare(parseMusicShare(apple), signal, transport)).toEqual({
     title: "hectopascal", author: "zzz - Anime on Piano", url: apple,
   })
   expect(await readExternalMusicShare(parseMusicShare(spotify), signal, transport)).toEqual({ title: "Never Gonna Give You Up", url: spotify })
-  expect(await readExternalMusicShare(parseMusicShare(sodaShort), signal, transport)).toEqual({ title: "汽水样本", author: "Luke Muzzic", url: soda })
-  expect(calls).toHaveLength(4)
-  await expect(readExternalMusicShare(parseMusicShare(sodaShort), signal, async () =>
+  expect(calls).toHaveLength(2)
+})
+
+test("汽水短链只提取官方 ID，禁止跨站或跨资源类型", async () => {
+  expect(await resolveMusicShare(parseMusicShare(sodaShort), signal, async (url, init) => {
+    expect(url.href).toBe(sodaShort)
+    expect(init).toMatchObject({ credentials: "omit", redirect: "manual" })
+    return Response.redirect(soda + "&sec_sharer_id=ignored")
+  })).toEqual({ platform: "soda", kind: "track", id: "7430806374525323280", url: soda })
+  await expect(resolveMusicShare(parseMusicShare(sodaShort), signal, async () =>
     Response.redirect(soda.replace("music.douyin.com", "example.test")))).rejects.toThrow("未指向")
-  await expect(readExternalMusicShare(parseMusicShare(soda), signal, async () =>
-    new Response(sodaPage("7430806374525323281")))).rejects.toThrow("编号")
+  await expect(resolveMusicShare(parseMusicShare(sodaShort), signal, async () =>
+    Response.redirect(soda.replace("/track", "/playlist")))).rejects.toThrow("未指向")
 })
 
-test("QQ 数字曲目从官方同号页面校验唯一 MID，再走已接的 QQ 单曲身份", async () => {
-  for (const url of [qq, "https://i2.y.qq.com/n3/other/pages/playsong/index.html?songid=480622732"]) {
-    expect(await resolveMusicShare(parseMusicShare(url), signal, async (actual, options) => {
-      expect(actual.href).toBe(qq)
-      expect(options).toMatchObject({ credentials: "omit", redirect: "error" })
-      return new Response(qqPage(qq, [mid]))
-    })).toEqual({ platform: "qq", kind: "track", id: mid, url: "https://y.qq.com/n/ryqq/songDetail/" + mid })
-  }
-  await expect(resolveMusicShare(parseMusicShare(qq), signal, async () =>
-    new Response(qqPage(qq.replace("480622732", "480622733"), [mid])))).rejects.toThrow("原曲目")
-  await expect(resolveMusicShare(parseMusicShare(qq), signal, async () =>
-    new Response(qqPage(qq, [mid, "004lfH1n1uKTn5"])))).rejects.toThrow("唯一")
-})
-
-test("波点旧歌曲和 MV 读取匿名官方详情，按原编号和 MV 标记核实", async () => {
-  const share = "https://h5app.kuwo.cn/m/bodian/playMusic.html?uid=3216773&musicId=192015898"
-  const mv = "https://h5app.kuwo.cn/m/bodian/play.html?mvId=118987&opusId=770096"
+test("QQ 数字、汽水、波点单曲只通过 TuneWeave 读取认证的同 ID 资料", async () => {
+  const bodian = "https://h5app.kuwo.cn/m/bodian/playMusic.html?musicId=192015898"
+  const mqq = "https://i2.y.qq.com/n3/other/pages/playsong/index.html?songid=480622732"
   const checks = []
-  const official = async (actual, init) => {
-    expect(actual.origin + actual.pathname).toBe("https://bd-api.kuwo.cn/api/service/music/info")
-    expect(init).toMatchObject({ credentials: "omit", redirect: "error" })
-    expect(init.headers.devId).toMatch(/^[a-f\d]{16}$/u)
-    expect(actual.searchParams.get("uid")).toBe("-1")
-    const id = Number(actual.searchParams.get("musicId"))
-    checks.push(id)
-    return Response.json({ code: 200, data: { id, isMv: id === 118987 ? 1 : 0,
-      name: id === 118987 ? "枫" : "Forever", artist: id === 118987 ? "周杰伦" : "Dwhite" } })
+  let wrong = false
+  const fixtures = {
+    "qq:480622732": { platform: "qq", id: mid, ref: "qq:" + mid, name: "QQ 曲", extensions: { numeric_id: "480622732" } },
+    "soda:7430806374525323280": { platform: "soda", id: "7430806374525323280", ref: "soda:7430806374525323280", name: "汽水曲" },
+    "kuwo:192015898": { platform: "kuwo", id: "192015898", ref: "kuwo:192015898", name: "波点曲" },
   }
-  expect(await readExternalMusicShare(parseMusicShare(share), signal, official)).toEqual({
-    title: "Forever", author: "Dwhite", url: "https://h5app.kuwo.cn/m/bodian/playMusic.html?musicId=192015898",
-  })
-  expect(await readExternalMusicShare(parseMusicShare(mv), signal, official)).toEqual({
-    title: "枫", author: "周杰伦", url: "https://h5app.kuwo.cn/m/bodian/play.html?mvId=118987",
-  })
-  expect(checks).toEqual([192015898, 118987])
-  expect(parseMusicShare(share + "&musicId=2")).toBeUndefined()
-  await expect(readExternalMusicShare(parseMusicShare(mv), signal, async () =>
-    Response.json({ code: 200, data: { id: 118987, name: "枫", isMv: 0 } }))).rejects.toThrow("编号")
+  const api = new MusicService({ tuneweave: new TuneWeaveService({
+    config: { api_url: "http://127.0.0.1:12345" },
+    async fetch(target, init) {
+      const url = new URL(target)
+      const ref = decodeURIComponent(url.pathname.split("/").at(-1))
+      expect(url.origin).toBe("http://127.0.0.1:12345")
+      expect(url.searchParams.size).toBe(0)
+      expect(new Headers(init.headers).has("cookie")).toBe(false)
+      checks.push(ref)
+      const result = fixtures[ref]
+      return Response.json({ ok: true, data: wrong ? { ...result, extensions: { numeric_id: "480622731" } } : result })
+    },
+  }) })
+  for (const [link, ref] of [[qq, "qq:480622732"], [mqq, "qq:480622732"], [soda, "soda:7430806374525323280"], [bodian, "kuwo:192015898"]]) {
+    const target = await resolveMusicShare(parseMusicShare(link), signal, async () => { throw new Error("不应抓取源页") })
+    expect(await api.publicShare(target,signal)).toEqual({ kind: "track", track: fixtures[ref] })
+  }
+  expect(checks).toEqual(["qq:480622732","qq:480622732","soda:7430806374525323280","kuwo:192015898"])
+  wrong = true
+  await expect(api.publicShare(parseMusicShare(qq), signal)).rejects.toThrow("身份")
+})
+
+test("公开 MV 校验 TuneWeave 详情、媒体授权、时长和对应 CDN", async () => {
+  const bodian = "https://h5app.kuwo.cn/m/bodian/play.html?mvId=118987"
+  const qqMv = "https://y.qq.com/n/ryqq/mv/013xscuH0xlbie"
+  let move = false
+  const api = new MusicService({ tuneweave: new TuneWeaveService({
+    config: { api_url: "http://127.0.0.1:12345" },
+    async fetch(target) {
+      const url = new URL(target)
+      const ref = decodeURIComponent(url.pathname.split("/")[3])
+      expect(url.searchParams.get("kind")).toBe("mv")
+      const [platform, id] = ref.split(":")
+      const duration_ms = 15000
+      if (!url.pathname.endsWith("/stream")) {
+        return Response.json({ ok: true, data: { kind: "mv", video: { ref, id, platform, title: "测试 MV", duration_ms } } })
+      }
+      return Response.json({ ok: true, data: {
+        video_ref: ref, format: "mp4", available: true, platform,
+        ...(platform === "qq" ? {
+          url: "http://opi.stream.tencentmusic.com/small.mp4", duration_ms: move ? 1000 : duration_ms,
+          platform_code: 0, extensions: { selected_protocol: "mp4" },
+        } : {
+          url: move ? "https://kuwo.cn.invalid/test.mp4" : "https://kw-bj.kuwo.cn/test.mp4",
+          platform_code: 200, extensions: { kind: "mv", source_track_id: id, authorization_source: "current_metadata_and_play_url" },
+        }),
+      } })
+    },
+  }) })
+  for (const [link, cdn] of [[bodian,"kuwo-mv"],[qqMv,"qq-mv"]]) {
+    const { mv } = await api.publicShare(parseMusicShare(link),signal)
+    const stream = await api.publicMvStream(mv, signal)
+    expect(stream.cdn).toBe(cdn)
+    expect(stream.url.protocol).toBe("https:")
+    move = true
+    await expect(api.publicMvStream(mv, signal)).rejects.toThrow("完整公开 MV")
+    move = false
+  }
 })
 
 test("实际媒体分发回官方元数据和曲目链接，显式播放提示原平台，未请求备用音源", async () => {

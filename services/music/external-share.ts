@@ -1,10 +1,9 @@
 export type ExternalMusicShare = {
-  readonly platform: "apple" | "spotify" | "soda" | "bodian"
+  readonly platform: "apple" | "spotify"
   readonly kind: "external-share"
   readonly id: string
   readonly url: string
   readonly region?: string
-  readonly video?: boolean
 }
 
 const numericId = /^[1-9]\d{0,19}$/u
@@ -28,21 +27,6 @@ export function parseExternalMusicShare(url: URL): ExternalMusicShare | undefine
   if (url.hostname === "open.spotify.com") {
     const id = /^\/(?:intl-[a-z-]+\/)?track\/([A-Za-z0-9]{22})$/u.exec(path)?.[1]
     if (id && spotifyId.test(id)) return { kind: "external-share", platform: "spotify", id, url: "https://open.spotify.com/track/" + id }
-  }
-  if (url.hostname === "qishui.douyin.com" && /^\/s\/[A-Za-z0-9]{4,24}$/u.test(path)) {
-    return { kind: "external-share", platform: "soda", id: "", url: "https://qishui.douyin.com" + path + "/" }
-  }
-  if (url.hostname === "music.douyin.com" && path === "/qishui/share/track") {
-    const id = parameter(url, "track_id")
-    if (id && numericId.test(id)) return { kind: "external-share", platform: "soda", id,
-      url: "https://music.douyin.com/qishui/share/track?track_id=" + id }
-  }
-  if (url.hostname === "h5app.kuwo.cn") {
-    const video = path === "/m/bodian/play.html"
-    if (!video && path !== "/m/bodian/playMusic.html") return
-    const id = parameter(url, video ? "mvId" : "musicId")
-    if (id && numericId.test(id)) return { kind: "external-share", platform: "bodian", id, video,
-      url: "https://h5app.kuwo.cn" + path + (video ? "?mvId=" : "?musicId=") + id }
   }
 }
 
@@ -71,12 +55,10 @@ async function boundedBody(response: Response, limit: number, signal: AbortSigna
   return body + decoder.decode()
 }
 
-const request = (url: URL, signal: AbortSignal, fetch: typeof globalThis.fetch, redirect: RequestRedirect = "error") =>
-  fetch(url, { signal, credentials: "omit", redirect, headers: {
-    "User-Agent": url.hostname.endsWith(".douyin.com") ? "Mozilla/5.0 (Linux; Android 13)" : "Mozilla/5.0",
-  } })
+const request = (url: URL, signal: AbortSignal, fetch: typeof globalThis.fetch) =>
+  fetch(url, { signal, credentials: "omit", redirect: "error", headers: { "User-Agent": "Mozilla/5.0" } })
 
-export const externalMusicLabels = { apple: "Apple Music", spotify: "Spotify", soda: "汽水音乐", bodian: "波点音乐" } as const
+export const externalMusicLabels = { apple: "Apple Music", spotify: "Spotify" } as const
 
 export async function readExternalMusicShare(
   share: ExternalMusicShare, signal: AbortSignal, fetch = globalThis.fetch,
@@ -99,57 +81,6 @@ export async function readExternalMusicShare(
     const title = field(data.title)
     if (title && data.provider_name === "Spotify" && embed?.origin === "https://open.spotify.com" &&
         embed.pathname === "/embed/track/" + share.id) return { title, url: share.url }
-  } else if (share.platform === "bodian") {
-    const endpoint = new URL("https://bd-api.kuwo.cn/api/service/music/info")
-    endpoint.search = new URLSearchParams({ musicId: share.id, uid: "-1", token: "" }).toString()
-    const response = await fetch(endpoint, { signal: active, credentials: "omit", redirect: "error", headers: {
-      "User-Agent": "Dart/2.18 (dart:io)", plat: "ar", ver: "3.1.0", channel: "aliopen",
-      devId: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
-    } })
-    const data = record(JSON.parse(await boundedBody(response, 64 * 1024, active)))
-    const item = record(data.data)
-    const title = field(item.name)
-    if (data.code === 200 && title && Number.isSafeInteger(item.id) && String(item.id) === share.id &&
-        (!share.video || item.isMv === 1)) return { title, author: field(item.artist), url: share.url }
-  } else {
-    if (!share.id) {
-      const response = await request(new URL(share.url), active, fetch, "manual")
-      await response.body?.cancel().catch(() => {})
-      const location = response.headers.get("Location")
-      const destination = location ? URL.parse(location, share.url) : undefined
-      const target = destination?.origin === "https://music.douyin.com" && !destination.username && !destination.password
-        ? parseExternalMusicShare(destination) : undefined
-      if (response.status < 300 || response.status >= 400 || target?.platform !== "soda" || !target.id) {
-        throw new Error("汽水分享未指向可核实的单曲。")
-      }
-      share = target
-    }
-    const body = await boundedBody(await request(new URL(share.url), active, fetch), 1024 * 1024, active)
-    const data = /\b_ROUTER_DATA\s*=\s*(\{[^\r\n]+\});/u.exec(body)?.[1]
-    const result = data && record(record(record(record(JSON.parse(data)).loaderData).track_page).audioWithLyricsOption)
-    const title = result && field(result.trackName)
-    if (title && result && result.track_id === share.id) return { title, author: field(result.artistName), url: share.url }
   }
   throw new Error("原平台返回的单曲编号无法核实。")
-}
-
-export async function readQqSongMid(id: string, signal: AbortSignal, fetch = globalThis.fetch): Promise<string> {
-  const url = new URL("https://y.qq.com/n/ryqq_v2/songDetail/" + id)
-  const active = AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-  const body = await boundedBody(await request(url, active, fetch), 512 * 1024, active)
-  const canonical = /<meta\s+property="og:url"\s+content="([^"]+)"\s*\/?>/iu.exec(body)?.[1]
-  if (canonical !== url.href) throw new Error("QQ 音乐未返回原曲目的官方页面。")
-  const matches = new Set<string>()
-  for (const script of body.matchAll(/<script\b[^>]*\btype="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/giu)) {
-    let graph: unknown
-    try { graph = record(JSON.parse(script[1]!))["@graph"] } catch { continue }
-    if (!Array.isArray(graph)) continue
-    for (const item of graph.map(record)) {
-      if (item["@type"] !== "MusicRecording" || typeof item.url !== "string") continue
-      const mid = /^https:\/\/y\.qq\.com\/n\/ryqq(?:_v2)?\/songDetail\/([A-Za-z0-9]{14})$/u.exec(item.url)?.[1]
-      if (mid) matches.add(mid)
-    }
-  }
-  if (matches.size === 1) return [...matches][0]!
-  throw new Error("QQ 音乐未返回唯一的原曲目 MID。")
 }

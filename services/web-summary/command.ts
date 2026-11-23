@@ -12,6 +12,7 @@ import { parsePublicPageUrl } from "./public-page-network.ts"
 type GenericPage = { readonly source: "public-page"; readonly link: string }
 type Source = GenericPage | ArxivTarget | NonNullable<ReturnType<typeof parseOfficialArticle>> | Extract<OfficialLink, { platform: "v2ex" }>
 type Summary = Pick<ReturnType<typeof createSummaryModel>, "settings" | "summarize">
+const explicitSummary = /^\s*[#＃]总结一下(?=\s|https?:\/\/|$)/iu
 
 function parse(value: string): Source | undefined {
   const article = parseArxiv(value) ?? parseOfficialArticle(value)
@@ -23,7 +24,8 @@ function parse(value: string): Source | undefined {
 function identify(message: string, context: MessageFallbackContext) {
   if (context.isDelegated || (context.message_type !== "private" && context.message_type !== "group")) return
   if (/^\s*[#＃]/u.test(message)) {
-    const value = /^\s*[#＃]总结一下\s*(https?:\/\/\S+)\s*$/iu.exec(message)?.[1]
+    if (!explicitSummary.test(message)) return
+    const value = /^(https?:\/\/\S+)$/iu.exec(message.replace(explicitSummary, "").trim())?.[1]
     if (value) {
       const fixed = parse(value)
       if (fixed) return fixed
@@ -73,6 +75,9 @@ export function createWebSummary({
   readonly publicPage?: ReturnType<typeof createPublicPageReader>
 } = {}) {
   return {
+    matches(message: string) {
+      return explicitSummary.test(message)
+    },
     features(context: MessageFallbackContext) {
       const target = !signal?.aborted && identify(context.normalizedMessage, context)
       return target ? ["platform" in target ? "[media] V2EX 预览" : "[media] 网页总结"] : []

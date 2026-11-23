@@ -27,6 +27,7 @@ type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
   {
     readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal">
+    readonly webSummary?: Pick<NonNullable<Parameters<typeof createWebSummary>[0]>, "model" | "publicPage">
     readonly biliVideo?: Pick<Parameters<typeof createBilibiliVideoCommands>[0], "fetch" | "settings">
     readonly xiaohongshu?: Omit<NonNullable<Parameters<typeof createXiaohongshuPreview>[0]>, "signal">
     readonly xigua?: Omit<NonNullable<Parameters<typeof createXiguaPreview>[0]>, "signal">
@@ -64,7 +65,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const publicShare = createPublicShareCommands(services)
   const weixinChannels = createWeixinChannelsPreview({ signal: services.signal })
   const officialLinks = createOfficialLinkPreview({ ...services.officialLinks, signal: services.signal })
-  const webSummary = createWebSummary({ ...services.officialLinks, signal: services.signal })
+  const webSummary = createWebSummary({ ...services.officialLinks, ...services.webSummary, signal: services.signal })
   return {
     ...subscriptions,
     async dispose() {
@@ -73,6 +74,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {
+      if (webSummary.matches(context.normalizedMessage)) return webSummary.features(context)
       const subscriptionFeatures = subscriptions.features(context)
       if (subscriptionFeatures.length) return subscriptionFeatures
       if (officialVideo.matches(context.normalizedMessage)) return ["[media] 米游社官号视频"]
@@ -108,6 +110,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       return summaryFeatures.length ? summaryFeatures : officialLinks.features(context)
     },
     async fallback(message, context) {
+      if (webSummary.matches(context.normalizedMessage)) return webSummary.fallback(context.normalizedMessage, context)
       if (officialVideo.matches(context.normalizedMessage)) return officialVideo.fallback(context.normalizedMessage, context)
       if (message.startsWith("#mcwiki") && /^\S/u.test(message.slice(7))) return mcwiki(message.slice(7))
       if (biliLogin.matches(message)) return biliLogin.fallback(message, context)

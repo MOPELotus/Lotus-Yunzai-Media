@@ -47,6 +47,57 @@ test("公开链接匹配限定域名、形态和身份，保留来源平台及�
   ]) expect(parseOfficialLink(link)).toBeUndefined()
 })
 
+test("显式网页摘要优先于媒体分享，按摘要权限而非平台自动解析派发", async () => {
+  const requests: string[] = []
+  const passiveRequests: string[] = []
+  let articles = true
+  const controller = new AbortController()
+  const module = await createModule({ lockFile, signal: controller.signal, officialLinks: {
+    settings: async () => ({ ...enabled, articles }),
+    fetcher: async url => { passiveRequests.push(url.href); return new Response(null, { status: 404 }) },
+    render: async () => Buffer.from("摘录"),
+  }, biliPgc: {
+    fetcher: async url => { passiveRequests.push(url.href); return new Response(null, { status: 404 }) },
+  }, webSummary: {
+    model: {
+      settings: async () => ({ summaryEnabled: false, summaryMode: "general", summaryBaseUrl: "",
+        summaryModel: "", summaryApiKeyConfigured: false }),
+      summarize: async () => { throw new Error("未开启摘要模型") },
+    },
+    publicPage: async link => {
+      requests.push(link)
+      return { link, title: "公开文章", text: "公开文章正文" }
+    },
+  } })
+  const registry = new CommandRegistry()
+  registry.registerModule({ name: "@lotus-yunzai/media", ...module })
+  const dispatch = (text: string, allowed = true) => {
+    const event: MessageEvent = { ...context(text), msg: text, raw_message: text, message: [], post_type: "message",
+      isGroup: true, isPrivate: false }
+    return registry.dispatchFallback(event, names => allowed || !names.includes("[media] 网页总结"), () => false)
+  }
+  try {
+    const samples = ["https://www.bilibili.com/bangumi/play/ep2395158",
+      "https://www.douyin.com/video/7212345678901234567", "https://www.xiaohongshu.com/explore/674000000000000000000000", post]
+    for (const link of samples) {
+      const input = "＃总结一下" + link
+      expect(module.fallbackFeatures?.(context(input))).toEqual(["[media] 网页总结"])
+      expect(await dispatch(input, false)).toBeUndefined()
+      expect(await dispatch(input)).toEqual([{ type: "image", file: Buffer.from("摘录") }, { type: "text", text: link }])
+    }
+    articles = false
+    await dispatch("#总结一下 " + samples[0])
+    expect(await module.fallback?.("#总结一下 " + samples[0] + " 多余参数",
+      context("#总结一下 " + samples[0] + " 多余参数"))).toBeUndefined()
+    expect(requests).toEqual(samples)
+    expect(passiveRequests).toEqual([])
+    expect(module.fallbackFeatures?.(context(post))).toEqual(["[media] Telegram 预览"])
+  } finally {
+    controller.abort()
+    await module.dispose()
+  }
+})
+
 test("Media 注册 YouTube、Music 与公开 Telegram，来源只发同 ID 的卡和原链接", async () => {
   const calls: URL[] = []
   const cards: SourceCard[] = []

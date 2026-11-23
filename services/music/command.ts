@@ -16,6 +16,7 @@ import { readPartnerLog, partnerLogNodes } from "./partner-log.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicStream, type MusicTrack, type MusicConfig } from "./service.ts"
 import { findMusicShare, parseMusicShare, resolveMusicShare } from "./share-link.ts"
+import { externalMusicLabels, readExternalMusicShare } from "./external-share.ts"
 
 const aliases: Readonly<Record<string, string>> = {
   网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq",
@@ -345,12 +346,30 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     } finally { await api.cleanup(media) }
   }
 
+  async function musicSharePreview(context: Context, active: AbortSignal,
+    detail: { title: string; author?: string; url: string }, platform: string, hint: string) {
+    const model = { title: detail.title, subtitle: [platform, detail.author].filter(Boolean).join(" · "), message: hint }
+    const limit = context.inlineImageByteLimit ?? maxInlineBytes
+    let image: Uint8Array | undefined = await renderMusicShare(model).catch(() => undefined)
+    if (!active.aborted && image && image.byteLength > limit) image = await renderMusicShare(model, { renderScale: 2 }).catch(() => undefined)
+    if (active.aborted) return
+    return image && image.byteLength <= limit ? [{ type: "image" as const, file: image }, detail.url]
+      : `${platform} · 《${detail.title}》${detail.author ? ` · ${detail.author}` : ""}\n${detail.url}\n${hint}`
+  }
+
   async function handleMusicShare(context: Context, target: NonNullable<ReturnType<typeof parseMusicShare>>, play: boolean) {
     const sessionSignal = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
     const active = sessionSignal ? AbortSignal.any([moduleSignal, sessionSignal]) : moduleSignal
     try {
       active.throwIfAborted()
       const { api, timeoutMs } = await openMusic()
+      if (target.kind === "external-share") {
+        const metadata = await readExternalMusicShare(target, active, fetchMusicShare)
+        if (active.aborted) return
+        const hint = "请在原平台打开并播放。"
+        if (play) return hint + "\n" + metadata.url
+        return await musicSharePreview(context, active, metadata, externalMusicLabels[target.platform], hint)
+      }
       const selected = await resolveMusicShare(target, active, fetchMusicShare)
       const item = await api.publicShare(selected, active)
       active.throwIfAborted()
@@ -383,13 +402,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         : item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
       const platform = item.kind === "mv" ? "网易云 MV" : item.kind === "episode" ? "网易云播客" : musicNames[selected.platform]
       const hint = item.kind === "mv" ? "发送 #播放 加原文链接可请求完整 MV。" : "发送 #播放 加原文链接可请求完整音源。"
-      const model = { title, subtitle: [platform, author].filter(Boolean).join(" · "), message: hint }
-      const limit = context.inlineImageByteLimit ?? maxInlineBytes
-      let image: Uint8Array | undefined = await renderMusicShare(model).catch(() => undefined)
-      if (!active.aborted && image && image.byteLength > limit) image = await renderMusicShare(model, { renderScale: 2 }).catch(() => undefined)
-      if (active.aborted) return
-      return image && image.byteLength <= limit ? [{ type: "image" as const, file: image }, selected.url]
-        : `${platform} · 《${title}》${author ? ` · ${author}` : ""}\n${selected.url}\n${hint}`
+      return await musicSharePreview(context, active, { title, author, url: selected.url }, platform, hint)
     } catch (error) {
       if (!active.aborted && (play || !(error instanceof MusicFeatureDisabled))) {
         return play ? "[media] 播放：" + errorText(error) : "暂时无法读取音乐链接，请在原平台打开。\n" + target.url

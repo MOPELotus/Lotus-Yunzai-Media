@@ -8,11 +8,13 @@ const pageSize = 100
 const refreshInterval = 5 * 60_000
 
 interface Binding { readonly owner: number; readonly alias: string; readonly uid: string; readonly key: string }
-interface CloudTrack { readonly ref: string; readonly track: MusicTrack; readonly filename?: string }
+interface CloudTrack { readonly ref: string; readonly track: MusicTrack; readonly filename?: string; readonly matched_track_ref?: string }
 interface Snapshot { readonly tracks: readonly CloudTrack[]; readonly used?: number; readonly capacity?: number; readonly loadedAt: number }
 interface Cache { snapshot?: Snapshot; reading?: Promise<Snapshot> }
 interface CloudDownload { ref?: unknown; platform?: unknown; available?: unknown; url?: unknown; duration_ms?: number }
 interface CloudUpload { track_ref?: unknown; published?: unknown }
+interface CloudMatch { cloud_track_ref?: unknown; target_track_ref?: unknown; matched?: unknown;
+  extensions?: { cloud_user_id?: unknown; response?: { code?: unknown } } }
 
 function isTrackReference(value: unknown): value is string {
   return typeof value === "string" && trackReference.test(value)
@@ -56,7 +58,7 @@ export class NeteaseCloudLibrary {
   }
 
   private async request<T>(api: MusicService, binding: Binding, path: string, params: Record<string, string>,
-    signal: AbortSignal, options: Pick<TuneWeaveRequestOptions, "method" | "audio"> = {}) {
+    signal: AbortSignal, options: Pick<TuneWeaveRequestOptions, "method" | "audio" | "body"> = {}) {
     await this.assertCurrent(api, binding, signal)
     const query = new URLSearchParams({ account: binding.alias, ...params })
     const result = await api.tuneweave.request<T>(`/v1/${path}?${query}`, { ...options, signal, redirect: "error",
@@ -147,6 +149,39 @@ export class NeteaseCloudLibrary {
     await verifyNeteaseAccount(api, binding, signal)
     await this.assertCurrent(api, binding, signal)
     return { url: url.href, duration_ms: unsignedCount(data.duration_ms), resolved_platform: "netease" }
+  }
+
+  private async trackDetails(api: MusicService, binding: Binding, ref: string, signal: AbortSignal) {
+    const { data } = await this.request<CloudTrack[]>(api, binding, "account/cloud/tracks/details", { platform: "netease", refs: ref }, signal)
+    if (!Array.isArray(data) || data.length !== 1 || data[0]?.ref !== ref) throw new Error("当前云盘曲目无法核实，请重新查询。")
+    return checkedTrack(data[0])
+  }
+
+  async match(api: MusicService, binding: Binding, source: CloudTrack, targetId: string, signal: AbortSignal) {
+    const cloudRef = checkedTrack(source).ref
+    const publicRef = "netease:" + targetId
+    if (!isTrackReference(publicRef)) throw new Error("请输入有效的网易云官方歌曲编号。")
+    const target = await api.publicShare({ platform: "netease", kind: "track", id: targetId,
+      url: "https://music.163.com/#/song?id=" + targetId }, signal)
+    if (target.kind !== "track") throw new Error("网易云官方曲目无法核实。")
+    const current = await this.trackDetails(api, binding, cloudRef, signal)
+    await verifyNeteaseAccount(api, binding, signal)
+    await this.assertCurrent(api, binding, signal)
+    if (cloudRef === publicRef || current.matched_track_ref === publicRef) return { changed: false, name: target.track.name }
+    try {
+      const { data } = await this.request<CloudMatch>(api, binding, "account/cloud/matches", { platform: "netease" }, signal, {
+        method: "POST", body: { user_id: binding.uid, cloud_track_id: cloudRef.slice("netease:".length), target_track_id: targetId },
+      })
+      if (data?.matched !== true || data.cloud_track_ref !== cloudRef || data.target_track_ref !== publicRef ||
+          String(data.extensions?.cloud_user_id) !== binding.uid || String(data.extensions?.response?.code) !== "200") throw new Error("unconfirmed")
+      const updated = await this.trackDetails(api, binding, cloudRef, signal)
+      await verifyNeteaseAccount(api, binding, signal)
+      await this.assertCurrent(api, binding, signal)
+      if (updated.matched_track_ref !== publicRef) throw new Error("unconfirmed")
+      return { changed: true, name: target.track.name }
+    } catch {
+      throw new Error("这次云盘匹配结果未确认。请先用 #云盘更新 核对，避免重复提交。")
+    } finally { this.clear(binding) }
   }
 
   async upload(api: MusicService, binding: Binding, file: ChatFile, signal: AbortSignal) {

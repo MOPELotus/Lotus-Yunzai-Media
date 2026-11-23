@@ -4,6 +4,7 @@ import { renderStatusCard } from "../../core/render/service.ts"
 import { isCloudMediaUrl, matchCloudTracks, NeteaseCloudLibrary } from "./cloud-service.ts"
 import type { MusicService } from "./service.ts"
 import { musicSessionKey } from "./service.ts"
+import { parseMusicShare } from "./share-link.ts"
 
 type Context = MessageFallbackContext
 type Binding = Awaited<ReturnType<NeteaseCloudLibrary["verify"]>>
@@ -12,9 +13,10 @@ type Prepared = Awaited<ReturnType<MusicService["prepareStream"]>>
 type CloudAction =
   | { readonly kind: "list"; readonly keyword: string; readonly page: number }
   | { readonly kind: "play"; readonly index: number }
+  | { readonly kind: "match"; readonly index?: number; readonly target?: string }
   | { readonly kind: "refresh" | "clear" | "upload" }
 
-export const cloudHelp = "主人好友私聊可使用 #我的云盘 [关键词]、#云盘下一页、#听云盘 1、#云盘更新、#清除云盘缓存。上传请引用自己发送的音频文件后用 #上传云盘。"
+export const cloudHelp = "主人好友私聊可使用 #我的云盘 [关键词]、#云盘下一页、#听云盘 1、#云盘更新、#清除云盘缓存。上传请引用自己发送的音频文件后用 #上传云盘。使用 #云盘匹配 1 网易云歌曲链接 可关联当前列表中的云盘曲目与官方歌曲。"
 
 export function cloudAction(message: string): CloudAction | undefined {
   const list = /^(?:#?我的云盘|#rnc|#云盘搜索)(?:\s+(.+))?$/iu.exec(message)
@@ -25,6 +27,10 @@ export function cloudAction(message: string): CloudAction | undefined {
   }
   const play = /^#(?:听云盘|播放云盘)\s*([1-9]\d{0,5})$/u.exec(message)
   if (play) return { kind: "play", index: Number(play[1]) }
+  if (/^#云盘匹配(?:\s|$)/u.test(message)) {
+    const match = /^#云盘匹配\s+([1-9]\d{0,5})\s+(\S+)$/u.exec(message)
+    return { kind: "match", ...(match && { index: Number(match[1]), target: match[2] }) }
+  }
   if (/^#?(?:云盘更新|更新云盘)$/u.test(message)) return { kind: "refresh" }
   if (/^#?清除云盘缓存$/u.test(message)) return { kind: "clear" }
   if (/^(?:#?(?:上传云盘|上传网盘)|#rnu)$/iu.test(message)) return { kind: "upload" }
@@ -51,6 +57,14 @@ interface CloudCommandsOptions {
 const pageSize = 10
 const turnLength = 120_000
 const diskSpace = (value: number) => `${(value / (1024 * 1024)).toFixed(1)} MiB`
+const matchUsage = "请使用 #云盘匹配 本页序号 网易云单曲链接或歌曲编号。"
+
+function matchTarget(value: string | undefined) {
+  if (!value) return
+  if (/^[1-9]\d{0,19}$/u.test(value)) return value
+  const link = parseMusicShare(value)
+  if (link?.platform === "netease" && link.kind === "track") return link.id
+}
 function inventory({ tracks, used, capacity }: Browse["snapshot"]) {
   const usage = used !== undefined && capacity !== undefined ? ` · ${diskSpace(used)} / ${diskSpace(capacity)}` : ""
   return `共 ${tracks.length} 首${usage}`
@@ -59,7 +73,7 @@ function inventory({ tracks, used, capacity }: Browse["snapshot"]) {
 export function createCloudCommands({ signal, ownerSignal, open, sendVoice, accountBusy, render = renderStatusCard }: CloudCommandsOptions) {
   const library = new NeteaseCloudLibrary()
   const browsing = new Map<string, Browse>()
-  const uploading = new Set<string>()
+  const writing = new Set<string>()
 
   function matches(message: string) { return cloudAction(message) !== undefined || message === "#云盘下一页" || message === "#云盘上一页" }
 
@@ -110,8 +124,9 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
     if (browse.page < 1 || browse.page > maxPage) return `请选择 1–${maxPage} 页。`
     const details = inventory(browse.snapshot) + (browse.keyword ? ` · 匹配 ${browse.tracks.length} 首` : "")
     const notes = `第 ${browse.page}/${maxPage} 页。使用 #听云盘 1 播放本页第 1 首，或 #云盘下一页 翻页。`
-    const items = tracks.map(({ track }, index) => ({ label: String(index + 1),
-      value: `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}` }))
+    const items = tracks.map(({ track, matched_track_ref }, index) => ({ label: String(index + 1),
+      value: `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}` +
+        (matched_track_ref && /^netease:[1-9]\d{0,21}$/u.test(matched_track_ref) ? " · 已匹配 " + matched_track_ref.slice("netease:".length) : "") }))
     const image = await render({ title: "网易云盘", subtitle: browse.keyword, message: `${details}\n${notes}`, items }).catch(() => undefined)
     await library.assertCurrent(api, browse.binding, active)
     if (!image || !await context.reply({ type: "image", file: image })) {
@@ -131,6 +146,8 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
     const key = musicSessionKey(context)
     for (const [scope, browse] of browsing) if (browse.expires <= Date.now()) browsing.delete(scope)
     const action = cloudAction(message)
+    const target = action?.kind === "match" ? matchTarget(action.target) : undefined
+    if (action?.kind === "match" && (!action.index || !target)) return matchUsage
     try {
       const api = await open()
       const binding = await library.verify(api, owner, active)
@@ -145,9 +162,9 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
         return `网易云盘已刷新，${inventory(snapshot)}。`
       }
       if (action?.kind === "upload") {
-        if (uploading.has(binding.key)) return "当前网易云账号已有上传任务，请稍候。"
+        if (writing.has(binding.key)) return "当前网易云账号已有云盘操作，请稍候。"
         if (accountBusy?.()) return "网易云扫码正在进行，请在登录完成后再上传。"
-        uploading.add(binding.key)
+        writing.add(binding.key)
         try {
           const quote = context.reply_id && context.lookupReply ? await context.lookupReply() : undefined
           active.throwIfAborted()
@@ -160,7 +177,7 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
           try { await library.upload(api, binding, { name: attachment.name, bytes }, active) }
           finally { browsing.delete(key) }
           return "音频已存入当前网易云账号的云盘。"
-        } finally { uploading.delete(binding.key) }
+        } finally { writing.delete(binding.key) }
       }
       if (action?.kind === "list") {
         const snapshot = await library.list(api, binding, active)
@@ -171,10 +188,23 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
       }
       const browse = browsing.get(key)
       if (!browse || browse.binding.key !== binding.key) return "请先使用 #我的云盘 [关键词] 查看云盘曲目。"
-      if (action?.kind === "play") {
-        const position = (browse.page - 1) * pageSize + action.index - 1
+      if (action?.kind === "play" || action?.kind === "match") {
+        const index = action.index ?? 0
+        const position = (browse.page - 1) * pageSize + index - 1
         const selected = browse.tracks[position]
-        if (action.index > pageSize || !selected) return "请输入当前页内的曲目序号。"
+        if (index < 1 || index > pageSize || !selected) return "请输入当前页内的曲目序号。"
+        if (action.kind === "match") {
+          if (!target) return matchUsage
+          if (writing.has(binding.key) || accountBusy?.()) return "当前网易云账号已有云盘操作，请稍候。"
+          writing.add(binding.key)
+          try {
+            const result = await library.match(api, binding, selected, target, active)
+            return result.changed ? `云盘曲目已匹配《${result.name}》。` : `该云盘曲目已关联《${result.name}》。`
+          } finally {
+            writing.delete(binding.key)
+            browsing.delete(key)
+          }
+        }
         await play(context, api, binding, selected)
         return []
       }
@@ -189,5 +219,5 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
     }
   }
 
-  return { matches, handle, search, play, assertVisible, isUploading: () => uploading.size > 0 }
+  return { matches, handle, search, play, assertVisible, isUploading: () => writing.size > 0 }
 }

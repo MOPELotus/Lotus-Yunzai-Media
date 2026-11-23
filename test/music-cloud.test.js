@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { CommandRegistry } from "../../../lib/commands.ts"
 import { createMusicCommands } from "../services/music/command.ts"
 import { createCloudCommands } from "../services/music/cloud-command.ts"
 import { MusicService } from "../services/music/service.ts"
@@ -28,6 +29,97 @@ function track(id, name, artist) {
   const ref = `netease:${id}`
   return { ref, filename: `试验-${name}.wav`, track: { platform: "netease", ref, id, name, artists: [{ name: artist }], duration_ms: 1000 } }
 }
+
+test("云盘匹配只写当前主人、原列表曲目和经核验的网易云官方编号，未知不重试", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lotus-cloud-match-"))
+  const alias = "lotus-nep-42", owner = 42, uid = "700"
+  const source = track(9001, "本人云盘音频", "作者")
+  const published = track(5257138, "屋顶", "温岚")
+  const other = track(5257139, "另一首", "演唱者")
+  const endpoint = "http://127.0.0.1:15432"
+  const calls = []
+  let matched, unconfirmed = false, identity = uid
+  let entered, release
+  const meta = { platform: "netease", account: alias }
+  const api = new MusicService({
+    accountsFile: join(root, "accounts.yaml"), partnerAccountsFile: join(root, "partners.yaml"),
+    tuneweave: new TuneWeaveService({ config: { api_url: endpoint }, async fetch(input, options) {
+      const url = new URL(input)
+      const path = decodeURIComponent(url.pathname)
+      const queryAlias = url.searchParams.get("account")
+      calls.push({ path, queryAlias, method: options.method, body: options.body && JSON.parse(options.body) })
+      expect(options.redirect).toBe("error")
+      expect(new Headers(options.headers).has("X-TuneWeave-Credential")).toBe(false)
+      if (path.startsWith("/v1/tracks/")) {
+        expect(queryAlias).toBeNull()
+        return Response.json({ ok: true, data: path.endsWith(published.ref) ? published.track : other.track })
+      }
+      expect(queryAlias).toBe(alias)
+      if (path === "/v1/account") return Response.json({ ok: true, meta,
+        data: { platform: "netease", account: alias, user_id: identity, authenticated: true } })
+      const item = { ...source, matched_track_ref: matched }
+      if (path.endsWith("/tracks/details")) {
+        expect(url.searchParams.get("refs")).toBe(source.ref)
+        return Response.json({ ok: true, meta, data: [item] })
+      }
+      if (path.endsWith("/tracks")) return Response.json({ ok: true,
+        meta: { ...meta, pagination: { offset: 0, total: 1, has_more: false } }, data: [item] })
+      expect(path).toBe("/v1/account/cloud/matches")
+      expect(options.method).toBe("POST")
+      const expected = "netease:" + JSON.parse(options.body).target_track_id
+      if (entered) {
+        entered()
+        await new Promise(resolve => { release = resolve })
+      }
+      if (!unconfirmed) matched = expected
+      return Response.json({ ok: true, meta, data: { cloud_track_ref: source.ref, target_track_ref: expected,
+        matched: true, extensions: { cloud_user_id: uid, response: { code: unconfirmed ? 400 : 200 } } } })
+    } }),
+  })
+  await api.partner.saveAccount({ uid, qq: owner, tuneweave_account: alias })
+  const command = createMusicCommands({ openMusic: async () => ({ api, defaultPlatform: "netease", timeoutMs: 120_000 }) })
+  const registry = new CommandRegistry()
+  registry.registerModule({ name: "@lotus-yunzai/media", commands: {}, fallback: command.fallback, fallbackFeatures: command.features })
+  const friend = { message_type: "private", self_id: 99, user_id: owner, adapter: "onebot",
+    privateCredentialSignal: new AbortController().signal, reply: async () => true }
+  const dispatch = (msg, changes = {}) => registry.dispatchFallback({ ...friend, ...changes, msg }, () => true, () => true, msg, { canManagePackages: true })
+  const writes = () => calls.filter(call => call.path.endsWith("/matches"))
+  try {
+    expect(await dispatch("#云盘匹配 1 5257138", { message_type: "group" })).toContain("好友私聊")
+    expect(await dispatch("#云盘匹配 1 5257138", { isDelegated: true })).toContain("好友私聊")
+    expect(await dispatch("#云盘匹配 1 https://music.163.com/#/dj?id=5257138")).toContain("单曲链接")
+    expect(calls).toHaveLength(0)
+    expect(await dispatch("#我的云盘")).toEqual([])
+    expect(await dispatch("#云盘匹配 1 5257138", { user_id: 43 })).toContain("自己的网易云账号")
+    expect(await dispatch("#云盘匹配 1 5257138", { adapter: "milky" })).toContain("先使用")
+    expect(await dispatch("#云盘匹配 2 5257138")).toContain("当前页")
+    identity = "701"
+    expect(await dispatch("#云盘匹配 1 5257138")).toContain("账号不一致")
+    identity = uid
+    const wait = new Promise(resolve => { entered = resolve })
+    const pending = dispatch("#云盘匹配 1 https://music.163.com/#/song?id=5257138")
+    await wait
+    expect(await dispatch("#云盘匹配 1 5257138")).toContain("请稍候")
+    release()
+    expect(await pending).toContain("已匹配《屋顶》")
+    expect(writes()).toEqual([{ path: "/v1/account/cloud/matches", queryAlias: alias, method: "POST",
+      body: { user_id: uid, cloud_track_id: "9001", target_track_id: "5257138" } }])
+    entered = undefined
+    expect(await dispatch("#云盘匹配 1 5257138")).toContain("先使用")
+    expect(await dispatch("#我的云盘")).toEqual([])
+    expect(await dispatch("#云盘匹配 1 5257138")).toContain("已关联")
+    expect(writes()).toHaveLength(1)
+    expect(await dispatch("#我的云盘")).toEqual([])
+    unconfirmed = true
+    expect(await dispatch("#云盘匹配 1 5257139")).toContain("结果未确认")
+    expect(await dispatch("#云盘匹配 1 5257139")).toContain("先使用")
+    expect(writes()).toHaveLength(2)
+  } finally {
+    release?.()
+    await command.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test("私人云盘沿音乐命令入口隔离读、筛选、翻页、播放和唯一一次上传", async () => {
   const root = await mkdtemp(join(tmpdir(), "lotus-music-cloud-"))

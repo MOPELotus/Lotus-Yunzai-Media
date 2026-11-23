@@ -1,5 +1,6 @@
 import type { connectStorage } from "@lotus-yunzai/storage"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
+import type { BiliCommentTarget } from "../bilibili/comments.ts"
 
 export type SubscriptionPlatform = "bilibili" | "weibo"
 export type SubscriptionRedis = Pick<Awaited<ReturnType<typeof connectStorage>>, "get" | "mGet" | "set" | "eval" | "pTTL">
@@ -34,6 +35,7 @@ export interface DynamicPost {
   avatar?: string
   forwarded?: DynamicPost
   activity?: DynamicActivity
+  commentTarget?: BiliCommentTarget
 }
 
 export interface SubscriptionProfile {

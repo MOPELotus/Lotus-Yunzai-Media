@@ -10,6 +10,7 @@ import { createBiliProvider } from "../subscriptions/bilibili/index.ts"
 import { createSubscriptionConfig } from "../subscriptions/config.ts"
 import { makeDynamicMessages } from "../subscriptions/render.ts"
 import { ToolInstallerService } from "../tools/installer.ts"
+import { biliCommentTarget, createBiliComments, type BiliComment, type BiliCommentTarget } from "./comments.ts"
 import {
   BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, isBiliVideoPage, normalizeDownloadConfig,
   quotedBiliCardLink, resolveCommandPath,
@@ -31,6 +32,7 @@ const quotedCoverCommand = /^#?(?:下载封面|封面下载|获取封面|封面)
 const quotedDescriptionCommand = /^#?简介$/u
 const quotedVideoCommand = /^#?(?:下载视频|视频下载|获取视频)$/u
 const quotedImagesCommand = /^#?(?:获取图片|下载图片|图片)$/u
+const expandCommentCommand = /^#?展开(?:\s*\+?\s*([0-9]{1,8}))?\s*$/u
 const previewWindow = 30 * 60_000
 const maxPreviewEntries = 512
 const subscriptionSettings = createSubscriptionConfig(dataPath, lockFile)
@@ -44,6 +46,7 @@ type VideoAction =
   | { kind: "page"; next: boolean }
   | { kind: "pick"; index: number; tuku: boolean }
   | { kind: "watch"; keyword: string }
+  | { kind: "comments"; index: number }
   | { kind: "quote"; action: QuotedAction }
   | { kind: "download" | "link"; target: string }
 
@@ -55,11 +58,23 @@ interface SearchSession {
   readonly results: SearchResults
 }
 
+interface Discussion {
+  readonly target: BiliCommentTarget
+  readonly rows: readonly BiliComment[]
+  readonly children?: true
+}
+
+interface Preview {
+  readonly target?: string
+  readonly discussion?: Discussion
+}
+
 interface Services {
   readonly signal?: AbortSignal
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
   readonly fetch?: BilibiliService["fetch"]
   readonly settings?: typeof subscriptionSettings.settings
+  readonly renderComments?: typeof renderStatusCard
 }
 
 function videoAction(message: string, context: MessageFallbackContext): VideoAction | undefined {
@@ -78,6 +93,11 @@ function videoAction(message: string, context: MessageFallbackContext): VideoAct
   if (watch) return { kind: "watch", keyword: watch[1]!.trim() }
   const download = downloadCommand.exec(message)
   if (download) return { kind: "download", target: download[1]!.trim() }
+  const expand = expandCommentCommand.exec(message)
+  if (expand) {
+    return context.message_type !== "terminal" && !context.isDelegated && context.reply_id !== undefined && context.lookupReply
+      ? { kind: "comments", index: Number(expand[1] ?? 1) } : undefined
+  }
   const quotedAction = quotedLinkCommand.test(message) ? "preview"
     : quotedCoverCommand.test(message) ? "cover"
     : quotedDescriptionCommand.test(message) ? "description"
@@ -128,9 +148,12 @@ async function readOriginal(url: string, byteLimit: number, signal: AbortSignal,
   } catch { return }
 }
 
-export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, settings = subscriptionSettings.settings }: Services) {
+export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, settings = subscriptionSettings.settings,
+  renderComments = renderStatusCard }: Services) {
   const sessions = new Map<string, SearchSession>()
-  const previews = new Map<string, { target: string; expires: number }>()
+  const previews = new Map<string, Preview & { expires: number }>()
+  const comments = createBiliComments(fetch)
+  const request = fetch ?? globalThis.fetch
   const running = new Set<string>()
   let recovery: Promise<unknown> | undefined
   const cancelRecovery = mediaRuntime?.whenReady(() => {
@@ -147,16 +170,16 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
   async function imageReply(context: MessageFallbackContext, image: Uint8Array | undefined, fallback: string,
     options?: Parameters<MessageFallbackContext["reply"]>[2]) {
     if (signal?.aborted) return
-    if (!image || !await reply(context, { type: "image", file: image }, undefined, options)) await reply(context, fallback)
+    if (!image || !await reply(context, { type: "image", file: image }, undefined, options)) await reply(context, fallback, undefined, options)
   }
 
-  function previewReceipt(context: MessageFallbackContext, target: string) {
+  function previewReceipt(context: MessageFallbackContext, preview: Preview) {
     const scope = quoteScope(context)
-    if (!scope || !URL.parse(target)) return
+    if (!scope || (!preview.target && !preview.discussion)) return
     return { onDelivered(messageId: number) {
       if (signal?.aborted || !Number.isSafeInteger(messageId)) return
       if (previews.size >= maxPreviewEntries) previews.delete(previews.keys().next().value!)
-      previews.set(scope + ":" + messageId, { target, expires: Date.now() + previewWindow })
+      previews.set(scope + ":" + messageId, { ...preview, expires: Date.now() + previewWindow })
     } }
   }
 
@@ -167,14 +190,80 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (!source || signal?.aborted) return
     if (card?.type === "json" || card?.type === "light_app") return quotedBiliCardLink(card.data) ?? undefined
     if (cardOnly) return
-    const scope = quoteScope(context)
-    const priorKey = scope && scope + ":" + context.reply_id
-    const preview = priorKey && source.user_id === context.self_id && previews.get(priorKey)
-    if (preview && preview.expires > Date.now()) return preview.target
+    return receivedPreview(context, source.user_id)?.target
   }
 
-  async function sendOriginals(context: MessageFallbackContext, sources: readonly string[], transport: BilibiliService["fetch"]) {
-    const active = signal ?? new AbortController().signal
+  function receivedPreview(context: MessageFallbackContext, author: number) {
+    const scope = quoteScope(context)
+    if (!scope || author !== context.self_id) return
+    const preview = previews.get(scope + ":" + context.reply_id)
+    if (preview && preview.expires > Date.now()) return preview
+  }
+
+  function commentSignal(context: MessageFallbackContext) {
+    const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+    return connection && signal ? AbortSignal.any([connection, signal]) : connection ?? signal
+  }
+
+  async function discussionFor(target: BiliCommentTarget | undefined, context: MessageFallbackContext): Promise<Discussion | undefined> {
+    if (!target || !quoteScope(context) || context.isDelegated) return
+    try {
+      const rows = await comments.firstPage(target, commentSignal(context))
+      if (rows.length) return { target, rows }
+    } catch { /* Comment availability is independent of the preview. */ }
+  }
+
+  async function showDiscussion(context: MessageFallbackContext, preview: Preview, title: string, parent?: BiliComment) {
+    const rows = preview.discussion?.rows ?? []
+    const active = commentSignal(context)
+    if (active?.aborted) return
+    const items = rows.map((row, index) => {
+      const characters = Array.from(`${row.text}${row.images.length ? " [图片]" : ""}`.trim())
+      return { label: `${index + 1}. ${row.author}${row.pinned ? " · 置顶" : ""}`,
+        value: characters.length > 100 ? characters.slice(0, 100).join("") + "…" : characters.join("") }
+    })
+    const hint = items.length ? "引用这条回复，发送 展开 1 查看对应编号。" : ""
+    const rootText = parent ? `${parent.author}\n${parent.text}` : undefined
+    const card = { title, message: [rootText, hint].filter(Boolean).join("\n"), userId: context.user_id, items }
+    const fallback = [title, rootText, ...items.map(item => `${item.label}\n${item.value}`), hint].filter(Boolean).join("\n\n")
+    let image = await renderComments(card).catch(() => undefined)
+    const limit = context.inlineImageByteLimit ?? 16 * 1024 * 1024
+    if (image && image.byteLength > limit && Number(Bun.env.LOTUS_RENDER_SCALE ?? 4) > 2) {
+      image = await renderComments(card, { renderScale: 2 }).catch(() => undefined)
+    }
+    if (active?.aborted) return
+    const receipt = previewReceipt(context, preview)
+    if (!image || image.byteLength > limit || !await reply(context, { type: "image", file: image }, undefined, receipt)) {
+      if (!active?.aborted) await reply(context, fallback, undefined, receipt)
+    }
+    if (parent?.images.length && !active?.aborted) await sendOriginals(context, parent.images, request, active)
+  }
+
+  async function expandComment(context: MessageFallbackContext, index: number) {
+    const options = await settings("bilibili")
+    const active = commentSignal(context)
+    if (!options.parseVideoLink || active?.aborted) return
+    const source = await context.lookupReply?.().catch(() => undefined)
+    if (!source || active?.aborted) return
+    const preview = receivedPreview(context, source.user_id)
+    if (!preview) return
+    const discussion = preview.discussion
+    if (!discussion?.rows.length) return "这条 B 站预览没有可展开的公开评论。"
+    const selected = discussion.rows[index - 1]
+    if (!selected) return `评论序号超出范围，请发送 1–${discussion.rows.length}。`
+    if (discussion.children) {
+      await showDiscussion(context, {}, "B 站子评论", selected)
+      return []
+    }
+    let rows: readonly BiliComment[] = []
+    try { rows = await comments.thread(discussion.target, selected.id, active) }
+    catch { if (!active?.aborted) return "B 站公开子评论暂不可用。" }
+    await showDiscussion(context, { discussion: { ...discussion, rows, children: true } }, "B 站评论详情", selected)
+    return []
+  }
+
+  async function sendOriginals(context: MessageFallbackContext, sources: readonly string[], transport: BilibiliService["fetch"],
+    active = signal ?? new AbortController().signal) {
     const limit = Math.min(context.inlineImageByteLimit ?? Infinity, 8 * 1024 ** 2)
     let sent = 0
     for (const url of [...new Set(sources)].slice(0, 9)) {
@@ -253,10 +342,14 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       if (info.type !== "video") throw error
       console.warn("[media] B 站视频图卡生成失败：" + error.message)
     })
-    const receipt = info.type === "video" ? previewReceipt(context, info.url) : undefined
+    const discussion = info.type === "video" && info.stat.reply !== 0
+      ? await discussionFor(biliCommentTarget(info.aid, 1), context) : undefined
+    const preview = info.type === "video" ? { target: info.url, discussion } : undefined
+    const receipt = preview && previewReceipt(context, preview)
     if (!image && info.type === "video") await reply(context, formatBilibiliPreviewText(info), undefined, receipt)
     else await imageReply(context, image || undefined, "[media] B站解析完成。", receipt)
     if (signal?.aborted) return
+    if (discussion && preview) await showDiscussion(context, preview, "B 站评论")
     if (info.type === "live" && info.playerUrl) {
       await reply(context, "[media] 独立播放器：" + info.playerUrl)
     } else if (info.type === "video" && info.url && download) {
@@ -321,6 +414,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (signal?.aborted) return
     const action = videoAction(message, context)
     if (!action) return
+    if (action.kind === "comments") return expandComment(context, action.index)
     const key = sessionKey(context)
     const session = currentSession(key)
     if (action.kind === "page" && !session?.tuku) return "[media] 请先发送 #点B站视频 关键词。"
@@ -380,9 +474,12 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
               return sendOriginals(context, [...post.images, ...(post.forwarded?.images ?? [])], service.fetch)
             }
             if (action.kind === "quote" && action.action !== "preview") return
+            const discussion = post.activity?.comments !== "0" ? await discussionFor(post.commentTarget, context) : undefined
+            const preview = { target: resolved.href, discussion }
             const messages = await makeDynamicMessages(provider, post, options,
               { signal, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
-            for (const message of messages) await reply(context, message, undefined, previewReceipt(context, resolved.href))
+            for (const message of messages) await reply(context, message, undefined, previewReceipt(context, preview))
+            if (discussion) await showDiscussion(context, preview, "B 站评论")
             return []
           }
           if (action.kind === "quote" && (!resolved || !isBiliVideoPage(resolved))) return

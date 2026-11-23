@@ -4,6 +4,7 @@ import { ExpiredSubscriptionSession, readWithSubscriptionSession, type Subscript
 import type { DynamicActivity, DynamicPost, SubscriptionProfile, SubscriptionProvider } from "../types.ts"
 import type { BiliSharedSession } from "./shared.ts"
 import { createAuthorArchive } from "../xhh-author-source.ts"
+import { biliCommentTarget } from "../../bilibili/comments.ts"
 
 interface LiveInfo {
   title?: unknown
@@ -17,6 +18,7 @@ interface LiveInfo {
 }
 
 interface BiliDynamic {
+  basic?: { comment_id_str?: unknown; comment_type?: unknown; is_only_fans?: boolean; in_audit?: boolean }
   id_str?: unknown
   type?: unknown
   orig?: unknown
@@ -176,9 +178,12 @@ export function normalizeBiliDynamic(input: unknown, expectedUid?: string, allow
     cover = picture(live?.cover ?? major.live?.cover)
     activity = streamActivity(live ?? major.live, roomUrl)
   }
+  const commentTarget = raw?.basic && !raw.basic.is_only_fans && !raw.basic.in_audit
+    ? biliCommentTarget(raw.basic.comment_id_str, raw.basic.comment_type) : undefined
   return {
     id, uid, author: typeof author.name === "string" ? author.name : uid, createdAt, type,
     title: typeof title === "string" ? title : "", content, url, images, cover, activity, avatar: picture(author.face),
+    ...(commentTarget && { commentTarget }),
     forwarded: allowForward && type === "DYNAMIC_TYPE_FORWARD" ? normalizeBiliDynamic(raw?.orig, undefined, false) : undefined,
   }
 }

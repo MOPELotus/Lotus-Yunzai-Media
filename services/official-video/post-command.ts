@@ -1,12 +1,20 @@
 import { load } from "cheerio"
+import { join } from "node:path"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { requestOfficialJson } from "../../../../packages/hoyo-client/redeem-preview/http.ts"
 import { renderSourceCard } from "../../core/render/source-cards.ts"
+import { resolveData } from "../../core/path.ts"
+import { isMiyousheVideoUrl, type MediaFetch } from "../media/cdn.ts"
+import { downloadMedia } from "../media/download.ts"
+import { mediaDeliveryUnknown, safeMediaName, sendMediaFile } from "../media/files.ts"
 import { articlePages, buildMediaMessageText, isMediaCommandText, type ArticleBlock } from "../media/message.ts"
+import { createMediaTask, recoverMediaTasks, releaseMediaTask } from "../media/tasks.ts"
 
 const link = /(?<=^|[\s"'([{>：，。])https?:\/\/(?:www\.|m\.)?miyoushe\.com\/[a-z0-9]+\/article\/([1-9]\d{0,17})(?=$|[\s"'\])}<>,.?/#&，。！？；：])/iu
 const imagesHosts = new Set(["upload-bbs.miyoushe.com", "upload-bbs.mihoyo.com"])
+const videoLimit = 100 * 1024 * 1024
+const holdMs = 10 * 60_000
 
 function record(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -74,12 +82,76 @@ function contentBlocks(post: Record<string, unknown>) {
   return blocks
 }
 
-export function createMiyoushePostCommands({ signal, request = requestOfficialJson, render = renderSourceCard }: {
-  readonly signal?: AbortSignal; readonly request?: typeof requestOfficialJson; readonly render?: typeof renderSourceCard
+export function createMiyoushePostCommands({ signal: lifecycle, mediaRuntime, request = requestOfficialJson,
+  render = renderSourceCard, fetchVideo, tasksDir = resolveData("miyoushe", "tasks") }: {
+  readonly signal?: AbortSignal
+  readonly mediaRuntime?: { whenReady(start: () => void): () => void }
+  readonly request?: typeof requestOfficialJson
+  readonly render?: typeof renderSourceCard
+  readonly fetchVideo?: MediaFetch
+  readonly tasksDir?: string
 } = {}) {
+  const stopped = new AbortController()
+  const signal = lifecycle ? AbortSignal.any([lifecycle, stopped.signal]) : stopped.signal
+  const deliveries = new Map<string, number>()
+  const work = new Set<Promise<void>>()
+  let recovery: Promise<unknown> | undefined
+  const cancelRecovery = mediaRuntime?.whenReady(() => {
+    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn("[media] 米游社视频任务恢复失败。"))
+  })
+
   function identify(message: string, context: MessageFallbackContext) {
     if (signal?.aborted || context.isDelegated || context.message_type === "terminal" || isMediaCommandText(message)) return
     return link.exec(buildMediaMessageText({ ...context, msg: message }))
+  }
+
+  function videoDelivery(video: URL, title: string, context: MessageFallbackContext) {
+    if (!context.forward || !context.deliverMedia) return
+    const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+    const active = connection ? AbortSignal.any([signal, connection]) : signal
+    const peer = context.message_type === "group" ? context.group_id : context.user_id
+    const key = context.message_id === undefined ? undefined :
+      [context.adapter ?? "onebot", context.self_id, context.message_type, peer, context.message_id].join(":")
+    let attempted = false
+    return async () => {
+      if (attempted || active.aborted) return
+      attempted = true
+      if (key) {
+        const now = Date.now()
+        for (const [old, expires] of deliveries) {
+          if (expires > now) break
+          deliveries.delete(old)
+        }
+        if (deliveries.has(key)) return
+        if (deliveries.size >= 4096) deliveries.delete(deliveries.keys().next().value!)
+        deliveries.set(key, now + holdMs)
+      }
+      const pending = sendVideo(video, title, context, active)
+      work.add(pending)
+      try { await pending } finally { work.delete(pending) }
+    }
+  }
+
+  async function sendVideo(video: URL, title: string, context: MessageFallbackContext, active: AbortSignal) {
+    let task: Awaited<ReturnType<typeof createMediaTask>> | undefined
+    try {
+      await recovery
+      active.throwIfAborted()
+      task = await createMediaTask(tasksDir)
+      const { file } = await downloadMedia(video.href, join(task.dir, "video"), {
+        fetch: fetchVideo, kind: "video", cdn: "miyoushe-video", maxBytes: videoLimit, timeoutMs: 60_000,
+        headers: { Referer: "https://www.miyoushe.com/" }, signal: active,
+      })
+      await sendMediaFile(context, file, { file_name: safeMediaName(title) + file.slice(file.lastIndexOf(".")), signal: active })
+    } catch (error) {
+      if (!active.aborted) {
+        const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
+        try { await context.reply(unknown ? "米游社视频送达未确认，请核对当前会话。" : "米游社视频发送失败，可打开上面的原帖或视频链接。") }
+        catch { /* The original connection may have closed after delivery. */ }
+      }
+    } finally {
+      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn("[media] 米游社视频任务清理失败。"))
+    }
   }
 
   async function fallback(message: string, context: MessageFallbackContext) {
@@ -117,14 +189,22 @@ export function createMiyoushePostCommands({ signal, request = requestOfficialJs
       }
       const videos = Array.isArray(entry.vod_list) ? entry.vod_list : []
       const resolutions = record(videos[0]).resolutions
-      if (Array.isArray(resolutions)) {
-        const video = resolutions.map(row => sourceUrl(record(row).url)).find(url => url && /(?:^|\.)mihoyo\.com$|(?:^|\.)miyoushe\.com$/u.test(url.hostname))
-        if (video) nodes.push(`视频地址：${video.href}`)
-      }
+      const video = Array.isArray(resolutions) ? resolutions.map(row => sourceUrl(record(row).url)).find(url => url && isMiyousheVideoUrl(url)) : undefined
+      if (video) nodes.push(`视频地址：${video.href}`)
       signal?.throwIfAborted()
-      return nodes.length > 1 ? { type: "forward" as const, nodes } : intro
+      const onDelivered = video && videoDelivery(video, title, context)
+      return nodes.length > 1 ? { type: "forward" as const, nodes, ...(onDelivered && { onDelivered }) } : intro
     } catch { if (!signal?.aborted) return "暂时无法读取米游社公开帖子。" }
   }
 
-  return { fallback, features: (context: MessageFallbackContext) => identify(context.normalizedMessage, context) ? ["[media] 米游社帖子"] : [] }
+  return {
+    fallback,
+    features: (context: MessageFallbackContext) => identify(context.normalizedMessage, context) ? ["[media] 米游社帖子"] : [],
+    async dispose() {
+      stopped.abort()
+      cancelRecovery?.()
+      await Promise.allSettled([recovery, ...work])
+      deliveries.clear()
+    },
+  }
 }

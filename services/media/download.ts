@@ -12,6 +12,7 @@ interface DownloadOptions {
   readonly timeoutMs?: number
   readonly maxBytes?: number
   readonly kind?: MediaKind
+  readonly cdn?: "miyoushe-video"
   readonly signal?: AbortSignal
 }
 
@@ -31,7 +32,7 @@ export function sniffMedia(bytes: Buffer): { kind: MediaKind; ext: string } | nu
 }
 
 /** No resumptions across mirrors. Failed transfers never become final files. */
-export async function downloadMedia(url: string, targetBase: string, { fetch: fetchImpl = globalThis.fetch, headers = {}, timeoutMs = 600000, maxBytes = 0, kind, signal }: DownloadOptions = {}) {
+export async function downloadMedia(url: string, targetBase: string, { fetch: fetchImpl = globalThis.fetch, headers = {}, timeoutMs = 600000, maxBytes = 0, kind, cdn, signal }: DownloadOptions = {}) {
   const controller = new AbortController()
   const active = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -41,7 +42,7 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   let prefix = Buffer.alloc(0)
   try {
     active.throwIfAborted()
-    const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active })
+    const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active }, cdn)
     if (!response.ok || !response.body) throw new Error(`媒体下载失败 HTTP ${response.status}`)
     expected = Number(response.headers.get("content-length")) || 0
     if (maxBytes > 0 && expected > maxBytes) throw new Error("媒体大小超过下载限制")

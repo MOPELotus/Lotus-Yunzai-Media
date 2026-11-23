@@ -37,7 +37,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   return {
     ...subscriptions,
     async dispose() {
-      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), biliVideo.dispose(), music.dispose(), officialVideo.dispose()])
+      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), biliVideo.dispose(), music.dispose(), officialVideo.dispose(), miyoushePost.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {

@@ -82,7 +82,7 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
       task = await createMediaTask(tasksDir)
       const limit = context.deliverMedia ? maxVideo : maxInline
       const { file } = await downloadMedia(source.video.href, join(task.dir, "video"), {
-        signal: active, kind: "video", cdn: `${source.site}-video`, maxBytes: limit, timeoutMs: 60_000, fetch: fetchMedia,
+        signal: active, kind: "video", cdn: `${source.site}-video`, maxBytes: limit, timeoutMs: 120_000, fetch: fetchMedia,
       })
       await sendMediaFile(context, file, { signal: active, file_name: safeMediaName(source.title) + file.slice(file.lastIndexOf(".")) })
       return []

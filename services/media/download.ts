@@ -42,10 +42,11 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   let expected = 0
   let prefix = Buffer.alloc(0)
   const sniffBytes = cdn === "acfun-video" ? 377 : 64
+  const requireFullFile = cdn === "acfun-video" || cdn === "weishi-video" || cdn === "zuiyou-video"
   try {
     active.throwIfAborted()
     const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active }, cdn)
-    if (!response.ok || !response.body || cdn === "acfun-video" && (response.status !== 200 || response.headers.has("content-range"))) {
+    if (!response.ok || !response.body || requireFullFile && (response.status !== 200 || response.headers.has("content-range"))) {
       await response.body?.cancel().catch(() => {})
       throw new Error(`媒体下载失败 HTTP ${response.status}`)
     }

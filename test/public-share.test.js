@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { downloadMedia } from "../services/media/download.ts"
 import { fetchCdn } from "../services/media/cdn.ts"
 import { createPublicShareCommands } from "../services/public-share/command.ts"
 import { parsePublicShare, readPublicShare } from "../services/public-share/source.ts"
@@ -100,4 +101,19 @@ test("最右预览仅发送本帖图像，显式命令下载一次同一作品�
 test("公开分享的媒体重定向不能跳到其他平台", async () => {
   await expect(fetchCdn(async () => Response.redirect("https://www.bilibili.com/stream.mp4"),
     "https://web-v01.izuiyou.com/valid.mp4", {}, "zuiyou-video")).rejects.toThrow("不属于分享来源")
+})
+
+
+test("公开视频不能把合法 MP4 文件头的非完整 Range 当作可发送文件", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-public-share-partial-"))
+  try {
+    await expect(downloadMedia("https://web-v01.izuiyou.com/valid.mp4", join(directory, "video"), {
+      kind: "video", cdn: "zuiyou-video", fetch: async () => new Response(mp4, {
+        status: 206, headers: { "Content-Range": `bytes 0-${mp4.length - 1}/999` },
+      }),
+    })).rejects.toThrow("媒体下载失败 HTTP 206")
+    expect(await readdir(directory)).toEqual([])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

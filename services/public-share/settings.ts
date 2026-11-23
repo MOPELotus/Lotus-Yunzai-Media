@@ -6,7 +6,7 @@ import { dataPath, rootPath } from "../../core/path.ts"
 
 const oldController = "通用（包含快手等）"
 export type PublicShareSettings = { enable: boolean; private: boolean }
-type Platform = "pipixia" | "kuaishou" | "jike"
+type Platform = "pipixia" | "kuaishou" | "jike" | "xigua"
 
 function mapping(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}

@@ -19,12 +19,14 @@ import { createPublicShareCommands } from "./services/public-share/command.ts"
 import { createWeixinChannelsPreview } from "./services/weixin-channels/preview.ts"
 import { createOfficialLinkPreview } from "./services/official-links/command.ts"
 import { createWebSummary } from "./services/web-summary/command.ts"
+import { createXiguaPreview } from "./services/xigua/preview.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
   {
     readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal">
     readonly biliVideo?: Pick<Parameters<typeof createBilibiliVideoCommands>[0], "fetch" | "settings">
+    readonly xigua?: Omit<NonNullable<Parameters<typeof createXiguaPreview>[0]>, "signal">
     readonly biliPgc?: Omit<Parameters<typeof createBiliPgcPreview>[0], "signal">
   }
 
@@ -49,6 +51,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const pipixia = createPipixiaCommands(services)
   const kuaishou = createKuaishouCommands(services)
   const jike = createJikeCommands(services)
+  const xigua = createXiguaPreview({ ...services.xigua, signal: services.signal })
   const biliLogin = createBilibiliLogin(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
@@ -88,6 +91,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (kuaishouFeatures.length) return kuaishouFeatures
       const jikeFeatures = jike.features(context)
       if (jikeFeatures.length) return jikeFeatures
+      const xiguaFeatures = xigua.features(context)
+      if (xiguaFeatures.length) return xiguaFeatures
       const shortVideoFeatures = douyin.features(context)
       if (shortVideoFeatures.length) return shortVideoFeatures
       const summaryFeatures = webSummary.features(context)
@@ -101,7 +106,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (biliPgc.matches(message, context)) return biliPgc.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await weixinChannels.fallback(message, context) ?? await music.fallback(message, context) ??
-        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ??
+        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ?? await xigua.fallback(message, context) ??
         await douyin.fallback(message, context) ?? await webSummary.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }

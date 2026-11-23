@@ -1,7 +1,7 @@
 import { Job } from "node-schedule"
 import { sep } from "node:path"
 import { isDeepStrictEqual } from "node:util"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { isAlias, isMap, parseDocument } from "yaml"
 import { lockFile } from "../../lib/file-lock.ts"
 import { GlobalConfigWriteError, updateLotusGlobalConfig } from "../../lib/lotus-global-config-write.ts"
@@ -15,6 +15,8 @@ import { biliPgcQualities } from "./services/bilibili/pgc-playback.ts"
 import { createOfficialLinkSettings, officialLinkToggles, officialLinkTrustFields, parseTrustedOfficialLinkUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
 import { createSummaryModel, parseSummaryModelPatch } from "./services/official-links/summary-model.ts"
 import { createJikeSettings, jikeFields } from "./services/jike/settings.ts"
+import { createPublicShareSettings } from "./services/public-share/settings.ts"
+import { xiguaFields } from "./services/xigua/preview.ts"
 import { createKuaishouSettings, kuaishouFields } from "./services/kuaishou/settings.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
 
@@ -244,6 +246,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
     { id: "pipixia", name: "皮皮虾", fields: pipixiaFields, store: pipixia },
     { id: "kuaishou", name: "快手", fields: kuaishouFields, store: kuaishou },
     { id: "jike", name: "即刻", fields: jikeFields, store: jike },
+    { id: "xigua", name: "西瓜视频", fields: xiguaFields, store: createPublicShareSettings("xigua", "西瓜视频", directory, fileURLToPath(root)) },
   ] as const
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },

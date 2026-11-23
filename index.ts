@@ -18,7 +18,8 @@ type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<voi
 export default { commands: {} } satisfies Pick<CommandModule, "commands">
 
 export async function createModule(services: MediaServices): Promise<MediaCommandModule> {
-  const subscriptions = await createSubscriptionModule(services)
+  const biliVideo = createBilibiliVideoCommands(services)
+  const subscriptions = await createSubscriptionModule({ ...services, quotedBilibiliAuthor: biliVideo.quotedAuthor })
   const maintenance = startMediaMaintenance(services)
   const music = createMusicCommands(services)
   const stopPartner = await createPartnerSchedule(services, {
@@ -29,7 +30,6 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const mcwiki = createMcWikiCommand({ signal: services.signal })
   const douyin = createDouyinCommands(services)
   const biliLogin = createBilibiliLogin(services)
-  const biliVideo = createBilibiliVideoCommands(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
   return {
@@ -39,6 +39,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {
+      const subscriptionFeatures = subscriptions.features(context)
+      if (subscriptionFeatures.length) return subscriptionFeatures
       if (officialVideo.matches(context.normalizedMessage)) return ["[media] 米游社官号视频"]
       if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return ["[media] B 站解析"]
       const features = biliVideo.features(context)

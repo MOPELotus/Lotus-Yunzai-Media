@@ -55,15 +55,16 @@ test("旧 R 配置按字段迁入，显式启用后模型只接收已读取的�
   expect(await runtime.summarize(keywords)).toBe("网页正文的可信摘要。")
   expect(calls).toEqual(["https://active.test/custom/chat/completions"])
   expect(JSON.stringify(await runtime.settings())).not.toContain(fixtureKey)
-  await current({ summaryEnabled: true, summaryMode: "yuanbao" })
+  await current({ summaryEnabled: true, summaryMode: "yuanbao", summaryModel: "research/explicit" })
   await expect(runtime.summarize(keywords)).rejects.toThrow("未选择")
+  expect(await runtime.summarize(keywords, undefined, true)).toBe("网页正文的可信摘要。")
   await current({ summaryEnabled: true, summaryApiKey: null })
   expect((await runtime.settings()).summaryApiKeyConfigured).toBe(false)
   await expect(runtime.summarize(keywords)).rejects.toThrow("尚未配置")
   await current({ summaryEnabled: true, summaryBaseUrl: "https://unrelated.test/v1" })
   expect((await runtime.settings()).summaryApiKeyConfigured).toBe(false)
   await expect(runtime.summarize(keywords)).rejects.toThrow("尚未配置")
-  expect(calls).toHaveLength(1)
+  expect(calls).toHaveLength(2)
 }))
 
 test("面板契约拒绝不安全端点、未知字段和响应状态，密码留空保留、null 才清除", () => {

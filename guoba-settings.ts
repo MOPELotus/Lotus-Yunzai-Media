@@ -235,7 +235,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       bottomHelpMessage: "开启后，支持的公开网页正文会发送给下方配置的模型服务。" },
     { key: "summaryMode", label: "网页总结模式", component: "Select",
       componentProps: { options: [{ label: "通用兼容接口", value: "general" }, { label: "保留旧元宝设置", value: "yuanbao" }] },
-      bottomHelpMessage: "旧元宝模式仍显示原文预览。切换到通用兼容接口后可生成模型摘要。" },
+      bottomHelpMessage: "旧元宝模式使用已启用的通用兼容接口回退。未配置通用模型时显示原文预览。" },
     { key: "summaryBaseUrl", label: "网页总结接口地址", component: "Input" },
     { key: "summaryModel", label: "网页总结模型名", component: "Input" },
     { key: "summaryApiKey", label: "网页总结 API 密钥", component: "InputPassword" },

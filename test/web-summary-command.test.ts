@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { sendCommandReply, type MessageFallbackContext } from "../../../lib/commands.ts"
+import { maxSummaryInput } from "../services/official-links/summary-model.ts"
 import { createWebSummary } from "../services/web-summary/command.ts"
 
 const url = "https://arxiv.org/abs/1706.03762v1"
@@ -54,4 +55,29 @@ test("模型失败只展示核验过的原文，读取错编号时直接保留�
   response = new Response("other", { headers: { "Content-Type": "text/html" } })
   expect(await command.fallback(url, event(url))).toBe(`暂无法读取公开原文。\n${url}`)
   expect(called).toBe(1)
+})
+
+test("长帖按模型上限摘要并说明范围，旧元宝只回退到管理员启用的通用服务", async () => {
+  const post = "https://www.v2ex.com/t/123"
+  const node = { id: 123, url: post, title: "长帖子", member: { username: "作者" }, content: "文".repeat(maxSummaryInput + 501) }
+  let enabled = true, calls = 0
+  const command = createWebSummary({ settings: async () => links, fetcher: async () => Response.json([node]),
+    render: async () => { throw new Error("未启用时回退正文") },
+    model: { settings: async () => ({ ...summaryConfig, summaryEnabled: enabled, summaryMode: "yuanbao" }),
+      summarize: async ({ text }, _, fallback) => {
+        calls++
+        expect(fallback).toBe(true)
+        expect(text).toBe("文".repeat(maxSummaryInput))
+        return "可核对的摘要"
+      },
+    },
+  })
+  const result = await command.fallback(post, event(post))
+  expect(result).toMatchObject({ type: "forward", nodes: [
+    "《长帖子》 · 原文 24501 字 · 预计阅读 50 分钟", "作者", "本次使用已配置的通用模型生成摘要。",
+    "摘要依据开头 24000 字，完整内容请查看原文。", "可核对的摘要", post,
+  ] })
+  enabled = false
+  expect(await command.fallback(post, event(post))).toContain(post)
+  expect(calls).toBe(1)
 })

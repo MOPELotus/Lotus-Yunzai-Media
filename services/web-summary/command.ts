@@ -3,7 +3,7 @@ import { renderTemplate } from "../../core/render/service.ts"
 import { messageLinkValues } from "../official-links/command.ts"
 import { createOfficialLinkSettings } from "../official-links/settings.ts"
 import { getV2exArticle, parseOfficialLink, type OfficialLink, type OfficialLinkFetch } from "../official-links/source.ts"
-import { createSummaryModel } from "../official-links/summary-model.ts"
+import { createSummaryModel, maxSummaryInput } from "../official-links/summary-model.ts"
 import { getArxiv, parseArxiv, type ArxivTarget } from "./arxiv.ts"
 import { getOfficialArticle, parseOfficialArticle } from "./official-article.ts"
 
@@ -35,11 +35,14 @@ async function getArticle(target: Source, fetcher: OfficialLinkFetch, signal: Ab
   return getOfficialArticle(target, fetcher, signal)
 }
 
-function summaryReply(title: string, owner: string | undefined, text: string, source: string, original: string): CommandForward {
+function summaryReply(title: string, owner: string | undefined, text: string, source: string, original: string, excerpt: string,
+  yuanbaoFallback: boolean): CommandForward {
   const chars = Array.from(text)
   const units = Array.from(original).length
   const minutes = Math.max(1, Math.ceil(units / 500))
   const nodes = [`《${title}》 · 原文 ${units} 字 · 预计阅读 ${minutes} 分钟`, ...(owner ? [owner] : [])]
+  if (yuanbaoFallback) nodes.push("本次使用已配置的通用模型生成摘要。")
+  if (excerpt.length < original.length) nodes.push(`摘要依据开头 ${Array.from(excerpt).length} 字，完整内容请查看原文。`)
   for (let offset = 0; offset < chars.length; offset += 900) nodes.push(chars.slice(offset, offset + 900).join(""))
   nodes.push(source)
   return { type: "forward", nodes }
@@ -75,10 +78,12 @@ export function createWebSummary({
       if (active.aborted) return []
       if (!article) return `暂无法读取公开原文。\n${target.link}`
       const configuration = await model.settings().catch(() => undefined)
-      if (article.text && configuration?.summaryEnabled && configuration.summaryMode === "general" && !active.aborted) {
+      if (article.text && configuration?.summaryEnabled && !active.aborted) {
         try {
-          const summary = await model.summarize({ title: article.title, text: article.text }, active)
-          if (!active.aborted && summary) return summaryReply(article.title, article.owner, summary, article.link, article.text)
+          const fallback = configuration.summaryMode === "yuanbao"
+          const excerpt = article.text.slice(0, maxSummaryInput).toWellFormed()
+          const summary = await model.summarize({ title: article.title.slice(0, 500).toWellFormed(), text: excerpt }, active, fallback)
+          if (!active.aborted && summary) return summaryReply(article.title, article.owner, summary, article.link, article.text, excerpt, fallback)
         } catch { if (active.aborted) return [] }
       }
       if (active.aborted) return []

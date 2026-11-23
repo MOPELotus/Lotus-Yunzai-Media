@@ -29,7 +29,7 @@ const biliDefaults = { ...defaults, liveAtAll: 0, liveAtAllGroupList: [], liveAt
   liveAtAllErrMsg: 1, parseVideoLink: 1, sharedBiliLogin: 1, biliPgcAuto: false, biliPgcQuality: 32, biliPgcDuration: 1800 }
 const weiboDefaults = { ...defaults, getDataRandomDelay: 4000, parseWeiboLink: 1, parseWeiboPrivate: 0 }
 const shareDefaults = { enable: true, private_preview: false }
-const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults, wxchannels: shareDefaults, xhs: shareDefaults }
+const publicShareDefaults = { acfun: shareDefaults, weishi: shareDefaults, zuiyou: shareDefaults, wxchannels: shareDefaults, xhs: shareDefaults, xhh: shareDefaults }
 const pipixiaDefaults = { enable: true, private: false }
 const officialLinksDefaults = { youtube: true, youtubeMusic: true, telegram: true, v2ex: true, articles: true, x: true, private: false, trustedTelegramUsers: [], trustedXUsers: [], summaryEnabled: false, summaryMode: "general", summaryBaseUrl: "", summaryModel: "" }
 const videoDefaults = { forwardMsg: true, cover: false, bh3: false, by: false, xbgd: false, groups: [], group_config: [] }

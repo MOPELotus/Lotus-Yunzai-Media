@@ -19,6 +19,7 @@ import { createPublicShareCommands } from "./services/public-share/command.ts"
 import { createWeixinChannelsPreview } from "./services/weixin-channels/preview.ts"
 import { createOfficialLinkPreview } from "./services/official-links/command.ts"
 import { createWebSummary } from "./services/web-summary/command.ts"
+import { createHeyboxPreview } from "./services/heybox/preview.ts"
 import { createXiaohongshuPreview } from "./services/xiaohongshu/preview.ts"
 import { createXiguaPreview } from "./services/xigua/preview.ts"
 import { createQqWorldNotice } from "./services/public-share/qq-world.ts"
@@ -29,6 +30,7 @@ type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
     readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal">
     readonly webSummary?: Pick<NonNullable<Parameters<typeof createWebSummary>[0]>, "model" | "publicPage">
     readonly biliVideo?: Pick<Parameters<typeof createBilibiliVideoCommands>[0], "fetch" | "settings">
+    readonly heybox?: Omit<NonNullable<Parameters<typeof createHeyboxPreview>[0]>, "signal">
     readonly xiaohongshu?: Omit<NonNullable<Parameters<typeof createXiaohongshuPreview>[0]>, "signal">
     readonly xigua?: Omit<NonNullable<Parameters<typeof createXiguaPreview>[0]>, "signal">
     readonly biliPgc?: Omit<Parameters<typeof createBiliPgcPreview>[0], "signal">
@@ -55,6 +57,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const pipixia = createPipixiaCommands(services)
   const kuaishou = createKuaishouCommands(services)
   const jike = createJikeCommands(services)
+  const heybox = createHeyboxPreview({ ...services.heybox, signal: services.signal })
   const xiaohongshu = createXiaohongshuPreview({ ...services.xiaohongshu, signal: services.signal })
   const xigua = createXiguaPreview({ ...services.xigua, signal: services.signal })
   const qqWorld = createQqWorldNotice({ signal: services.signal })
@@ -102,6 +105,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (xiguaFeatures.length) return xiguaFeatures
       const xhsFeatures = xiaohongshu.features(context)
       if (xhsFeatures.length) return xhsFeatures
+      const heyboxFeatures = heybox.features(context)
+      if (heyboxFeatures.length) return heyboxFeatures
       const qqWorldFeatures = qqWorld.features(context)
       if (qqWorldFeatures.length) return qqWorldFeatures
       const shortVideoFeatures = douyin.features(context)
@@ -119,7 +124,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await weixinChannels.fallback(message, context) ?? await music.fallback(message, context) ??
         await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ?? await xigua.fallback(message, context) ?? await xiaohongshu.fallback(message, context) ??
-        await qqWorld.fallback(message, context) ?? await douyin.fallback(message, context) ??
+        await heybox.fallback(message, context) ?? await qqWorld.fallback(message, context) ?? await douyin.fallback(message, context) ??
         await webSummary.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }

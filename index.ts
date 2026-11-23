@@ -8,9 +8,10 @@ import { createPartnerSchedule } from "./services/music/partner-schedule.ts"
 import { createSubscriptionModule } from "./services/subscriptions/module.ts"
 import { startMediaMaintenance } from "./services/tuneweave/startup.ts"
 import { createMediaEnvironment } from "./services/tools/command.ts"
+import { createOfficialVideoCommands } from "./services/official-video/index.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
-  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0]
+  Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0]
 
 type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<void> }
 
@@ -30,13 +31,15 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const biliLogin = createBilibiliLogin(services)
   const biliVideo = createBilibiliVideoCommands(services)
   const environment = createMediaEnvironment(services)
+  const officialVideo = createOfficialVideoCommands(services)
   return {
     ...subscriptions,
     async dispose() {
-      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), biliVideo.dispose(), music.dispose()])
+      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), biliVideo.dispose(), music.dispose(), officialVideo.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
     fallbackFeatures(context) {
+      if (officialVideo.matches(context.normalizedMessage)) return ["[media] 米游社官号视频"]
       if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return ["[media] B 站解析"]
       const features = biliVideo.features(context)
       if (features.length) return features
@@ -44,6 +47,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       return songFeatures.length ? songFeatures : douyin.features(context)
     },
     async fallback(message, context) {
+      if (officialVideo.matches(context.normalizedMessage)) return officialVideo.fallback(context.normalizedMessage, context)
       if (message.startsWith("#mcwiki") && /^\S/u.test(message.slice(7))) return mcwiki(message.slice(7))
       if (message === biliLogin.command) return biliLogin.fallback(message, context)
       if (environment.matches(message)) return environment.fallback(message, context)

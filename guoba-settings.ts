@@ -2,6 +2,7 @@ import { Job } from "node-schedule"
 import { lockFile } from "../../lib/file-lock.ts"
 import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
+import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
 
 import type { SubscriptionPlatform } from "./services/subscriptions/types.ts"
 
@@ -87,6 +88,37 @@ function fieldValue(field: SettingsField, settings: SubscriptionSettings) {
   return field.component === "EasyCron" || field.tags ? value : Number(value)
 }
 
+const officialVideoToggles = [
+  ["forwardMsg", "合并转发"], ["cover", "使用封面原图"], ["bh3", "包含崩坏3"],
+  ["by", "包含崩坏因缘精灵"], ["xbgd", "包含星布谷地"],
+] as const
+const officialVideoTags = [
+  ["groups", "定时推送群", "每行填写一个群号。留空时只提供手动查询。"],
+  ["group_config", "群聊屏蔽的游戏", "按「群号: gs, sr」填写。游戏代号为 gs、sr、zzz、bh3、by、xbgd。"],
+] as const
+
+function officialVideoPatch(values: Readonly<Record<string, unknown>>, edited: ReadonlySet<string> | undefined) {
+  const patch: Record<string, boolean | readonly string[]> = {}
+  for (const [key] of officialVideoToggles) {
+    const name = `officialVideo.${key}`
+    if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
+    if (typeof values[name] !== "boolean") return
+    patch[key] = values[name]
+  }
+  for (const [key] of officialVideoTags) {
+    const name = `officialVideo.${key}`
+    if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
+    const value = values[name]
+    if (!Array.isArray(value) || value.length > 1000 || !value.every(row => typeof row === "string")) return
+    if (key === "groups" ? !value.every(row => numericId(row)) : !value.every(row => {
+      const [group, ...games] = row.split(/[:：,，\s]+/u).filter(Boolean)
+      return numericId(group) && games.length && games.every(game => Object.hasOwn(officialVideoGames, game))
+    })) return
+    patch[key] = value
+  }
+  return patch
+}
+
 function submittedValue(field: SettingsField, value: unknown): FieldInput | undefined {
   if (field.tags) {
     if (!Array.isArray(value) || !value.every(word => typeof word === "string")) return
@@ -119,12 +151,12 @@ function changed(field: SettingsField, value: FieldInput, settings: Subscription
   return before !== value
 }
 
-export function supportGuoba(directory = dataPath) {
+export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory)) {
   const config = createSubscriptionConfig(directory, lockFile)
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
     configInfo: {
-      schemas: platforms.flatMap(({ id, label: platform, fields }) => [
+      schemas: [...platforms.flatMap(({ id, label: platform, fields }) => [
         { component: "SOFT_GROUP_BEGIN", label: `${platform}动态推送` },
         ...fields.map(({ key, label, options, min, max, help, component, tags }) => ({
           field: `${id}.${key}`,
@@ -134,16 +166,24 @@ export function supportGuoba(directory = dataPath) {
           componentProps: tags ? { mode: "tags" } : options ? { options: options.map((label, value) => ({ label, value })) }
             : max !== undefined ? { min: min ?? 0, max, step: 1 } : undefined,
         })),
-      ]),
+      ]), { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },
+      ...officialVideoToggles.map(([key, label]) => ({ field: `officialVideo.${key}`, label, component: "Switch" })),
+      ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
+        component: "Select", componentProps: { mode: "tags" } }))],
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
           return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
-        return Object.fromEntries(entries)
+        const videos = await officialVideo.settings()
+        return { ...Object.fromEntries(entries), officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
+          groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
+            .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
       },
       async setConfigData<Result>(values: Readonly<Record<string, unknown>>, { Result, changedFields }: GuobaContext<Result>) {
         const edited = Array.isArray(changedFields) ? new Set(changedFields) : undefined
+        const videoPatch = officialVideoPatch(values, edited)
+        if (!videoPatch) return Result.error("请填写有效的米游社官号视频设置。", 422)
         const changes = new Map<SubscriptionPlatform, { field: SettingsField; value: FieldInput }[]>()
         for (const { id, label, fields } of platforms) {
           const selected = []
@@ -163,6 +203,7 @@ export function supportGuoba(directory = dataPath) {
             .filter(({ field, value }) => changed(field, value, settings))
             .map(({ field, value }) => [field.key, value])))
         }
+        if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
         return Result.ok()
       },
     },

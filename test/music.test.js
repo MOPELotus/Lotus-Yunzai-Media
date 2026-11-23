@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import YAML from "yaml"
 import { MusicService, musicSessionKey, musicShare } from "../services/music/service.ts"
+import { createMusicCommands } from "../services/music/command.ts"
 import { readMusicAccounts, saveMusicAccount } from "../services/music/accounts.ts"
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.ts"
 import { TuneWeaveService } from "../services/tuneweave/service.ts"
@@ -60,15 +61,34 @@ test("合伙人日志按原先顺序投影账号和逐首结果，避开未筛�
   expect(many(99).at(-1).text).toContain("仅显示前 99 条")
 })
 
-test("点歌会话按机器人、群或私聊、发起人隔离", () => {
-  const subject = {self_id:99,user_id:42,group_id:77}
-  expect(musicSessionKey(subject)).toBe("99:77:42")
+test("点歌会话按协议、机器人、群或私聊、发起人隔离", () => {
+  const subject = {adapter:undefined,message_type:"group",self_id:99,user_id:42,group_id:77}
+  expect(musicSessionKey(subject)).toBe("onebot:99:group:77:42")
   expect(new Set([
     musicSessionKey(subject),
     musicSessionKey({...subject,self_id:98}),
-    musicSessionKey({...subject,group_id:undefined}),
+    musicSessionKey({...subject,group_id:78}),
     musicSessionKey({...subject,user_id:43}),
-  ]).size).toBe(4)
+    musicSessionKey({...subject,adapter:"milky"}),
+    musicSessionKey({...subject,message_type:"private",group_id:undefined}),
+    musicSessionKey({...subject,message_type:"terminal",group_id:undefined}),
+  ]).size).toBe(7)
+})
+
+test("同号 Milky 私聊不能取消 OneBot 的音乐扫码菜单", async () => {
+  const api = { platforms: async () => [{ id: "netease", name: "网易云音乐", capabilities: ["qr_login"] }] }
+  const music = createMusicCommands({ openMusic: async () => ({ api, defaultPlatform: "netease", timeoutMs: 120000 }) })
+  const onebot = { message_type: "private", self_id: 99, user_id: 42,
+    canManagePackages: true, privateCredentialSignal: new AbortController().signal }
+  const milky = { ...onebot, adapter: "milky" }
+  try {
+    expect(await music.fallback("#音乐登录", onebot)).toContain("请选择扫码平台")
+    expect(music.features({ ...milky, normalizedMessage: "#取消" })).toEqual([])
+    expect(await music.fallback("#取消", milky)).toBeUndefined()
+    expect(await music.fallback("#取消", onebot)).toBe("已取消本次音乐操作。")
+  } finally {
+    await music.dispose()
+  }
 })
 
 test("搜歌只取所选平台的曲目，播放回退保留卡片的原平台", async () => {

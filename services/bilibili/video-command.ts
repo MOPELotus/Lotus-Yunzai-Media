@@ -94,7 +94,7 @@ function videoAction(message: string, context: MessageFallbackContext): VideoAct
 }
 
 function sessionKey(context: MessageFallbackContext) {
-  return [context.self_id, context.message_type, context.group_id, context.user_id].join(":")
+  return [context.adapter ?? "onebot", context.self_id, context.message_type, context.group_id, context.user_id].join(":")
 }
 
 function quoteScope(context: MessageFallbackContext) {

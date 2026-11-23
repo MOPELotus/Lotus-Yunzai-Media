@@ -74,10 +74,12 @@ type ProbeResult = { format?: { duration?: string | number }; streams?: { codec_
 type DownloadRequest = { headers?: Record<string, string>; signal?: AbortSignal }
 
 export const musicSessionKey = (e: {
+  readonly adapter?: "milky"
+  readonly message_type: "group" | "private" | "terminal"
   readonly self_id?: number | string
   readonly group_id?: number | string
   readonly user_id?: number | string
-}) => `${e.self_id || ""}:${e.group_id || "private"}:${e.user_id}`
+}) => [e.adapter ?? "onebot", e.self_id, e.message_type, e.group_id, e.user_id].join(":")
 export const musicLoginTimeout = (platform: string) => platform === "netease" ? 300000 : 180000
 export class MusicService {
   readonly tuneweave: NonNullable<MusicServiceOptions["tuneweave"]>

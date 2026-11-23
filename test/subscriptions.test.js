@@ -34,6 +34,32 @@ function raw(type=draw,fields={}) {
     modules:{module_author:{mid:uid,pub_ts:seen,name:"试验发布者"},module_dynamic:fields} }
 }
 
+test("同号 Milky 群不能翻页或选择 OneBot 的 B 站搜索结果", async () => {
+  const bvid = "BV1dAxE6VErW"
+  const offsets = []
+  const replies = []
+  const api = createBilibiliVideoCommands({ async fetch(input) {
+    const url = new URL(input)
+    expect(url.pathname).toBe("/v1/search")
+    offsets.push(url.searchParams.get("offset"))
+    return Response.json({ ok: true, data: [{ type: "video", data: { id: bvid, title: "测试视频" } }] })
+  } })
+  const onebot = { message_type: "group", self_id: 99, user_id: 42, group_id: 77,
+    reply: async value => { replies.push(value); return true } }
+  const milky = { ...onebot, adapter: "milky" }
+  try {
+    expect(await api.fallback("#点B站视频 测试", onebot)).toEqual([])
+    expect(offsets).toEqual(["0"])
+    expect(replies.at(-1)).toMatchObject({ type: "image" })
+    expect(await api.fallback("#B站下一页", milky)).toContain("请先发送")
+    expect(await api.fallback("#看B站视频 1", milky)).toContain("搜索结果已过期")
+    expect(await api.fallback("#B站下一页", onebot)).toEqual([])
+    expect(offsets).toEqual(["0", "42"])
+  } finally {
+    await api.dispose()
+  }
+})
+
 test("引用已确认送达的同群 B 站动态可取原图，图片字节独立验限", async () => {
   const image = "https://i0.hdslb.com/bfs/new_dyn/example.png"
   const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7LQMcAAAAASUVORK5CYII=", "base64")

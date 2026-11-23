@@ -22,7 +22,7 @@ function loginRequired(platform: RefreshPlatform) {
   const message = platform === "kuwo" || platform === "migu"
     ? "此平台需要绑定账号的主人先在 TuneWeave 登录，并完成公共音乐账号绑定。"
     : "请由绑定账号的主人在当前好友私聊使用 #音乐登录 重新扫码。"
-  return Object.assign(new Error(message), { code: "authentication_required" })
+  return Object.assign(new Error(message), { code: "authentication_required", platform })
 }
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 export function musicAuthenticationRequired(error: unknown, platform?: string) {
@@ -153,36 +153,71 @@ export async function ownMusicStatus(api: MusicService, platform: PrivatePlatfor
   return verify(api, await binding(api, platform, owner, signal), signal)
 }
 
+async function withQqRenewal<T>(api: MusicService, expected: Binding, signal: AbortSignal,
+  action: (account: Binding) => Promise<T>) {
+  await assertCurrent(api, expected, signal)
+  try {
+    return { result: await action(expected), binding: expected, renewed: false }
+  } catch (error) {
+    // Only QQ routes are passed here. Older responses can omit platform.
+    if (!musicAuthenticationRequired(error) ||
+        error && typeof error === "object" && "platform" in error && error.platform !== undefined && error.platform !== "qq") throw error
+    const profile = await refreshMusicBinding(api, expected, signal)
+    const current = await binding(api, "qq", expected.owner, signal)
+    if (current.alias !== expected.alias || current.uid !== expected.uid ||
+        current.saved.credential !== profile.caller_credential?.value) throw new Error("音乐账号已变更，请重新查询。")
+    return { result: await action(current), binding: current, renewed: true }
+  }
+}
+
 export async function readQqCollection(api: MusicService, kind: MusicCollection, owner: number, page: number, signal: AbortSignal) {
-  let expected = await binding(api, "qq", owner, signal)
+  const expected = await binding(api, "qq", owner, signal)
   const limit = kind === "radio" ? 5 : kind === "daily" || page === 0 ? 30 : 10
   const offset = kind === "favorites" ? Math.max(0, page - 1) * limit : 0
   const route = kind === "radio" ? "/v1/recommendations/tracks?platform=qq&source=personalized&limit=5" :
     kind === "daily" ? `/v1/playlists/${encodeURIComponent("qq:dir:202")}/tracks?limit=${limit}&offset=0` :
       `/v1/account/favorites/tracks?platform=qq&limit=${limit}&offset=${offset}`
-  async function load() {
-    await verify(api, expected, signal)
-    const items = await accountRequest<MusicTrack[]>(api, expected, route, signal)
-    await verify(api, expected, signal)
+  const result = await withQqRenewal(api, expected, signal, async current => {
+    await verify(api, current, signal)
+    const items = await accountRequest<MusicTrack[]>(api, current, route, signal)
+    await verify(api, current, signal)
     if (!Array.isArray(items) || items.some(item => !isQqTrack(item))) throw new Error("QQ 音乐未返回可核实的歌曲。")
     return items.slice(0, limit)
-  }
-  try { return { tracks: await load(), binding: expected } }
-  catch (error) {
-    if (errorCode(error) !== "authentication_required") throw error
-    await refreshMusicBinding(api, expected, signal)
-    const renewed = await binding(api, "qq", owner, signal)
-    if (renewed.alias !== expected.alias || renewed.uid !== expected.uid) throw new Error("音乐账号已变更，请重新查询。")
-    expected = renewed
-    return { tracks: await load(), binding: expected }
-  }
+  })
+  return { tracks: result.result, binding: result.binding }
 }
 
-export async function openOwnQqStream(api: MusicService, expected: Binding, track: MusicTrack, signal: AbortSignal) {
-  await verify(api, expected, signal)
-  const stream = checkStream(track, await accountRequest<MusicStream>(api, expected, streamRoute(track, api), signal))
-  await verify(api, expected, signal)
-  return stream
+export async function prepareOwnQqTrack(api: MusicService, expected: Binding, track: MusicTrack, signal: AbortSignal,
+  onPreparing: () => Promise<void>) {
+  let announced = false
+  const prepared = await withQqRenewal(api, expected, signal, async current => {
+    await verify(api, current, signal)
+    const stream = checkStream(track, await accountRequest<MusicStream>(api, current, streamRoute(track, api), signal))
+    await verify(api, current, signal)
+    if (!announced) {
+      announced = true
+      await onPreparing()
+    }
+    const media = await api.prepareStream(track, stream, { signal })
+    try {
+      await verify(api, current, signal)
+      return media
+    } catch (error) {
+      await api.cleanup(media)
+      throw error
+    }
+  })
+  let current = prepared.binding
+  let renewed = prepared.renewed
+  return { media: prepared.result, async verifyDelivery() {
+    if (renewed) {
+      await verify(api, current, signal)
+      return
+    }
+    const checked = await withQqRenewal(api, current, signal, account => verify(api, account, signal))
+    current = checked.binding
+    renewed = checked.renewed
+  } }
 }
 
 export async function verifyQqSelection(api: MusicService, expected: Binding, signal: AbortSignal) {

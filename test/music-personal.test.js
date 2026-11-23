@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { CommandRegistry } from "../../../lib/commands.ts"
@@ -142,3 +142,112 @@ test("网易云续期严格用本人历史账号别名，账号变更或取消�
     expect(called).toBe(3)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test("QQ 私人列表选歌前、播放过程中和发送语音前到期共用一次续期", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lotus-qq-play-renewal-"))
+  const accountsFile = join(root, "accounts.yaml")
+  const tasksDir = join(root, "tasks")
+  const localAudio = Bun.spawnSync(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "1", "-f", "wav", "pipe:1"])
+  expect(localAudio.exitCode).toBe(0)
+  const original = { alias: "lotus-music-qq", owner: 42, uid: "909", credential: "twc1_initial" }
+  const other = { alias: "lotus-music-qq-other", owner: 42, uid: "333", credential: "twc1_other" }
+  const loginExpired = () => Object.assign(new Error("合成到期"), { code: "authentication_required", platform: "qq" })
+  let scenario, expired, renewals, streams, downloads, cards, checksAfterDownload
+  const commandReplies = [], voice = []
+  const api = new MusicService({ accountsFile, tasksDir, tuneweave: { config: { api_url: "http://127.0.0.1:7337" },
+    async request(path, options) {
+      const route = new URL(path, "http://127.0.0.1:7337")
+      expect(options.accountSelection).toEqual({ platform: "qq", alias: original.alias })
+      const data = { platform: "qq", account: original.alias, authenticated: true, user_id: original.uid }
+      if (route.pathname === "/v1/auth/session/refresh") {
+        renewals++
+        expect(options.body).toEqual({ platform: "qq", account: original.alias, credential_mode: "both" })
+        expect(options.credentials).toEqual([original.credential])
+        if (scenario === "rebind") await saveMusicAccount("qq", other, { file: accountsFile })
+        expired = false
+        return { accountSelected: true, data: { ...data, caller_credential: { platform: "qq", value: "twc1_next" } } }
+      }
+      expect(route.searchParams.get("account")).toBe(original.alias)
+      expect(options.credentials).toBeUndefined()
+      if (route.pathname === "/v1/account") {
+        if (downloads > 0 && ++checksAfterDownload === 2) {
+          if (scenario === "before-image") await saveMusicAccount("qq", other, { file: accountsFile })
+          if (scenario === "before-card" || scenario === "before-and-after-card") throw loginExpired()
+        }
+        if (expired) throw loginExpired()
+        return { accountSelected: true, data }
+      }
+      if (route.pathname === "/v1/account/favorites/tracks") return { accountSelected: true, data: [{ ...song, album: { cover_url: "https://audio.example.test/cover.jpg" } }] }
+      expect(decodeURIComponent(route.pathname)).toBe(`/v1/tracks/${song.ref}/stream`)
+      expect(route.searchParams.get("fallback")).toBe("false")
+      expect(route.searchParams.get("unblock")).toBe("false")
+      streams++
+      if (scenario === "other-platform") throw Object.assign(loginExpired(), { platform: "netease" })
+      if ((scenario === "stream" && streams === 1) || scenario === "retry-fails") throw loginExpired()
+      return { accountSelected: true, data: { url: "https://audio.example.test/fixture.wav", duration_ms: 1000,
+        resolved_platform: "qq", origin_track: song.ref, resolved_track: song.ref } }
+    },
+  }, async fetch(url) {
+    expect(String(url)).toBe("https://audio.example.test/fixture.wav")
+    downloads++
+    if ((scenario === "download" || scenario === "twice") && downloads === 1) expired = true
+    return new Response(localAudio.stdout, { headers: { "content-type": "audio/wav", "content-length": String(localAudio.stdout.length) } })
+  } })
+  const command = createMusicCommands({ openMusic: async () => ({ api, defaultPlatform: "netease", timeoutMs: 120_000 }) })
+  const context = { message_type: "private", canManagePackages: true, self_id: 99, user_id: 42,
+    privateCredentialSignal: new AbortController().signal,
+    reply: async message => { commandReplies.push(message); return true },
+    sendMusicCard: async () => {
+      cards++
+      if (["after-card", "twice", "before-and-after-card"].includes(scenario)) expired = true
+      return "confirmed"
+    },
+    deliverMedia: async item => {
+      expect(await Bun.file(item.path).exists()).toBe(true)
+      voice.push(item.name)
+      return "confirmed"
+    } }
+  try {
+    for (scenario of ["before-selection", "stream", "download", "after-card", "twice", "rebind", "retry-fails",
+      "before-card", "before-and-after-card", "before-image", "other-platform"]) {
+      expired = false
+      renewals = streams = downloads = cards = checksAfterDownload = commandReplies.length = voice.length = 0
+      await saveMusicAccount("qq", original, { file: accountsFile })
+      expect(await command.fallback("我的收藏", context)).toEqual([])
+      expect(renewals).toBe(0)
+      expired = scenario === "before-selection" || scenario === "rebind"
+      const response = await command.fallback("1", scenario === "before-image" ? { ...context, sendMusicCard: undefined } : context)
+      expect(renewals).toBe(["before-image", "other-platform"].includes(scenario) ? 0 : 1)
+      expect(await command.fallback("1", context)).toBeUndefined()
+      expect(await readdir(tasksDir)).toEqual([])
+      const stored = (await readMusicAccounts(accountsFile)).qq
+      if (scenario === "rebind" || scenario === "retry-fails") {
+        expect(streams).toBe(scenario === "rebind" ? 0 : 2)
+        expect(voice).toEqual([])
+        expect(downloads).toBe(0)
+        expect(response).toContain(scenario === "rebind" ? "账号已变更" : "合成到期")
+        expect(stored).toEqual(scenario === "rebind" ? other : { ...original, credential: "twc1_next" })
+      } else if (scenario === "before-image" || scenario === "other-platform") {
+        expect(voice).toEqual([])
+        expect(cards).toBe(0)
+        expect(commandReplies.filter(message => message?.type === "image")).toHaveLength(1)
+        expect(response).toContain(scenario === "before-image" ? "账号已变更" : "合成到期")
+        expect(stored).toEqual(scenario === "before-image" ? other : original)
+      } else if (scenario === "twice" || scenario === "before-and-after-card") {
+        expect(cards).toBe(1)
+        expect(streams).toBe(scenario === "twice" ? 2 : 1)
+        expect(downloads).toBe(scenario === "twice" ? 2 : 1)
+        expect(response).toContain("合成到期")
+        expect(voice).toEqual([])
+      } else {
+        expect(response).toEqual([])
+        expect(cards).toBe(1)
+        expect(voice).toEqual(["示例歌曲.wav"])
+        expect(downloads).toBe(scenario === "download" ? 2 : 1)
+        expect(streams).toBe(["before-selection", "after-card", "before-card"].includes(scenario) ? 1 : 2)
+        expect(commandReplies.filter(message => typeof message === "string" && message.startsWith("正在获取"))).toHaveLength(1)
+        expect(stored).toEqual({ ...original, credential: "twc1_next" })
+      }
+    }
+  } finally { await command.dispose(); await rm(root, { recursive: true, force: true }) }
+}, 30_000)

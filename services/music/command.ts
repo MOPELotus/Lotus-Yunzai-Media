@@ -15,7 +15,7 @@ import { cloudHelp, createCloudCommands } from "./cloud-command.ts"
 import { episodeSelectionFromTrack, neteaseEpisodePage, type VoiceSearchSelection } from "./episode.ts"
 import { readPartnerLog, partnerLogNodes } from "./partner-log.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
-import { openOwnQqStream, openPublicQqStream, ownMusicStatus, readQqCollection, recommendQqSong, refreshOwnMusicAccount, verifyQqSelection, type MusicCollection, type RefreshPlatform } from "./personal.ts"
+import { openPublicQqStream, ownMusicStatus, prepareOwnQqTrack, readQqCollection, recommendQqSong, refreshOwnMusicAccount, verifyQqSelection, type MusicCollection, type RefreshPlatform } from "./personal.ts"
 import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicStream, type MusicTrack, type MusicConfig } from "./service.ts"
 import { findMusicShare, parseMusicShare, resolveMusicShare } from "./share-link.ts"
 import { externalMusicLabels, readExternalMusicShare } from "./external-share.ts"
@@ -337,10 +337,12 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     throw new Error("语音发送失败。")
   }
 
-  async function sendTrackInfo(context: Context, track: MusicTrack, media: Prepared, active = moduleSignal) {
+  async function sendTrackInfo(context: Context, track: MusicTrack, media: Prepared, active = moduleSignal,
+    verify?: () => Promise<void>) {
     active.throwIfAborted()
     const share = musicShare(track, media.stream)
     if (share && context.sendMusicCard) {
+      await verify?.()
       const result = await context.sendMusicCard(share.data)
       if (result === "confirmed") return
       if (result === "unknown") {
@@ -356,6 +358,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       items: [{ label: "实际音源", value: musicNames[media.stream.resolved_platform ?? ""] || media.stream.resolved_platform || musicNames[track.platform] }],
     }).catch(() => undefined)
     active.throwIfAborted()
+    await verify?.()
     if (program && image && await reply(context, { type: "image", file: image })) {
       active.throwIfAborted()
       await reply(context, program)
@@ -364,15 +367,18 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     else await imageReply(context, image, fallback)
   }
 
-  async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream, active = moduleSignal,
-    verify?: () => Promise<void>) {
+  async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream, active = moduleSignal) {
     active.throwIfAborted()
     await reply(context, `正在获取《${track.name}》完整音源…`)
     const media = stream ? await api.prepareStream(track, stream, { signal: active }) : await api.prepare(track, { signal: active })
+    await sendPreparedTrack(context, api, track, media, active)
+  }
+
+  async function sendPreparedTrack(context: Context, api: MusicService, track: MusicTrack, media: Prepared, active: AbortSignal,
+    verify?: () => Promise<void>) {
     try {
       active.throwIfAborted()
-      await verify?.()
-      await sendTrackInfo(context, track, media, active)
+      await sendTrackInfo(context, track, media, active, verify)
       await verify?.()
       await sendVoice(context, media, active)
     } finally { await api.cleanup(media) }
@@ -761,9 +767,11 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         if (session.collection && track && session.binding && friend) {
           drop(key, session)
           const active = AbortSignal.any([moduleSignal, friend])
-          const binding = session.binding
-          const stream = await openOwnQqStream(session.api, binding, track, active)
-          await playMedia(context, session.api, track, stream, active, () => verifyQqSelection(session.api, binding, active))
+          const { media, verifyDelivery } = await prepareOwnQqTrack(session.api, session.binding, track, active, async () => {
+            active.throwIfAborted()
+            await reply(context, `正在获取《${track.name}》完整音源…`)
+          })
+          await sendPreparedTrack(context, session.api, track, media, active, verifyDelivery)
           return []
         }
         if (session.multiple && track) {

@@ -52,13 +52,25 @@ export async function verifyNeteaseAccount(api: Pick<MusicService, "tuneweave">,
   const result = await api.tuneweave.request<TuneWeaveQrProfile>(route, { signal, redirect: "error",
     accountSelection: { platform: "netease", alias } })
   signal?.throwIfAborted()
-  const profile = result.data
-  if (!result.accountSelected || profile?.platform !== "netease" || profile.account !== alias) {
+  return checkedProfile(result.data, result.accountSelected, alias, uid)
+}
+
+function checkedProfile(profile: TuneWeaveQrProfile | undefined, accountSelected: boolean, alias: string, uid: string) {
+  if (!accountSelected || profile?.platform !== "netease" || profile.account !== alias) {
     throw new Error("TuneWeave 未确认选用的网易云账号。")
   }
+  if (profile.user_id != null && String(profile.user_id) !== uid) throw new Error("网易云账号不一致，请使用 #音乐重新登录 核实。")
   if (profile.authenticated === false) {
     throw Object.assign(new Error("网易云登录已过期，请在当前好友私聊重新扫码。"), { code: "authentication_required" })
   }
   if (profile.authenticated !== true || String(profile.user_id) !== uid) throw new Error("网易云账号不一致，请使用 #音乐重新登录 核实。")
   return profile
+}
+
+export async function refreshServerNeteaseAccount(api: Pick<MusicService, "tuneweave">, account: OwnedNeteaseAccount, signal: AbortSignal) {
+  const { alias, uid } = account
+  const result = await api.tuneweave.request<TuneWeaveQrProfile>("/v1/auth/session/refresh", { method: "POST", signal, redirect: "error",
+    body: { platform: "netease", account: alias, credential_mode: "server" }, accountSelection: { platform: "netease", alias } })
+  signal.throwIfAborted()
+  return checkedProfile(result.data, result.accountSelected, alias, uid)
 }

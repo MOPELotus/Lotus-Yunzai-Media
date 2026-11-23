@@ -241,6 +241,75 @@ test("旧合伙人只复用已登录且同 UID 的 TuneWeave 默认别名，不�
   expect((await readMusicAccounts(accountsFile)).netease).toMatchObject({ uid, alias: "default", owner: 42, credential: "" })
 })
 
+test("复用明确过期的网易云或 QQ 登录会先续期同一 UID，再核验是否需要扫码", async () => {
+  for (const [platform, alias, caller] of [
+    ["netease", "lotus-nep-42", false], ["netease", "lotus-nep-42", true], ["qq", "lotus-music-qq", true],
+  ]) {
+    const root = await directory()
+    const accountsFile = join(root, "music.yaml"), partnerAccountsFile = join(root, "partner.yaml")
+    const old = { uid: "1042", alias, owner: 42, credential: caller ? "twc1_original" : "" }
+    const calls = []
+    let state = "expired"
+    let outcome = "success"
+    const profile = { platform, account: alias, authenticated: true, user_id: old.uid }
+    const service = new MusicService({ accountsFile, partnerAccountsFile, tuneweave: { config: { api_url: "http://127.0.0.1:7832" },
+      async request(path, options) {
+        calls.push(path.split("?")[0])
+        expect(options.accountSelection).toEqual({ platform, alias })
+        if (path === "/v1/auth/session/refresh") {
+          expect(options.body).toEqual({ platform, account: alias, credential_mode: caller ? "both" : "server" })
+          expect(options.credentials).toEqual(caller ? ["twc1_original"] : undefined)
+          if (outcome === "network") throw Object.assign(new Error("网络异常"), { code: "tuneweave_unavailable" })
+          if (outcome === "expired") throw Object.assign(new Error("已过期"), { code: "authentication_required" })
+          if (outcome === "wrong-uid") return { accountSelected: true, data: { ...profile, user_id: "5000" } }
+          state = "success"
+          return { accountSelected: true, data: { ...profile, ...(caller ? { caller_credential: { platform, value: "twc1_rotated" } } : {}) } }
+        }
+        return { accountSelected: true, data: state === "success" ? profile : { ...profile, authenticated: false } }
+      } },
+    })
+    const signal = new AbortController().signal
+    for (const [result, error] of [["network", "网络异常"], ["wrong-uid", "不一致|无法核实"], ["expired", null], ["success", null]]) {
+      outcome = result
+      await saveMusicAccount(platform, old, { file: accountsFile })
+      calls.length = 0
+      if (error) await expect(service.reuseMusicLogin(platform, 42, signal, true)).rejects.toThrow(new RegExp(error))
+      else expect(await service.reuseMusicLogin(platform, 42, signal, true)).toBe(result === "success")
+      expect(calls).toEqual(result === "success" ? ["/v1/account", "/v1/auth/session/refresh", "/v1/account"]
+        : ["/v1/account", "/v1/auth/session/refresh"])
+      expect((await readMusicAccounts(accountsFile))[platform].credential).toBe(result === "success" && caller ? "twc1_rotated" : old.credential)
+    }
+  }
+})
+
+test("云盘列表返回时合伙人绑定已换号，旧结果不能进入缓存", async () => {
+  const root = await directory()
+  const accountsFile = join(root, "music.yaml"), partnerAccountsFile = join(root, "partner.yaml")
+  const alias = "lotus-nep-42", uid = "1042"
+  let switched = false
+  const service = new MusicService({ accountsFile, partnerAccountsFile, tuneweave: { config: { api_url: "http://127.0.0.1:7832" },
+    async request(route, options) {
+      const url = new URL(route, "http://127.0.0.1:7832")
+      expect(options.accountSelection).toEqual({ platform: "netease", alias })
+      if (url.pathname === "/v1/account") return { accountSelected: true,
+        data: { platform: "netease", authenticated: true, account: alias, user_id: switched ? "2042" : uid } }
+      expect(url.pathname).toBe("/v1/account/cloud/tracks")
+      await service.partner.saveAccount({ uid: "2042", qq: 42, tuneweave_account: alias })
+      switched = true
+      return { accountSelected: true, data: [], pagination: { offset: 0, total: 0, has_more: false } }
+    } },
+  })
+  await service.partner.saveAccount({ uid, qq: 42, tuneweave_account: alias })
+  const library = new NeteaseCloudLibrary()
+  const signal = new AbortController().signal
+  const previous = await library.verify(service, 42, signal)
+  await expect(library.list(service, previous, signal)).rejects.toThrow("账号不一致")
+  const current = await library.verify(service, 42, signal)
+  expect(current.uid).toBe("2042")
+  expect(current.key).not.toBe(previous.key)
+  await expect(library.assertCurrent(service, previous, signal)).rejects.toThrow("绑定已变更")
+})
+
 test("取消与串号确认保留原音乐身份和凭据", async () => {
   const accountsFile = join(await directory(),"music.yaml")
   const current = {alias:"lotus-music-qq",uid:"42",credential:"twc1_old"}

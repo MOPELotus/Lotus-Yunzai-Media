@@ -11,6 +11,7 @@ const refreshing = new Set<string>()
 
 function loginRequired() { return Object.assign(new Error("请由绑定账号的主人在当前好友私聊使用 #音乐登录 重新扫码。"), { code: "authentication_required" }) }
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
+export function musicAuthenticationRequired(error: unknown) { return errorCode(error) === "authentication_required" }
 
 export async function recommendQqSong(api: MusicService, signal: AbortSignal) {
   const feed = await api.tuneweave.request<Feed>("/v1/recommendations/feed?platform=qq&direction=forward&page=1&loaded_count=0", { signal, redirect: "error" })
@@ -71,7 +72,8 @@ async function accountRequest<T>(api: MusicService, expected: Binding, route: st
 
 async function verify(api: MusicService, expected: Binding, signal: AbortSignal) {
   const profile = await accountRequest<TuneWeaveQrProfile>(api, expected, `/v1/account?platform=${expected.platform}`, signal)
-  if (profile?.platform !== expected.platform || profile.account !== expected.alias) throw new Error("音乐账号身份无法核实。")
+  if (profile?.platform !== expected.platform || profile.account !== expected.alias ||
+      profile.user_id != null && String(profile.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
   if (profile.authenticated === false) throw loginRequired()
   if (profile.authenticated !== true || String(profile.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
   await assertCurrent(api, expected, signal)
@@ -86,8 +88,11 @@ async function refreshMusicBinding(api: MusicService, expected: Binding, signal:
   finally { refreshing.delete(key) }
 }
 
-export async function refreshOwnMusicAccount(api: MusicService, platform: PrivatePlatform, owner: number, signal: AbortSignal) {
-  return refreshMusicBinding(api, await binding(api, platform, owner, signal), signal)
+export async function refreshOwnMusicAccount(api: MusicService, platform: PrivatePlatform, owner: number, signal: AbortSignal,
+  selection?: { alias: string; uid: string }) {
+  const current = await binding(api, platform, owner, signal)
+  if (selection && (current.alias !== selection.alias || current.uid !== selection.uid)) throw new Error("音乐账号已变更，请重新查询。")
+  return refreshMusicBinding(api, current, signal)
 }
 
 async function renew(api: MusicService, expected: Binding, signal: AbortSignal) {
@@ -98,8 +103,11 @@ async function renew(api: MusicService, expected: Binding, signal: AbortSignal) 
   const { data, accountSelected } = await api.tuneweave.request<RefreshResult>("/v1/auth/session/refresh", { method: "POST", signal,
     redirect: "error", body: { platform, account: expected.alias, credential_mode: "both" }, credentials: [credential],
     accountSelection: { platform, alias: expected.alias } })
-  if (!accountSelected || data.platform !== platform || data.account !== expected.alias || data.authenticated !== true ||
-      String(data.user_id) !== expected.uid || data.caller_credential?.platform !== platform || !data.caller_credential.value?.startsWith("twc1_")) throw loginRequired()
+  if (!accountSelected || data?.platform !== platform || data.account !== expected.alias ||
+      data.user_id != null && String(data.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
+  if (data.authenticated === false) throw loginRequired()
+  if (data.authenticated !== true || String(data.user_id) !== expected.uid || data.caller_credential?.platform !== platform ||
+      !data.caller_credential.value?.startsWith("twc1_")) throw new Error("音乐账号身份无法核实。")
   await assertCurrent(api, expected, signal)
   const saved = await saveMusicAccount(platform, { credential: data.caller_credential.value }, { file: api.accountsFile, expected: expected.saved, signal })
     .catch(() => { throw new Error("无法保存音乐登录续期结果。") })

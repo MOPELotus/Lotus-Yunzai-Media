@@ -16,7 +16,9 @@ import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type
 import type { PublicMusicTarget } from "./share-link.ts"
 import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
-import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner, verifyNeteaseAccount } from "./netease-account.ts"
+import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner,
+  refreshServerNeteaseAccount, verifyNeteaseAccount } from "./netease-account.ts"
+import { musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -155,8 +157,20 @@ export class MusicService {
     let profile
     try { profile = await verifyNeteaseAccount(this, account, signal) }
     catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "authentication_required") return false
-      throw error
+      if (!musicAuthenticationRequired(error)) throw error
+      if (legacy) return false
+      const current = await findOwnedNeteaseAccount(this, owner, signal)
+      if (current?.alias !== account.alias || current.uid !== account.uid) throw new Error("网易云绑定已变更，请重试。")
+      const saved = (await readMusicAccounts(this.accountsFile)).netease
+      try {
+        if (saved && recordedNeteaseOwner(saved, owner) && saved.alias === account.alias && String(saved.uid) === account.uid &&
+            saved.credential?.startsWith("twc1_")) await refreshOwnMusicAccount(this, "netease", owner, signal, account)
+        else await refreshServerNeteaseAccount(this, account, signal)
+        profile = await verifyNeteaseAccount(this, account, signal)
+      } catch (refreshError) {
+        if (musicAuthenticationRequired(refreshError)) return false
+        throw refreshError
+      }
     }
     const latest = await findOwnedNeteaseAccount(this, owner, signal)
     if (currentBinding ? latest?.alias !== account.alias || latest.uid !== account.uid : Boolean(latest)) {
@@ -188,19 +202,30 @@ export class MusicService {
     const saved = (await readMusicAccounts(this.accountsFile))[platform]
     if (!saved?.alias || !musicAccountAlias.test(saved.alias) || saved.owner !== owner || !saved.uid) return false
     const alias = saved.alias
-    try {
+    const verify = async () => {
       const { data, accountSelected } = await this.tuneweave.request<TuneWeaveQrProfile>(
         "/v1/account?" + new URLSearchParams({ platform, account: alias }), { signal, redirect: "error", accountSelection: { platform, alias } })
       signal.throwIfAborted()
       if (!accountSelected || data?.platform !== platform || data.account !== alias) throw new Error("平台登录账号未确认，请使用 #音乐重新登录 核实。")
+      if (data.user_id != null && String(data.user_id) !== String(saved.uid)) throw new Error("平台登录账号不一致，请使用 #音乐重新登录 核实。")
       if (data.authenticated === false) return false
       if (data.authenticated !== true || String(data.user_id) !== String(saved.uid)) throw new Error("平台登录账号不一致，请使用 #音乐重新登录 核实。")
       const current = (await readMusicAccounts(this.accountsFile))[platform]
       if (current?.owner !== owner || current.alias !== alias || current.uid !== saved.uid) throw new Error("音乐账号绑定已变更，请重试。")
       signal.throwIfAborted()
       return true
+    }
+    try {
+      if (await verify()) return true
     } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "authentication_required") return false
+      if (!musicAuthenticationRequired(error)) throw error
+    }
+    if (platform !== "qq" || !saved.credential?.startsWith("twc1_")) return false
+    try {
+      await refreshOwnMusicAccount(this, platform, owner, signal, { alias, uid: String(saved.uid) })
+      return await verify()
+    } catch (error) {
+      if (musicAuthenticationRequired(error)) return false
       throw error
     }
   }

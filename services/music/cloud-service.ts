@@ -57,7 +57,7 @@ export class NeteaseCloudLibrary {
 
   private async request<T>(api: MusicService, binding: Binding, path: string, params: Record<string, string>,
     signal: AbortSignal, options: Pick<TuneWeaveRequestOptions, "method" | "audio"> = {}) {
-    signal.throwIfAborted()
+    await this.assertCurrent(api, binding, signal)
     const query = new URLSearchParams({ account: binding.alias, ...params })
     const result = await api.tuneweave.request<T>(`/v1/${path}?${query}`, { ...options, signal, redirect: "error",
       accountSelection: { platform: "netease", alias: binding.alias } })
@@ -128,6 +128,7 @@ export class NeteaseCloudLibrary {
       }
       if (!meta.has_more) {
         if (total !== undefined && tracks.size !== total) throw new Error("云盘曲目数在刷新期间发生变化，请重新刷新。")
+        await verifyNeteaseAccount(api, binding, active)
         await this.assertCurrent(api, binding, active)
         return { tracks: [...tracks.values()], used, capacity, loadedAt: this.now() }
       }
@@ -143,6 +144,7 @@ export class NeteaseCloudLibrary {
     if (data?.ref !== track.ref || data.platform !== "netease" || data.available !== true || !url || !isCloudMediaUrl(url)) {
       throw new Error("当前云盘曲目没有可用的完整音源。")
     }
+    await verifyNeteaseAccount(api, binding, signal)
     await this.assertCurrent(api, binding, signal)
     return { url: url.href, duration_ms: unsignedCount(data.duration_ms), resolved_platform: "netease" }
   }

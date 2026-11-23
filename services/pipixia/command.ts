@@ -10,6 +10,7 @@ import { downloadMedia } from "../media/download.ts"
 import { mediaDeliveryUnknown, safeMediaName, sendMediaFile } from "../media/files.ts"
 import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
 import { createMediaTask, recoverMediaTasks, releaseMediaTask } from "../media/tasks.ts"
+import { createPipixiaSettings } from "./settings.ts"
 
 const origin = "https://h5.pipix.com"
 const feature = "[media] 皮皮虾解析"
@@ -111,12 +112,13 @@ async function fetchPost(start: URL, fetch: MediaFetch, signal: AbortSignal) {
 }
 
 export function createPipixiaCommands({ signal: lifecycle, mediaRuntime, fetch = globalThis.fetch, render = renderSourceCard,
-  loadConfig = loadGlobalConfig, tasksDir = resolveData("pipixia", "tasks") }: {
+  loadConfig = loadGlobalConfig, settings = createPipixiaSettings(), tasksDir = resolveData("pipixia", "tasks") }: {
   readonly signal?: AbortSignal
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
   readonly fetch?: MediaFetch
   readonly render?: typeof renderSourceCard
   readonly loadConfig?: typeof loadGlobalConfig
+  readonly settings?: ReturnType<typeof createPipixiaSettings>
   readonly tasksDir?: string
 } = {}) {
   const stopped = new AbortController()
@@ -144,9 +146,8 @@ export function createPipixiaCommands({ signal: lifecycle, mediaRuntime, fetch =
     const active = connection ? AbortSignal.any([signal, connection]) : signal
     try {
       const cfg = await loadConfig()
-      if (context.message_type === "private" && cfg.tools.privateResolve !== true) return
-      const deny = cfg.tools.globalBlackList
-      if (Array.isArray(deny) && deny.some(item => item === "general" || item === "通用（包含快手等）")) return
+      const options = await settings.settings(cfg.tools)
+      if (!options.enable || (context.message_type === "private" && !options.private)) return
       const post = await fetchPost(target, fetch, AbortSignal.any([active, AbortSignal.timeout(12_000)]))
       if (!post) return "皮皮虾未返回该公开作品。"
       const { like, reply, share, view } = post.stat

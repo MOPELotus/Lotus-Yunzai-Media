@@ -95,3 +95,72 @@ test("皮皮虾阻止跨域跳转、禁止私聊默认解析并识别缺少身�
     expect(seen).toEqual([preview, "https://h5.pipix.com/item/123"])
   } finally { await commands.dispose() }
 })
+
+test("锅巴写入与群、私聊解析共用存储，并继承旧通用开关", async () => {
+  const { mkdir, writeFile } = await import("node:fs/promises")
+  const { createPipixiaSettings } = await import("../services/pipixia/settings.ts")
+  const { supportGuoba } = await import("../guoba-settings.ts")
+  const root = await mkdtemp("/tmp/lotus-ppx-guoba-")
+  const data = join(root, "data")
+  const legacy = join(root, "backup/plugins/rconsole-plugin/config")
+  await mkdir(legacy, { recursive: true })
+  await writeFile(join(legacy, "tools.yaml"), 'privateResolve: true\nglobalBlackList: ["通用（包含快手等）"]\n')
+  const settings = createPipixiaSettings(data, root)
+  const tools = loadConfig()
+  const guoba = supportGuoba(data, undefined, undefined, settings, tools).configInfo
+  const Result = { ok: () => 200, error: (_: string, status: number) => status }
+  const requests: string[] = []
+  const commands = createPipixiaCommands({ settings, loadConfig: tools,
+    fetch: async url => { requests.push(url); return html({}) },
+    render: async () => Buffer.from([1]),
+  })
+  try {
+    expect(await guoba.getConfigData()).toMatchObject({ pipixia: { enable: false, private: true } })
+    expect(await commands.fallback(article, context(article))).toBeUndefined()
+    expect(await commands.fallback(article, context(article, { message_type: "private" }))).toBeUndefined()
+    expect(requests).toHaveLength(0)
+    expect(await guoba.setConfigData({ "pipixia.enable": "false" }, { Result })).toBe(422)
+    expect(await guoba.setConfigData({ "pipixia.enable": true, "pipixia.private": false },
+      { Result, changedFields: ["pipixia.enable"] })).toBe(200)
+    expect(await commands.fallback(article, context(article))).toContain("未返回")
+    expect(await commands.fallback(article, context(article, { message_type: "private" }))).toContain("未返回")
+    expect(await guoba.setConfigData({ "pipixia.private": false }, { Result })).toBe(200)
+    expect(await commands.fallback(article, context(article, { message_type: "private" }))).toBeUndefined()
+    expect(requests).toEqual([article, article])
+    expect(await guoba.getConfigData()).toMatchObject({ pipixia: { enable: true, private: false } })
+  } finally {
+    await commands.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("皮皮虾未知网关回执不重新上传，也不回退至逐字节重发", async () => {
+  const dir = await mkdtemp("/tmp/lotus-ppx-unknown-")
+  const messages: unknown[] = []
+  let downloads = 0, uploads = 0
+  const commands = createPipixiaCommands({ tasksDir: dir, loadConfig: loadConfig(),
+    fetch: async url => {
+      if (url === article) return html(fixture)
+      if (url === source) { downloads++; return new Response(mp4) }
+      throw new Error(url)
+    },
+    render: async () => Buffer.from([1]),
+  })
+  try {
+    const event = context(article, {
+      deliverMedia: () => { uploads++; return "unknown" },
+      reply: (message: unknown) => { messages.push(message); return true },
+    })
+    const result = await commands.fallback(article, event)
+    if (!result || typeof result !== "object" || !("onDelivered" in result) || result.type !== "delivery") throw new Error("missing delivery")
+    await result.onDelivered(12)
+    await result.onDelivered(12)
+    expect(downloads).toBe(1)
+    expect(uploads).toBe(1)
+    expect(messages).toEqual(["视频送达未确认，请核对当前会话。"])
+    expect(await readdir(dir)).toEqual([])
+  } finally {
+    await commands.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

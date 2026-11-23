@@ -10,6 +10,8 @@ import { loadAcfunConfig } from "./core/config/global.ts"
 import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
+import { loadGlobalConfig } from "./core/config/global.ts"
+import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
 
 import type { SubscriptionPlatform } from "./services/subscriptions/types.ts"
 
@@ -217,7 +219,8 @@ function changed(field: SettingsField, value: FieldInput, settings: Subscription
 }
 
 export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory),
-  root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep)) {
+  root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep),
+  pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig) {
   const config = createSubscriptionConfig(directory, lockFile)
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
@@ -237,14 +240,16 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },
       ...officialVideoToggles.map(([key, label]) => ({ field: `officialVideo.${key}`, label, component: "Switch" })),
       ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
-        component: "Select", componentProps: { mode: "tags" } }))],
+        component: "Select", componentProps: { mode: "tags" } })),
+      { component: "SOFT_GROUP_BEGIN", label: "皮皮虾" },
+      ...pipixiaFields.map(([key, label]) => ({ field: `pipixia.${key}`, label, component: "Switch" }))],
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
           return [id, Object.fromEntries(fields.map(field => [field.key, fieldValue(field, settings)]))]
         }))
-        const [videos, acfun] = await Promise.all([officialVideo.settings(), loadAcfunConfig(root)])
-        return { ...Object.fromEntries(entries), acfun: { enable: acfun.enable, private_preview: acfun.privatePreview }, officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
+        const [videos, acfun, tools] = await Promise.all([officialVideo.settings(), loadAcfunConfig(root), loadConfig().then(config => config.tools)])
+        return { ...Object.fromEntries(entries), acfun: { enable: acfun.enable, private_preview: acfun.privatePreview }, pipixia: await pipixia.settings(tools), officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
       },
@@ -254,6 +259,14 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         if (!videoPatch) return Result.error("请填写有效的米游社官号视频设置。", 422)
         const sharePatch = acfunPatch(values, edited)
         if (!sharePatch) return Result.error("请填写有效的 AcFun 视频设置。", 422)
+        const pipixiaPatch: Partial<PipixiaSettings> = {}
+        for (const [key] of pipixiaFields) {
+          const name = `pipixia.${key}`
+          if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
+          const value = values[name]
+          if (typeof value !== "boolean") return Result.error("请填写有效的皮皮虾开关。", 422)
+          pipixiaPatch[key] = value
+        }
         const changes = new Map<SubscriptionPlatform, { field: SettingsField; value: FieldInput }[]>()
         for (const { id, label, fields } of platforms) {
           const selected = []
@@ -275,6 +288,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         }
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
         if (Object.keys(sharePatch).length) await saveAcfun(root, sharePatch)
+        if (Object.keys(pipixiaPatch).length) await pipixia.save(pipixiaPatch)
         return Result.ok()
       },
     },

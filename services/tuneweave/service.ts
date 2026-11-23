@@ -67,7 +67,7 @@ export interface TuneWeaveRequestOptions {
 interface TuneWeaveResponse<T> {
   ok?: boolean
   data: T
-  error?: { code?: string; platform?: string; details?: { upstream_code?: number } }
+  error?: { code?: string; platform?: string; details?: { upstream_code?: number; upstream_response_empty?: boolean; android_search_empty?: boolean } }
   meta?: { platform?: string; account?: string; pagination?: unknown }
 }
 
@@ -227,10 +227,15 @@ export class TuneWeaveService {
     if (!response.ok || json?.ok !== true) {
       const code = json?.error?.code || `HTTP ${response.status}`
       // Never expose upstream payloads, login cookies or credentials in chat/logs.
-      const reason = json?.error?.details?.upstream_code === 405 ? "网易云今日没有更多可评定歌曲（405）" : code
+      const details = json?.error?.details
+      const emptySodaSearch = response.status === 502 && json?.error?.platform === "soda" && route.startsWith("/v1/search?") &&
+        (details?.upstream_response_empty === true || details?.android_search_empty === true)
+      const reason = emptySodaSearch
+        ? "汽水搜索暂不可用，平台返回空响应。请检查 TuneWeave 的汽水签名服务配置。"
+        : details?.upstream_code === 405 ? "网易云今日没有更多可评定歌曲（405）" : code
       throw Object.assign(new Error(`TuneWeave 请求失败：${reason}`), {
         code, platform: json?.error?.platform,
-        ...(json?.error?.details?.upstream_code === 405 && { upstreamCode: 405 }),
+        ...(details?.upstream_code === 405 && { upstreamCode: 405 }),
       })
     }
     if (accountSelection) {

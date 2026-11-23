@@ -59,6 +59,25 @@ test("汽水短链只提取官方 ID，禁止跨站或跨资源类型", async ()
     Response.redirect(soda.replace("/track", "/playlist")))).rejects.toThrow("未指向")
 })
 
+test("汽水 beta.4 公开搜索的空响应有定向提示，不回显上游详情", async () => {
+  const tuneweave = new TuneWeaveService({
+    config: { api_url: "http://127.0.0.1:12345" },
+    async fetch() {
+      return Response.json({
+        ok: false, error: {
+          code: "upstream_error", platform: "soda", message: "do not expose upstream diagnostics",
+          details: { upstream_http_status: 200, upstream_response_empty: true, raw: "invented private value" },
+        },
+      }, { status: 502 })
+    },
+  })
+  const search = await tuneweave.request("/v1/search?platform=soda&q=test").catch(error => error)
+  expect(search.message).toContain("汽水签名服务配置")
+  expect(search.message).not.toContain("invented private value")
+  const media = await tuneweave.request("/v1/tracks/soda%3A1/stream").catch(error => error)
+  expect(media.message).toBe("TuneWeave 请求失败：upstream_error")
+})
+
 test("QQ 数字、汽水、波点单曲只通过 TuneWeave 读取认证的同 ID 资料", async () => {
   const bodian = "https://h5app.kuwo.cn/m/bodian/playMusic.html?musicId=192015898"
   const mqq = "https://i2.y.qq.com/n3/other/pages/playsong/index.html?songid=480622732"
@@ -158,6 +177,8 @@ test("酷狗官方 MV 页校验分享码、同编号、足长和授权的资源�
 
   const hash = "9DC24F0A2633F6E451389549B9C5EE87"
   const ref = "kugou:mv:117613"
+  const primary = "https://mvwebfs.tx.kugou.com/" + hash.toLowerCase() + ".mp4"
+  const backup = primary.replace(".tx.", ".ali.")
   let paid = false
   const api = new MusicService({ tuneweave: new TuneWeaveService({
     config: { api_url: "http://127.0.0.1:12345" },
@@ -170,14 +191,19 @@ test("酷狗官方 MV 页校验分享码、同编号、足长和授权的资源�
       }
       return Response.json({ ok: true, data: {
         video_ref: ref, available: true, platform: "kugou",
-        url: "https://mvwebfs.tx.kugou.com/" + hash.toLowerCase() + ".mp4", duration_ms: 317400,
+        url: primary, backup_urls: [primary, backup.replace(hash.toLowerCase(), "b".repeat(32)), backup, backup],
+        duration_ms: 317400,
         platform_code: 0, extensions: { kind: "mv", backend: "anonymous_video_tracker",
           selected_resource: { hash, pay_type: paid ? 1 : 0, privilege: 0 } },
       } })
     },
   }) })
   const { mv } = await api.publicShare(target, signal)
-  expect((await api.publicMvStream(mv, signal)).cdn).toBe("kugou-mv")
+  const stream = await api.publicMvStream(mv, signal)
+  expect(stream.cdn).toBe("kugou-mv")
+  expect(stream.urls).toEqual([primary, backup])
+  expect(stream.matchesUrl(new URL(backup))).toBe(true)
+  expect(stream.matchesUrl(new URL(backup.replace(hash.toLowerCase(), "b".repeat(32))))).toBe(false)
   paid = true
   await expect(api.publicMvStream(mv, signal)).rejects.toThrow("完整公开 MV")
 })

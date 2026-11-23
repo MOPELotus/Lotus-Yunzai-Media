@@ -84,7 +84,7 @@ export function musicVideoCdnUrl(value: string | URL, kind: MusicVideoCdn) {
       !/\.mp4$/iu.test(url.pathname)) return
   if (kind === "qq-mv" && url.hostname.endsWith(".stream.tencentmusic.com") ||
       kind === "kuwo-mv" && /^kw-[a-z0-9-]+\.kuwo\.cn$/u.test(url.hostname) ||
-      kind === "kugou-mv" && url.hostname === "mvwebfs.tx.kugou.com") {
+      kind === "kugou-mv" && /^mvwebfs\.(?:tx|ali)\.kugou\.com$/u.test(url.hostname)) {
     url.protocol = "https:"
     return url
   }

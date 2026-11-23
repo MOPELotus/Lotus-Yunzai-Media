@@ -47,7 +47,7 @@ type MusicMv = { readonly ref: string; readonly id: string | number; readonly pl
   readonly duration_ms?: number; readonly creators?: readonly { readonly name?: string }[] }
 type MusicMvStream = { readonly video_ref?: string; readonly platform?: string; readonly available?: boolean;
   readonly format?: string; readonly fee?: unknown; readonly source_range?: unknown; readonly platform_code?: unknown;
-  readonly url?: string; readonly size?: number; readonly duration_ms?: number;
+  readonly url?: string; readonly backup_urls?: readonly string[]; readonly size?: number; readonly duration_ms?: number;
   readonly extensions?: { readonly kind?: string; readonly source_track_id?: string; readonly authorization_source?: string;
     readonly selected_protocol?: string; readonly backend?: string;
     readonly selected_resource?: { readonly hash?: string; readonly pay_type?: number; readonly privilege?: number } } }
@@ -248,7 +248,16 @@ export class MusicService {
           details.source_track_id === String(mv.id) && details.authorization_source === "current_metadata_and_play_url")
     }
     if (!authorized) throw new Error("没有可核实的完整公开 MV，请打开原链接。")
-    return { url, size: stream.size, cdn }
+    const urls = new Set([url.href])
+    const hash = mv.platform === "kugou" ? details?.selected_resource?.hash?.toLowerCase() : undefined
+    const matchesUrl = hash ? (candidate: URL) => candidate.pathname.toLowerCase().endsWith("/" + hash + ".mp4") : undefined
+    if (matchesUrl && Array.isArray(stream.backup_urls)) {
+      for (const candidate of stream.backup_urls.slice(0, 4)) {
+        const mirror = musicVideoCdnUrl(candidate, cdn)
+        if (mirror && matchesUrl(mirror)) urls.add(mirror.href)
+      }
+    }
+    return { url, urls: [...urls], matchesUrl, size: stream.size, cdn }
   }
   async publicLyrics(track: MusicTrack, signal?: AbortSignal) {
     const data = await this.tuneweave.request<{ track_ref?: unknown; plain?: unknown; translated?: unknown }>(

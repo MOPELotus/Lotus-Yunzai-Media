@@ -406,10 +406,27 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           active.throwIfAborted()
           const task = await createMediaTask(api.tasksDir)
           try {
-            const { file, sizeBytes } = await downloadMedia(stream.url.href, join(task.dir, "mv"), {
-              fetch: api.fetch, kind: "video", cdn: stream.cdn, maxBytes: mvByteLimit, timeoutMs: 60_000, signal: active,
-            })
-            if (!file.endsWith(".mp4") || (stream.size && stream.size !== sizeBytes)) throw new Error("MV 文件与原平台回包不一致。")
+            const transfer = AbortSignal.any([active, AbortSignal.timeout(60_000)])
+            let file: string | undefined
+            let failure: unknown
+            for (const url of stream.urls) {
+              transfer.throwIfAborted()
+              try {
+                const result = await downloadMedia(url, join(task.dir, "mv"), {
+                  fetch: (address, request) => {
+                    if (stream.matchesUrl && !stream.matchesUrl(new URL(address))) throw new Error("MV 地址身份与原平台回包不一致。")
+                    return api.fetch(address, request)
+                  },
+                  kind: "video", cdn: stream.cdn, maxBytes: mvByteLimit, timeoutMs: 60_000, signal: transfer,
+                })
+                if (!result.file.endsWith(".mp4") || (stream.size && stream.size !== result.sizeBytes)) {
+                  throw new Error("MV 文件与原平台回包不一致。")
+                }
+                file = result.file
+                break
+              } catch (error) { failure = error }
+            }
+            if (!file) throw failure ?? new Error("没有可核实的完整公开 MV。")
             await sendMediaFile(context, file, { file_name: safeMediaName(item.mv.title) + ".mp4", signal: active })
           } finally { await releaseMediaTask(api.tasksDir, task.dir) }
         } else if (item.kind === "episode") {

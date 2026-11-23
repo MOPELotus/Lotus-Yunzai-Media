@@ -133,13 +133,16 @@ test("B 站搜索读取旧账号别名，新登录只更新主文件，冲突不
   const original = "# 原格式\r\ntuneweave_account: fixture-old\r\ncookie: fixture-never-forwarded\r\n"
   const conflict = "tuneweave_account: fixture-conflict\n"
   const searched = []
-  const tuneweave = { async request(route) {
+  const tuneweave = { async request(route, options) {
     const url = new URL(route, "http://127.0.0.1")
     if (url.pathname === "/v1/auth/qr/fixture-login") return { state: "confirmed", profile: { authenticated: true } }
     expect(url.pathname).toBe("/v1/search")
     expect(url.searchParams.has("cookie")).toBe(false)
-    searched.push(url.searchParams.get("account"))
-    return []
+    const alias = url.searchParams.get("account")
+    searched.push(alias)
+    if (!alias) return []
+    expect(options.accountSelection).toEqual({ platform: "bilibili", alias })
+    return { data: [], accountSelected: true }
   } }
   const service = () => new BilibiliService({ accountFile, legacyAccountFiles: [first, second], tuneweave })
   await writeFile(first, original)

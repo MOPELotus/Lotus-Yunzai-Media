@@ -330,7 +330,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     try {
       if (tuku) await reply(context, "好的，正在搜索")
       if (signal?.aborted) return []
-      const results = await service.search(keyword, tuku ? { page, limit: tukuPageSize } : { page })
+      const results = await service.search(keyword, { page, signal: commentSignal(context), ...(tuku && { limit: tukuPageSize }) })
       if (signal?.aborted) return []
       if (page > 1 && !results.length) return "[media] 已经没有下一页了。"
       const message = results.length
@@ -357,7 +357,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     return []
   }
 
-  async function renderInfo(context: MessageFallbackContext, service: BilibiliService, info: BiliInfo, target?: string, download = true) {
+  async function renderInfo(context: MessageFallbackContext, service: BilibiliService, info: BiliInfo, download = true) {
     const image = await renderTemplate("bilibili-info", {
       type: info.type,
       title: info.title, owner: info.owner, cover: info.cover,
@@ -380,15 +380,16 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (info.type === "live" && info.playerUrl) {
       await reply(context, "[media] 独立播放器：" + info.playerUrl)
     } else if (info.type === "video" && info.url && download) {
-      await runDownload(context, service, target || info.url, "B站解析下载")
+      await runDownload(context, service, info.url, "B站解析下载")
     }
   }
 
   async function runDownload(context: MessageFallbackContext, service: BilibiliService, target: string, title: string): Promise<void> {
+    const active = commentSignal(context)
     let result: Awaited<ReturnType<BilibiliService["download"]>> | undefined
     try {
       await recovery
-      if (signal?.aborted) return
+      if (active?.aborted) return
       const config = await loadGlobalConfig()
       const permissions = new PermissionService({ permissions: config.permissions })
       const subject = context.canManagePackages ? { ...context, isMaster: true } : context
@@ -398,7 +399,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       const download = normalizeDownloadConfig(settings)
       if (!download.enable) throw new Error("B站下载未启用，请由 bot 主人在 global.yaml 中开启 bilibili.download.enable。")
       const installed = await Promise.all(["ffmpeg", "ffprobe"].map(name => resolveCommandPath(name, download.tools_path)))
-      if (signal?.aborted) return
+      if (active?.aborted) return
       // Requests with working local tools do not wait for remote version checks.
       if (context.canManagePackages && permissions.explain(subject, "tools.install").ok && installed.some(file => !file)) {
         const tools = await new ToolInstallerService({ config: config.tools }).ensureAll()
@@ -407,27 +408,27 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
           throw new Error("工具链初始化失败：" + (failures || "unknown"))
         }
       }
-      if (signal?.aborted) return
+      if (active?.aborted) return
       result = await service.download(target, settings, {
-        signal,
+        signal: active,
         onEvent: event => {
           console.debug("[media] B 站下载：" + event.message)
         },
       })
-      if (signal?.aborted) return
+      if (active?.aborted) return
       if (!result.ok) {
         if (result.reason === "live_download_unsupported") {
-          return renderInfo(context, service, result.info, undefined, false)
+          return renderInfo(context, service, result.info, false)
         }
         throw new Error(mediaFailureMessage(result))
       }
       for (const file of result.files) {
-        if (signal?.aborted) return
+        if (active?.aborted) return
         await sendMediaFile({ ...context, reply: (...args: Parameters<MessageFallbackContext["reply"]>) => reply(context, ...args) },
-          file, { ...download, file_name: result.fileNames[file] })
+          file, { ...download, file_name: result.fileNames[file], signal: active })
       }
     } catch (error) {
-      await reportError(context, title, error)
+      if (!active?.aborted) await reportError(context, title, error)
     } finally {
       if (result?.ok) {
         await service.releaseTask(result).catch(error => {
@@ -474,7 +475,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         target = item.url
       } else if (action.kind === "watch") {
         if (!action.keyword) return "[media] 请输入关键词。"
-        const [first] = await service.search(action.keyword, { limit: 1 })
+        const [first] = await service.search(action.keyword, { limit: 1, signal: commentSignal(context) })
         if (!first) throw new Error("未搜索到相关视频")
         target = first.url
       } else {
@@ -520,7 +521,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         await runDownload(context, service, informationUrl, "B站下载")
         return []
       }
-      const info = await service.getInfo(informationUrl ?? target)
+      const info = await service.getInfo(informationUrl ?? target, commentSignal(context))
       if (signal?.aborted) return
       if (action.kind === "quote" && action.action !== "preview") {
         if (info.type !== "video") return
@@ -528,7 +529,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         if (action.action === "description") return info.description.trim().slice(0, 3000) || "这条 B 站视频没有简介。"
         return
       }
-      await renderInfo(context, service, info, target, action.kind !== "quote")
+      await renderInfo(context, service, info, action.kind !== "quote")
     } catch (error) {
       await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
     }
@@ -544,7 +545,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       const service = new BilibiliService({ fetch, tuneweaveConfig: config.tuneweave })
       const resolved = await service.resolveShortLink(url, signal)
       if (!isBiliVideoPage(resolved)) return
-      const info = await service.getInfo(resolved.href)
+      const info = await service.getInfo(resolved.href, commentSignal(context))
       if (info.type === "video" && !signal?.aborted) return info.ownerId
     },
     features(context: MessageFallbackContext) {

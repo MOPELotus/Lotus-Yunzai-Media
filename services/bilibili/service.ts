@@ -13,7 +13,7 @@ import { downloadRanges } from "../media/range-download.ts"
 import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/tasks.ts"
 import { packMediaFiles, runMediaProcess, mediaLimitFailure, safeMediaName } from "../media/files.ts"
 
-type VideoId = { bvid: string; aid?: string } | { bvid?: string; aid: string }
+type VideoId = ({ bvid: string; aid?: string } | { bvid?: string; aid: string }) & { page?: number }
 type BilibiliTarget = (VideoId & { type: "video" }) | { type: "live"; roomId: string }
 type BilibiliInput = string | BilibiliTarget
 
@@ -45,6 +45,7 @@ interface TuneWeaveVideo {
 }
 
 interface TuneWeavePart {
+  video_ref: string
   id: string
   page: number
   title?: string
@@ -57,6 +58,8 @@ interface TuneWeaveTrack {
 }
 
 interface TuneWeavePlayback {
+  video_ref: string
+  part_ref: string
   headers?: Record<string, string>
   video_tracks?: (TuneWeaveTrack & { id: number; codec_id?: number })[]
   audio_tracks?: (TuneWeaveTrack & { bandwidth: number })[]
@@ -71,7 +74,7 @@ interface TuneWeaveQr {
 
 interface TuneWeaveQrResult {
   state: string
-  profile?: { authenticated?: boolean; platform?: string; account?: string }
+  profile?: { authenticated?: boolean; platform?: string; account?: string; user_id?: string }
 }
 
 interface LiveRoomResponse {
@@ -93,10 +96,11 @@ interface BilibiliAccount {
   cookie?: string
   tuneweave_account?: string
   saved_at?: string
+  user_id?: string
   source?: string
 }
 
-type StoredAccount = { cookie?: string | null; tuneweave_account?: string | null }
+type StoredAccount = { cookie?: string | null; tuneweave_account?: string | null; saved_at?: string; user_id?: string }
 
 interface PreviewStats {
   view?: number
@@ -143,6 +147,7 @@ interface VideoInfo extends VideoPreview {
   aid?: string | number
   cid?: string | number
   pages: VideoPage[]
+  selectedPage?: VideoPage
   desc: string
   description: string
   stat: PreviewStats & { bandwidth?: number }
@@ -239,7 +244,7 @@ interface QrOptions {
 }
 
 const BILI_SHORT_HOSTS = new Set(["b23.tv", "bili2233.cn"])
-const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "live.bilibili.com", ...BILI_SHORT_HOSTS])
+const BILI_HOSTS = new Set(["bilibili.com", "www.bilibili.com", "m.bilibili.com", "live.bilibili.com", ...BILI_SHORT_HOSTS])
 const dynamicLinkInText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/(?:t\.bilibili\.com\/|(?:www|m)\.bilibili\.com\/opus\/|m\.bilibili\.com\/dynamic\/)[1-9]\d{0,21}\/?(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
 const LIVE_INFO_API = "https://api.live.bilibili.com/room/v1/Room/get_info"
 const bareB23InText = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:\/\/)?b23\.tv\/([a-z0-9]+)(?=$|[\s\p{Pe}\p{Pf}"'。，、！？；：,!?;?#]|\.(?=\s|$))/iu
@@ -264,6 +269,8 @@ export class BilibiliService {
   readonly tasksDir: string
   readonly spawn: typeof spawn
   private pendingAlias?: string
+  private selection?: Promise<{ alias: string; record?: StoredAccount }>
+  private refreshed = false
 
   constructor(options: BilibiliOptions = {}) {
     this.fetch = options.fetch || globalThis.fetch
@@ -290,32 +297,34 @@ export class BilibiliService {
     if (wholeCard !== undefined) return wholeCard
 
     const clean = raw.replace(/\\\//g, "/")
-    const match = clean.match(/https?:\/\/(?:www\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)
+    const match = clean.match(/https?:\/\/(?:www\.|m\.)?(?:bilibili\.com\/video\/[^"'\s,\]}]+|b23\.tv\/[^"'\s,\]}]+|bili2233\.cn\/[^"'\s,\]}]+|live\.bilibili\.com\/\d+)|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b/i)
     const bare = bareB23InText.exec(clean)
     const dynamic = dynamicLinkInText.exec(clean)
     const first = [match, bare, dynamic].filter(candidate => candidate !== null)
       .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))[0]
     if (first && first === bare) return "https://b23.tv/" + bare[1]
-    return first?.[0] || ""
+    return first && first === match ? first[0].replace(/[）。！？；，、!?)】》]+$/u, "") : first?.[0] || ""
   }
 
-  async resolveTarget(input = ""): Promise<BilibiliTarget> {
+  async resolveTarget(input = "", signal?: AbortSignal): Promise<BilibiliTarget> {
     const text = String(input || "").trim()
     if (!text) throw new Error("empty bilibili target")
-    if (/^BV[1-9A-Za-z]{10}$/i.test(text)) return { type: "video", bvid: text }
-    if (/^av\d+$/i.test(text)) return { type: "video", aid: text.slice(2) }
+    if (/^BV[1-9A-Za-z]{10}$/i.test(text)) return { type: "video", bvid: "BV" + text.slice(2) }
+    if (/^av0*[1-9]\d{0,19}$/i.test(text)) return { type: "video", aid: text.slice(2).replace(/^0+/u, "") }
     const bare = bareB23Target.exec(text)
     const parsed = parseBiliUrl(bare ? "https://b23.tv/" + bare[1] : text)
     if (!parsed) throw new Error("不支持的 B 站链接")
-    const url = await this.resolveShortLink(parsed)
+    const url = await this.resolveShortLink(parsed, signal)
     const destination = url.href
     const live = destination.match(/live\.bilibili\.com\/(\d+)/i)
     if (live?.[1]) return { type: "live", roomId: live[1] }
-    const bvid = url.pathname.match(/BV[1-9A-Za-z]{10}/i)?.[0]
-    if (bvid) return { type: "video", bvid }
-    const aid = url.pathname.match(/av(\d+)/i)?.[1]
-    if (aid) return { type: "video", aid }
-    throw new Error("unsupported bilibili target")
+    if (!isBiliVideoPage(url)) throw new Error("不支持的 B 站链接")
+    const [, , token] = url.pathname.split("/")
+    const page = biliPartNumber(url)
+    if (page === null) throw new Error("B 站分 P 编号无效")
+    const picked = page === undefined ? {} : { page }
+    if (token?.slice(0, 2).toLowerCase() === "bv") return { type: "video", bvid: "BV" + token.slice(2), ...picked }
+    return { type: "video", aid: token!.slice(2), ...picked }
   }
 
   async resolveShortLink(url: URL, active?: AbortSignal): Promise<URL> {
@@ -333,48 +342,95 @@ export class BilibiliService {
     throw new Error("B 站短链接未跳转至可识别的地址")
   }
 
-  async getInfo(input: BilibiliInput): Promise<VideoInfo | LiveInfo> {
-    const target = typeof input === "string" ? await this.resolveTarget(input) : input
+  async getInfo(input: BilibiliInput, signal?: AbortSignal): Promise<VideoInfo | LiveInfo> {
+    const target = typeof input === "string" ? await this.resolveTarget(input, signal) : input
     if (target.type === "live") return this.getLiveInfo(target.roomId)
-    return this.getVideoInfo(target)
+    return this.getVideoInfo(target, signal)
   }
 
-  async tuneRequest<Data>(route: string, params: Record<string, string> = {}): Promise<Data> {
-    const stored = this.tuneAccount ? null : await this.loadAccount()
-    this.tuneAccount ||= stored?.tuneweave_account || ""
-    const query = new URLSearchParams({ ...params, ...(this.tuneAccount ? { account: this.tuneAccount } : {}) })
-    return this.tuneweave.request<Data>(route + (query.size ? "?" + query : ""))
+  private async sameSelection(alias: string, record: StoredAccount | undefined, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    if (!record) return this.tuneAccount === alias
+    const current = await this.loadAccount()
+    signal?.throwIfAborted()
+    return current?.tuneweave_account === alias && current.saved_at === record.saved_at && current.user_id === record.user_id
   }
 
-  async getVideoInfo(target: VideoId): Promise<VideoInfo> {
+  async tuneRequest<Data>(route: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<Data> {
+    this.selection ??= this.loadAccount().then(stored => {
+      const alias = this.tuneAccount || stored?.tuneweave_account || ""
+      return { alias, record: alias && stored?.tuneweave_account === alias ? stored : undefined }
+    })
+    const { alias, record } = await this.selection
+    const query = new URLSearchParams({ ...params, ...(alias ? { account: alias } : {}) })
+    const endpoint = route + (query.size ? "?" + query : "")
+    if (!alias) return this.tuneweave.request<Data>(endpoint, { signal, redirect: "error" })
+    const accountSelection = { platform: "bilibili", alias }
+    const verify = async () => {
+      if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+    }
+    const read = async () => {
+      await verify()
+      const result = await this.tuneweave.request<Data>(endpoint, { signal, redirect: "error", accountSelection })
+      await verify()
+      if (!result.accountSelected) throw new Error("TuneWeave 未确认原 B 站账号。")
+      return result.data
+    }
+    try { return await read() }
+    catch (error) {
+      if (!record || this.refreshed || !(error && typeof error === "object" && "code" in error && error.code === "authentication_required")) throw error
+      await verify()
+      const originalUid = record.user_id
+      if (typeof originalUid !== "string" || !/^[1-9]\d{0,19}$/u.test(originalUid)) {
+        throw new Error("旧 B 站账号缺少已核验的 UID，请重新扫码登录。")
+      }
+      this.refreshed = true
+      const { data, accountSelected } = await this.tuneweave.request<{ platform?: string; account?: string; authenticated?: boolean; user_id?: string }>(
+        "/v1/auth/session/refresh", { method: "POST", signal, redirect: "error", accountSelection,
+          body: { platform: "bilibili", account: alias, credential_mode: "server" } })
+      await verify()
+      if (!accountSelected || data?.platform !== "bilibili" || data.account !== alias || data.authenticated !== true ||
+          data.user_id !== originalUid) throw new Error("TuneWeave 未确认原 B 站账号续期。")
+      return read()
+    }
+  }
+
+  async getVideoInfo(target: VideoId, signal?: AbortSignal): Promise<VideoInfo> {
     const ref = target.bvid ? `bilibili:bvid:${target.bvid}` : `bilibili:aid:${target.aid}`
     const route = `/v1/videos/${encodeURIComponent(ref)}`
-    const detail = await this.tuneRequest<{ video?: TuneWeaveVideo }>(route, { kind: "video" })
+    const detail = await this.tuneRequest<{ video?: TuneWeaveVideo }>(route, { kind: "video" }, signal)
     const data = detail?.video
     if (!data?.ref) throw new Error("TuneWeave 视频详情不完整")
     const ext = data.extensions || {}
     const pages: TuneWeavePart[] = []
     const bvid = ext.bvid || target.bvid
-    if (bvid && !/^BV[1-9A-Za-z]{10}$/i.test(bvid)) throw new Error("TuneWeave 视频编号无效")
+    const resolvedRef = bvid ? `bilibili:bvid:${bvid}` : ref
+    if (bvid && !/^BV[1-9A-Za-z]{10}$/u.test(bvid) || target.bvid && bvid !== target.bvid ||
+        target.aid && String(ext.aid) !== target.aid || data.ref !== resolvedRef) {
+      throw new Error("TuneWeave 视频编号与请求不匹配")
+    }
     for (let offset = 0; offset < 10000; offset += 100) {
-      const part = await this.tuneRequest<TuneWeavePart[]>(route + "/parts", { kind: "video", limit: "100", offset: String(offset) })
+      const part = await this.tuneRequest<TuneWeavePart[]>(route + "/parts", { kind: "video", limit: "100", offset: String(offset) }, signal)
       pages.push(...part)
       if (part.length < 100) break
       if (offset === 9900) throw new Error("视频分P数量超过限制")
     }
+    const parsedPages = parseParts(pages, data.ref)
+    const selected = target.page === undefined ? undefined : parsedPages.find(item => item.page === target.page)
+    if (target.page !== undefined && !selected) throw new Error("TuneWeave 未返回指定分 P")
     const description = stripHtml(data.description)
     const ownerRef = data.creators?.[0]?.ref ?? data.creators?.[0]?.resource_ref
     return {
       type: "video",
       ref: data.ref,
-      title: stripHtml(data.title),
+      title: selected?.part ? `${stripHtml(data.title)} · P${selected.page} ${selected.part}` : stripHtml(data.title),
       bvid,
       aid: ext.aid || target.aid,
-      url: `https://www.bilibili.com/video/${bvid || "av" + target.aid}`,
+      url: `https://www.bilibili.com/video/${bvid || "av" + target.aid}${selected ? "?p=" + selected.page : ""}`,
       cover: normalizeBiliImage(data.cover_url || ""),
       owner: data.creators?.map(c => c.name).join(" / ") || "",
       ownerId: typeof ownerRef === "string" ? /^bilibili:user:([1-9]\d*)$/u.exec(ownerRef)?.[1] : undefined,
-      duration: Number(data.duration_ms || 0) / 1000,
+      duration: selected?.duration ?? Number(data.duration_ms || 0) / 1000,
       createdAt: ext.ctime,
       publishedAt: data.published_at,
       category: ext.category_name,
@@ -389,15 +445,9 @@ export class BilibiliService {
         reply: ext.comment_count,
         share: ext.share_count,
       },
-      cid: ext.first_cid,
-      pages: pages.map((part, i) => ({
-        index: i + 1,
-        cid: part.id.replace(/^cid:/, ""),
-        partId: part.id,
-        page: part.page,
-        part: stripHtml(part.title),
-        duration: Number(part.duration_ms || 0) / 1000,
-      })),
+      cid: selected?.cid ?? ext.first_cid,
+      pages: parsedPages,
+      ...(selected && { selectedPage: selected }),
       desc: description.slice(0, 180),
       description,
     }
@@ -421,10 +471,10 @@ export class BilibiliService {
     }
   }
 
-  async search(keyword: string, { page = 1, limit = this.searchLimit } = {}): Promise<BilibiliSearchResult[]> {
+  async search(keyword: string, { page = 1, limit = this.searchLimit, signal }: { page?: number; limit?: number; signal?: AbortSignal } = {}): Promise<BilibiliSearchResult[]> {
     const items = await this.tuneRequest<{ type: string; data: TuneWeaveVideo }[]>("/v1/search", {
       platform: "bilibili", type: "video", q: keyword, limit: String(limit), offset: String((page - 1) * limit),
-    })
+    }, signal)
     return items.filter(item => item.type === "video").map(({ data }) => {
       const bvid = data.extensions?.bvid || data.id.replace(/^bvid:/, "")
       return {
@@ -434,8 +484,8 @@ export class BilibiliService {
     })
   }
 
-  async buildDownloadPlan(input: BilibiliInput, config: DownloadConfigInput = {}): Promise<DownloadPlan | DownloadFailure> {
-    const info = await this.getInfo(input)
+  async buildDownloadPlan(input: BilibiliInput, config: DownloadConfigInput = {}, signal?: AbortSignal): Promise<DownloadPlan | DownloadFailure> {
+    const info = await this.getInfo(input, signal)
     if (info.type !== "video") {
       return {
         ok: false,
@@ -459,7 +509,7 @@ export class BilibiliService {
       }
     }
 
-    const pages = selectPages(info.pages, download.multi_page_policy)
+    const pages = info.selectedPage ? [info.selectedPage] : selectPages(info.pages, download.multi_page_policy)
     return {
       ok: true,
       info,
@@ -472,7 +522,7 @@ export class BilibiliService {
 
   async download(input: BilibiliInput, config: DownloadConfigInput = {}, hooks: DownloadHooks = {}): Promise<DownloadSuccess | DownloadFailure> {
     const download = normalizeDownloadConfig(config)
-    const plan = await this.buildDownloadPlan(input, download)
+    const plan = await this.buildDownloadPlan(input, download, hooks.signal)
     if (!plan.ok) return plan
     const task = await createMediaTask(this.tasksDir)
     try {
@@ -508,9 +558,13 @@ export class BilibiliService {
     const signal = hooks.signal
     const processOptions = { cwd: workDir, spawnImpl: this.spawn, timeoutMs: download.timeout_ms, signal }
     for (const page of plan.pages) {
-      const manifest = await this.tuneRequest<TuneWeavePlayback>(`/v1/videos/${encodeURIComponent(plan.info.ref)}/playback`, { kind: "video", part: page.partId || "cid:" + page.cid })
       if (!/^\d+$/.test(String(page.cid)) || !Number.isSafeInteger(page.page) || page.page < 1) {
         throw new Error("TuneWeave 视频分 P 编号无效")
+      }
+      const manifest = await this.tuneRequest<TuneWeavePlayback>(`/v1/videos/${encodeURIComponent(plan.info.ref)}/playback`,
+        { kind: "video", part: page.partId || "cid:" + page.cid }, signal)
+      if (manifest.video_ref !== plan.info.ref || manifest.part_ref !== "bilibili:cid:" + page.cid) {
+        throw new Error("TuneWeave 播放来源与所选分 P 不匹配")
       }
       const stem = `video-${plan.info.bvid || "av" + plan.info.aid}-P${page.page}-${page.cid}`, output = path.join(workDir, stem + ".mp4")
       const options = { fetch: this.fetch, headers: manifest.headers || {}, timeoutMs: download.timeout_ms, maxBytes: download.max_estimated_size_mb > 0 ? download.max_estimated_size_mb * 1024 * 1024 : 0, concurrency: download.concurrency, signal }
@@ -575,9 +629,12 @@ export class BilibiliService {
         const profile = result.profile
         if (!profile?.authenticated || (profile.platform && profile.platform !== "bilibili") ||
             (profile.account && profile.account !== alias)) throw new Error("B站登录身份未核实")
-        const account = { tuneweave_account: alias, saved_at: formatLocalIso(this.now()), source: "tuneweave" }
+        const account = { tuneweave_account: alias, saved_at: formatLocalIso(this.now()), source: "tuneweave",
+          ...(typeof profile.user_id === "string" && /^[1-9]\d{0,19}$/u.test(profile.user_id) && { user_id: profile.user_id }) }
         await this.saveAccount(account, { signal })
         this.tuneAccount = account.tuneweave_account
+        this.selection = undefined
+        this.refreshed = false
         return { ok: true as const, account }
       }
       if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("B站二维码已过期或需要附加验证，请重新登录")
@@ -614,6 +671,7 @@ export class BilibiliService {
     const data = YAML.stringify({
       ...(account.cookie ? { cookie: normalizeBiliCookie(account.cookie) } : {}),
       ...(account.tuneweave_account ? { tuneweave_account: account.tuneweave_account } : {}),
+      ...(account.user_id && { user_id: account.user_id }),
       saved_at: account.saved_at || formatLocalIso(this.now()),
       source: account.source || "manual",
     })
@@ -814,6 +872,20 @@ export async function resolveCommandPath(command: string, toolsPath = "") {
   return first || ""
 }
 
+function parseParts(rows: readonly TuneWeavePart[], ref: string): VideoPage[] {
+  const seenPages = new Set<number>(), seenCids = new Set<string>()
+  return rows.map((part, index) => {
+    const cid = /^cid:([1-9]\d{0,19})$/u.exec(part.id)?.[1]
+    const { page } = part
+    if (!cid || !Number.isSafeInteger(page) || page < 1 || part.video_ref !== ref || seenPages.has(page) || seenCids.has(cid)) {
+      throw new Error("TuneWeave 返回不匹配或重复的 B 站分 P")
+    }
+    seenPages.add(page)
+    seenCids.add(cid)
+    return { index: index + 1, cid, partId: part.id, page, part: stripHtml(part.title), duration: Number(part.duration_ms || 0) / 1000 }
+  })
+}
+
 export function selectPages(pages: VideoPage[] = [], policy: MultiPagePolicy = "zip"): VideoPage[] {
   const list = Array.isArray(pages) && pages.length ? pages : [{ index: 1, page: 1 }]
   return policy === "first" ? [list[0]!] : list
@@ -841,8 +913,15 @@ export function biliDynamicId(url: URL) {
 }
 
 export function isBiliVideoPage(url: URL) {
-  return (url.hostname === "www.bilibili.com" || url.hostname === "bilibili.com") &&
+  return (url.hostname === "www.bilibili.com" || url.hostname === "bilibili.com" || url.hostname === "m.bilibili.com") &&
     /^\/video\/(?:BV[1-9A-Za-z]{10}|av[1-9]\d*)\/?$/iu.test(url.pathname)
+}
+
+function biliPartNumber(url: URL) {
+  const values = url.searchParams.getAll("p")
+  if (!values.length) return
+  const [value] = values
+  return values.length === 1 && value && /^[1-9]\d{0,3}$/u.test(value) ? Number(value) : null
 }
 
 function cardProperty(value: unknown, name: string): unknown {
@@ -868,7 +947,9 @@ export function quotedBiliCardLink(raw: unknown) {
     const url = parseBiliUrl(value)
     if (!url || (!isBiliVideoPage(url) && !biliDynamicId(url) &&
         !(BILI_SHORT_HOSTS.has(url.hostname) && /^\/[a-z0-9]+\/?$/iu.test(url.pathname)))) continue
-    url.search = ""
+    const page = isBiliVideoPage(url) ? biliPartNumber(url) : undefined
+    if (page === null) return
+    url.search = page === undefined ? "" : "p=" + page
     url.hash = ""
     return url.href
   }

@@ -261,9 +261,9 @@ function openNews(p: SourceCanvas, { owner, title, byline, avatar, metadata }: M
  if(avatar)p.image(avatar,35,p.y,90,90,{cover:true,radius:45})
  const ownerX=avatar?143:35, ownerWidth=p.width-ownerX-35
  const authorHeight=p.text(owner,ownerX,p.y+16,ownerWidth,30,GOLD,{leading:50,literal})
- const extraAuthor=literal?Math.max(0,authorHeight-50):0
+ const extraAuthor=Math.max(0,authorHeight-50)
  const bylineHeight=p.text(byline,ownerX,p.y+66+extraAuthor,ownerWidth,22,MUTED,{literal})
- p.y+=130+extraAuthor+(literal?Math.max(0,bylineHeight-33):0)
+ p.y+=130+extraAuthor+Math.max(0,bylineHeight-33)
  p.rule(30,p.y-5,p.width-60,RULE)
  p.y+=p.text(title,30,p.y,p.width-60,44,WHITE,{leading:60,literal})+20
  if (metadata !== undefined) p.y+=p.text(metadata,30,p.y,p.width-60,18,GOLD,{leading:28,literal})+20

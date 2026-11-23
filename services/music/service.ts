@@ -12,6 +12,7 @@ import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/t
 import { runMediaProcess } from "../media/files.ts"
 import { resolveData } from "../../core/path.ts"
 import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accounts.ts"
+import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeResult, type VoiceSearchItem } from "./episode.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -24,11 +25,12 @@ export type MusicTrack = {
   readonly album?: { readonly cover_url?: string }
   readonly extensions?: { readonly url?: string }
   readonly duration_ms?: number
+  readonly episode_id?: string
 }
 
 export interface MusicStream {
   url: string
-  trial?: boolean
+  trial?: boolean | { readonly start_ms?: number; readonly end_ms?: number } | null
   resolved_platform?: string
   backup_urls?: string[]
   headers?: Record<string, string>
@@ -119,7 +121,9 @@ export class MusicService {
     return Object.entries(MUSIC_PLATFORMS).map(([platform, name]) => ({ platform, name, capabilities: items.find(i => i.platform === platform && i.registered)?.capabilities || [] })).filter(i => i.capabilities.length)
   }
   async search(platform: string, keyword: string, page = 1,
-    { limit = this.config.search_limit, offset = (page - 1) * this.config.search_limit } = {}) {
+    { limit = this.config.search_limit, offset = (page - 1) * this.config.search_limit, variant }: {
+      limit?: number; offset?: number; variant?: "cloud"
+    } = {}) {
     if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error("请选择有效平台并输入歌曲关键词")
     const accounts = await readMusicAccounts(this.accountsFile)
     const { alias, credential } = accounts[platform] || {}
@@ -127,6 +131,7 @@ export class MusicService {
     // results from other platforms or losing rotated caller credentials.
     const params = new URLSearchParams({
       platform, type: "track", q: keyword.trim(), limit: String(limit), offset: String(offset),
+      ...(variant ? { variant } : {}),
       ...(alias && !credential ? { account: alias } : {}),
     })
     const { data: items, accountSelected } = await this.request<SearchItem[]>(`/v1/search?${params}`, accounts, {
@@ -136,6 +141,22 @@ export class MusicService {
     // confirm that the music provider still considers the account signed in.
     const accountStatus = alias || credential ? accountSelected ? "selected" : "unverified" : "unconfigured"
     return { tracks: items.filter(i => i.type === "track").map(i => i.data), accountStatus }
+  }
+  async firstEpisode(keyword: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const account = (await readMusicAccounts(this.accountsFile)).netease?.alias
+    const identity: Record<string, string> = account ? { account } : {}
+    const search = new URLSearchParams({ platform: "netease", type: "voice", variant: "legacy", limit: "1", q: keyword, ...identity })
+    const items = await this.tuneweave.request<VoiceSearchItem[]>(`/v1/search?${search}`, { signal, redirect: "error" })
+    if (!Array.isArray(items)) throw new Error("网易云播客搜索结果无法核实。")
+    if (!items.length) return
+    const episode = voiceSearchSelection(items[0])
+    if (!episode) throw new Error("网易云播客搜索结果缺少可核实的节目资料。")
+    const controls = new URLSearchParams({ quality: this.config.quality, fallback: "false", unblock: "false", ...identity })
+    const result = await this.tuneweave.request<EpisodeResult>(`/v1/episodes/${encodeURIComponent(episode.ref)}/stream?${controls}`,
+      { signal, redirect: "error" })
+    signal?.throwIfAborted()
+    return verifiedEpisodePlayback(episode, result)
   }
   async resolve(track: MusicTrack) {
     const accounts = await readMusicAccounts(this.accountsFile), account = accounts[track.platform]
@@ -229,7 +250,8 @@ export function musicShare(track: MusicTrack, stream: Pick<MusicStream, "url" | 
   const type = types[track.platform]
   if (!type) return null
   const artists = track.artists?.map(a => a.name).join(" / ") || "未知歌手", id = encodeURIComponent(track.id)
-  const links: Partial<Record<string, string>> = { netease: `https://music.163.com/#/song?id=${id}`, qq: `https://y.qq.com/n/ryqq/songDetail/${id}` }
+  const netease = track.episode_id ? neteaseEpisodePage(track.episode_id) : `https://music.163.com/#/song?id=${id}`
+  const links: Partial<Record<string, string>> = { netease, qq: `https://y.qq.com/n/ryqq/songDetail/${id}` }
   const url = links[track.platform] || track.extensions?.url
   if (!url) return null
   const cover = track.album?.cover_url || track.artists?.[0]?.avatar_url || ""

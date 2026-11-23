@@ -7,9 +7,10 @@ import { formatLocalDateTime } from "../../core/time.ts"
 import { safeMediaName } from "../media/files.ts"
 import { TuneWeaveService } from "../tuneweave/service.ts"
 import { cloudHelp, createCloudCommands } from "./cloud-command.ts"
+import { neteaseEpisodePage } from "./episode.ts"
 import { readPartnerLog, partnerLogNodes } from "./partner-log.ts"
 import { NeteasePartnerTask, type PartnerConfig, type PartnerReport } from "./partner-task.ts"
-import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicTrack, type MusicConfig } from "./service.ts"
+import { MusicService, MUSIC_PLATFORMS, MUSIC_QR_TYPES, musicLoginTimeout, musicSessionKey, musicShare, type MusicStream, type MusicTrack, type MusicConfig } from "./service.ts"
 
 const aliases: Readonly<Record<string, string>> = {
   网易云: "netease", 网易: "netease", QQ: "qq", qq: "qq", QQ音乐: "qq",
@@ -18,9 +19,11 @@ const aliases: Readonly<Record<string, string>> = {
 const featureNames = ["[media] 点歌"] as const
 const maxInlineBytes = 16 * 1024 * 1024
 const searchCommand = /^#(网易云|网易|QQ音乐|QQ|qq|酷狗|酷我|咪咕|汽水)?(?:点歌|搜歌)\s*([\s\S]*)$/u
+const playCommand = /^#播放\s*([\s\S]*?)(?:\s+([12]))?$/u
 const choiceCommand = /^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$/u
 const partnerManualCommand = /^#合伙人测试(?:[（(]执行[）)])?$/u
-const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音，播放自动回退音源。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。"
+const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客。"
+const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
 const searchNotes: Readonly<Record<string, string>> = {
   selected: "本次搜索已选用公共音乐账号。",
   unverified: "公共音乐账号的登录状态待确认。",
@@ -198,12 +201,24 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       }
     }
     const artists = track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"
-    const fallback = `《${track.name}》 · ${artists}`
+    const program = track.episode_id ? neteaseEpisodePage(track.episode_id) : undefined
+    const fallback = `《${track.name}》 · ${artists}${program ? `\n${program}` : ""}`
     const image = await renderStatusCard({ title: track.name, subtitle: artists,
       message: `完整音频 · ${Math.round(media.duration)} 秒`,
       items: [{ label: "实际音源", value: musicNames[media.stream.resolved_platform ?? ""] || media.stream.resolved_platform || musicNames[track.platform] }],
     }).catch(() => undefined)
-    await imageReply(context, image, fallback)
+    if (program && image && await reply(context, { type: "image", file: image })) await reply(context, program)
+    else if (program) await reply(context, fallback)
+    else await imageReply(context, image, fallback)
+  }
+
+  async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream) {
+    await reply(context, `正在获取《${track.name}》完整音源…`)
+    const media = stream ? await api.prepareStream(track, stream, { signal: moduleSignal }) : await api.prepare(track, { signal: moduleSignal })
+    try {
+      await sendTrackInfo(context, track, media)
+      await sendVoice(context, media)
+    } finally { await api.cleanup(media) }
   }
 
   async function showResults(context: Context, key: string, session: SearchSession) {
@@ -314,15 +329,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           await cloud.play(context, session.api, session.cloud.binding, cloudTrack)
           return []
         }
-        await reply(context, `正在获取《${track.name}》完整音源…`)
-        let media
-        try {
-          media = await session.api.prepare(track, { signal: moduleSignal })
-          await sendTrackInfo(context, track, media)
-          await sendVoice(context, media)
-        } finally {
-          if (media) await session.api.cleanup(media)
-        }
+        await playMedia(context, session.api, track)
       } else {
         if (!credentialScope(context)) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
         const index = Number(message) - 1
@@ -349,6 +356,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
 
   function action(message: string) {
     if (searchCommand.test(message)) return "search"
+    if (playCommand.test(message)) return "directPlay"
     if (choiceCommand.test(message)) return "choice"
     if (partnerManualCommand.test(message)) return "partnerManual"
     switch (message) {
@@ -369,6 +377,31 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     const key = musicSessionKey(context)
     if (selected === "choice") return choose(message, context, key)
     if (selected === "help") return credentialScope(context) ? `${help}\n${cloudHelp}` : help
+    if (selected === "directPlay") {
+      if (context.message_type === "terminal") return
+      const [, input, mode] = playCommand.exec(message)!
+      const keyword = input!.trim()
+      if (!keyword) return playHelp
+      try {
+        const { api, defaultPlatform } = await openMusic()
+        await recovery
+        moduleSignal.throwIfAborted()
+        if (mode === "2") {
+          if (defaultPlatform !== "netease") return "当前默认音乐平台未接入播客播放。"
+          const episode = await api.firstEpisode(keyword, moduleSignal)
+          if (!episode) return "未找到相关网易云播客。"
+          await playMedia(context, api, episode.track, episode.stream)
+        } else {
+          const variant = defaultPlatform === "netease" ? "cloud" : undefined
+          const { tracks: [track] } = await api.search(defaultPlatform, keyword, 1, { limit: 1, variant })
+          if (!track) return "未找到相关歌曲。"
+          await playMedia(context, api, track)
+        }
+      } catch (error) {
+        if (!moduleSignal.aborted) return "[media] 播放：" + errorText(error)
+      }
+      return []
+    }
     if (selected === "search") {
       try {
         const { api, defaultPlatform, timeoutMs } = await openMusic()

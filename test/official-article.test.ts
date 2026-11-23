@@ -24,15 +24,51 @@ const sspaiBody = `<article><h1 id="article-title">公开文章</h1><div class="
  <span hidden>不显示</span><script>恶意文本</script><template>不可见</template></div><aside>广告</aside></article>`
 const dailyBody = '<div class="content-left"><h1>News article</h1><div id="Content"><p>Original body.</p></div><aside>Recommendations</aside></div>'
 
-test("固定官方路径仅识别仓库根、明确 README 和带文章身份的地址", () => {
+test("固定官方路径识别仓库根、明确 README、Issue、Pull Request 和带身份的文章", () => {
   expect(parseOfficialArticle(github + "/?tab=readme-ov-file#install")).toMatchObject({ source: "github", link: github })
   expect(parseOfficialArticle(explicit + "?plain=1")).toMatchObject({ source: "github", link: explicit, file: { ref: "main", path: "README.md" } })
   expect(parseOfficialArticle(sspai + "?utm_source=share")).toEqual({ source: "sspai", link: sspai })
   expect(parseOfficialArticle(chinadaily)).toEqual({ source: "chinadaily", link: chinadaily })
-  for (const denied of [github + "/issues/1", github + "/blob/main/package.json", github + "/tree/main",
+  expect(parseOfficialArticle(github + "/issues/17?utm_source=share#issuecomment-81")).toMatchObject({
+    link: github + "/issues/17#issuecomment-81", discussion: { kind: "issues", number: "17" },
+  })
+  expect(parseOfficialArticle(github + "/pull/18?utm_source=share#discussion_r21")).toMatchObject({
+    link: github + "/pull/18#discussion_r21", discussion: { kind: "pull", number: "18" },
+  })
+  for (const denied of [github + "/issues/01", github + "/pull/18/files", github + "/blob/main/package.json", github + "/tree/main",
     github + "/blob/feature/name/README.md", "https://github.com@evil.example/oven-sh/bun",
     "https://sspai.com:8081/post/116181", "https://sspai.com/", "https://global.chinadaily.com.cn/a/index.html",
     "https://evil.example/post/116181", "http://127.0.0.1:8080/"]) expect(parseOfficialArticle(denied)).toBeUndefined()
+})
+
+test("GitHub Issue 与 Pull Request 只读同仓同编号的官方正文", async () => {
+  for (const [action, apiCollection] of [["issues", "issues"], ["pull", "pulls"]]) {
+    const htmlUrl = github + `/${action}/17`
+    const input = parseOfficialArticle(htmlUrl + "#issuecomment-81")!
+    const apiUrl = `https://api.github.com/repos/oven-sh/bun/${apiCollection}/17`
+    const data = {
+      url: apiUrl, html_url: htmlUrl, number: 17, title: "公开标题", user: { login: "maintainer" },
+      body: "原始 Markdown", body_text: "公开正文", comments_url: "https://example.invalid/untrusted",
+    }
+    let requests = 0
+    expect(await getOfficialArticle(input, async (url, init) => {
+      requests++
+      expect(url.href).toBe(apiUrl)
+      expect(init).toEqual({ redirect: "error", credentials: "omit", signal,
+        headers: { Accept: "application/vnd.github.text+json", "User-Agent": "Lotus-Yunzai" } })
+      return Response.json(data)
+    }, signal)).toEqual({
+      title: "公开标题", owner: "maintainer · oven-sh/bun #17", text: "公开正文", link: input.link,
+    })
+    expect(requests).toBe(1)
+    for (const changes of [{ number: 18 }, { url: apiUrl.replace("/bun/", "/other/") },
+      { html_url: htmlUrl.replace("/bun/", "/other/") }, { html_url: htmlUrl + "/files" }, { title: "" },
+      ...(action === "issues" ? [{ pull_request: { html_url: github + "/pull/17" } }] : []),
+    ]) expect(await getOfficialArticle(input, async () => Response.json({ ...data, ...changes }), signal)).toBeUndefined()
+    expect(await getOfficialArticle(input, async () => Response.json({ ...data, body_text: null, body: null }), signal))
+      .toMatchObject({ text: "", link: input.link })
+    expect(await getOfficialArticle(input, async () => new Response(null, { status: 404 }), signal)).toBeUndefined()
+  }
 })
 
 test("GitHub 绑定同一仓库、默认或明确分支、README 字节和 Git blob SHA，始终只读官方 API", async () => {

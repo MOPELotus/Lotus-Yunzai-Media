@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto"
 import { load } from "cheerio"
 
-interface GitHubReadme {
+interface GitHubArticle {
   readonly source: "github"
   readonly owner: string
   readonly repo: string
   readonly link: string
   readonly file?: { readonly ref: string; readonly path: string }
+  readonly discussion?: { readonly kind: "issues" | "pull"; readonly number: string }
 }
 
 interface NewsArticle {
@@ -14,7 +15,7 @@ interface NewsArticle {
   readonly link: string
 }
 
-export type OfficialArticleTarget = GitHubReadme | NewsArticle
+export type OfficialArticleTarget = GitHubArticle | NewsArticle
 export type OfficialArticleFetch = (url: URL, options: RequestInit) => Promise<Response>
 export interface OfficialArticle {
   readonly title: string
@@ -53,6 +54,11 @@ export function parseOfficialArticle(value: string): OfficialArticleTarget | und
   if (!owner || !repo || !githubOwner.test(owner) || !githubRepo.test(repo) || rest.length) return
   const root = `https://${githubHost}/${owner}/${repo}`
   if (action === undefined) return { source: "github", owner, repo, link: root }
+  if ((action === "issues" || action === "pull") && ref && /^[1-9]\d{0,11}$/u.test(ref) && filename === undefined) {
+    const link = new URL(`${root}/${action}/${ref}`)
+    if (/^#(?:issuecomment|pullrequestreview|discussion_r)-?\d{1,20}$/u.test(url.hash)) link.hash = url.hash
+    return { source: "github", owner, repo, link: link.href, discussion: { kind: action, number: ref } }
+  }
   if (action !== "blob" || !ref || !githubRef.test(ref) || !filename || !readmeName.test(filename)) return
   return { source: "github", owner, repo, file: { ref, path: filename }, link: `${root}/blob/${ref}/${filename}` }
 }
@@ -94,8 +100,30 @@ function clean(value: unknown, max: number) {
   return truncate(safeText(value).replace(/[^\S\n]+/gu, " ").replace(/ *\n */gu, "\n").replace(/\n{3,}/gu, "\n\n"), max)
 }
 
-async function github(target: GitHubReadme, fetcher: OfficialArticleFetch, signal: AbortSignal): Promise<OfficialArticle | undefined> {
+async function github(target: GitHubArticle, fetcher: OfficialArticleFetch, signal: AbortSignal): Promise<OfficialArticle | undefined> {
   const repo = `/repos/${target.owner}/${target.repo}`
+  const discussion = target.discussion
+  if (discussion) {
+    const { kind, number } = discussion
+    const endpoint = new URL(`https://${githubApi}${repo}/${kind === "pull" ? "pulls" : kind}/${number}`)
+    const json = await bounded(fetcher, endpoint, signal, "application/vnd.github.text+json",
+      ["application/json", "application/vnd.github+json", "application/vnd.github.text+json"], 512 * 1024)
+    if (!json) return
+    const data = record(JSON.parse(json))
+    const api = articleUrl(data?.url)
+    const page = articleUrl(data?.html_url)
+    const expected = new URL(target.link)
+    if (!data || !Number.isSafeInteger(data.number) || String(data.number) !== number ||
+        api?.origin !== endpoint.origin || api.pathname.toLowerCase() !== endpoint.pathname.toLowerCase() ||
+        page?.origin !== expected.origin || page.pathname.toLowerCase() !== expected.pathname.toLowerCase() ||
+        (kind === "issues" && data.pull_request != null)) return
+    const title = clean(data.title, 300)
+    if (!title) return
+    const author = clean(record(data.user)?.login, 80)
+    const repository = `${target.owner}/${target.repo} #${number}`
+    return { title, owner: author ? `${author} · ${repository}` : repository,
+      text: clean(data.body_text ?? data.body, maxText), link: target.link }
+  }
   const endpoint = new URL(`https://${githubApi}${repo}${target.file ? "/contents/" + target.file.path : "/readme"}`)
   if (target.file) endpoint.searchParams.set("ref", target.file.ref)
   const json = await bounded(fetcher, endpoint, signal, "application/vnd.github+json",

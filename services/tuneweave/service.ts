@@ -131,7 +131,7 @@ function requireCompatibleManifest(manifest: TuneWeaveManifest) {
     throw new TuneWeaveCompatibilityError("此 TuneWeave 发行版未声明客户端兼容性")
   }
   const profiles = manifest.compatibility_profiles
-  if (manifest.api_version !== "v1" || !Array.isArray(profiles) || profiles.length < 1 || profiles.length > 16 ||
+  if (!Array.isArray(profiles) || profiles.length < 1 || profiles.length > 16 ||
       profiles.some(profile => typeof profile !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile)) ||
       new Set(profiles).size !== profiles.length) {
     throw new TuneWeaveCompatibilityError("TuneWeave 发布清单的客户端兼容性声明无效")

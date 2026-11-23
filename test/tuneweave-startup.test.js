@@ -165,6 +165,8 @@ test("TuneWeave 更新按兼容契约选择，只有已验历史版本可以缺�
   expect(await service.releaseManifest()).toEqual(legacy)
   manifest = { ...current, compatibility_profiles: ["future-client", "tuneweave-http-v1"] }
   expect(await service.releaseManifest()).toEqual(manifest)
+  manifest = { ...current, api_version: "v2", compatibility_profiles: ["tuneweave-http-v1", "future-client"] }
+  expect(await service.releaseManifest()).toEqual(manifest)
 
   for (const [value, error] of [
     [current, "未声明"],
@@ -172,7 +174,7 @@ test("TuneWeave 更新按兼容契约选择，只有已验历史版本可以缺�
     [{ ...legacy, api_version: "v1", compatibility_profiles: ["tuneweave-http-v1", "tuneweave-http-v1"] }, "声明无效"],
     [{ ...current, compatibility_profiles: null }, "声明无效"],
     [{ ...current, compatibility_profiles: ["tuneweave-http-v1", "不可用"] }, "声明无效"],
-    [{ ...current, api_version: "v2", compatibility_profiles: ["tuneweave-http-v1"] }, "声明无效"],
+    [{ ...legacy, api_version: "v2" }, "未声明"],
   ]) {
     manifest = value
     await expect(service.releaseManifest()).rejects.toThrow(error)

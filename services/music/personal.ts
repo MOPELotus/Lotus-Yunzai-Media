@@ -78,16 +78,20 @@ async function verify(api: MusicService, expected: Binding, signal: AbortSignal)
   return profile
 }
 
-export async function refreshOwnMusicAccount(api: MusicService, platform: PrivatePlatform, owner: number, signal: AbortSignal) {
-  const key = JSON.stringify([api.tuneweave.config.api_url, api.accountsFile, platform])
+async function refreshMusicBinding(api: MusicService, expected: Binding, signal: AbortSignal) {
+  const key = JSON.stringify([api.tuneweave.config.api_url, api.accountsFile, expected.platform])
   if (refreshing.has(key)) throw new Error("此平台的音乐登录正在续期。")
   refreshing.add(key)
-  try { return await renew(api, platform, owner, signal) }
+  try { return await renew(api, expected, signal) }
   finally { refreshing.delete(key) }
 }
 
-async function renew(api: MusicService, platform: PrivatePlatform, owner: number, signal: AbortSignal) {
-  const expected = await binding(api, platform, owner, signal)
+export async function refreshOwnMusicAccount(api: MusicService, platform: PrivatePlatform, owner: number, signal: AbortSignal) {
+  return refreshMusicBinding(api, await binding(api, platform, owner, signal), signal)
+}
+
+async function renew(api: MusicService, expected: Binding, signal: AbortSignal) {
+  const { platform } = expected
   const credential = expected.saved.credential
   if (!credential?.startsWith("twc1_")) throw loginRequired()
   await assertCurrent(api, expected, signal)
@@ -126,9 +130,10 @@ export async function readQqCollection(api: MusicService, kind: MusicCollection,
   try { return { tracks: await load(), binding: expected } }
   catch (error) {
     if (errorCode(error) !== "authentication_required") throw error
-    await assertCurrent(api, expected, signal)
-    await refreshOwnMusicAccount(api, "qq", owner, signal)
-    expected = await binding(api, "qq", owner, signal)
+    await refreshMusicBinding(api, expected, signal)
+    const renewed = await binding(api, "qq", owner, signal)
+    if (renewed.alias !== expected.alias || renewed.uid !== expected.uid) throw new Error("音乐账号已变更，请重新查询。")
+    expected = renewed
     return { tracks: await load(), binding: expected }
   }
 }

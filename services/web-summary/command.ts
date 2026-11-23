@@ -6,8 +6,11 @@ import { getV2exArticle, parseOfficialLink, type OfficialLink, type OfficialLink
 import { createSummaryModel, maxSummaryInput } from "../official-links/summary-model.ts"
 import { getArxiv, parseArxiv, type ArxivTarget } from "./arxiv.ts"
 import { getOfficialArticle, parseOfficialArticle } from "./official-article.ts"
+import { createPublicPageReader } from "./public-page.ts"
+import { parsePublicPageUrl } from "./public-page-network.ts"
 
-type Source = ArxivTarget | NonNullable<ReturnType<typeof parseOfficialArticle>> | Extract<OfficialLink, { platform: "v2ex" }>
+type GenericPage = { readonly source: "public-page"; readonly link: string }
+type Source = GenericPage | ArxivTarget | NonNullable<ReturnType<typeof parseOfficialArticle>> | Extract<OfficialLink, { platform: "v2ex" }>
 type Summary = Pick<ReturnType<typeof createSummaryModel>, "settings" | "summarize">
 
 function parse(value: string): Source | undefined {
@@ -21,7 +24,13 @@ function identify(message: string, context: MessageFallbackContext) {
   if (context.isDelegated || (context.message_type !== "private" && context.message_type !== "group")) return
   if (/^\s*[#＃]/u.test(message)) {
     const value = /^\s*[#＃]总结一下\s*(https?:\/\/\S+)\s*$/iu.exec(message)?.[1]
-    return value ? parse(value) : undefined
+    if (value) {
+      const fixed = parse(value)
+      if (fixed) return fixed
+      const url = parsePublicPageUrl(value)
+      if (url) return { source: "public-page", link: value } as const
+    }
+    return
   }
   for (const value of messageLinkValues(message, context)) {
     const target = parse(value)
@@ -29,7 +38,11 @@ function identify(message: string, context: MessageFallbackContext) {
   }
 }
 
-async function getArticle(target: Source, fetcher: OfficialLinkFetch, signal: AbortSignal) {
+function isGenericPage(target: Source): target is GenericPage {
+  return "source" in target && target.source === "public-page"
+}
+
+async function getArticle(target: Exclude<Source, GenericPage>, fetcher: OfficialLinkFetch, signal: AbortSignal) {
   if ("platform" in target) return getV2exArticle(target, fetcher, signal)
   if (target.source === "arxiv") return getArxiv(target, fetcher, signal)
   return getOfficialArticle(target, fetcher, signal)
@@ -50,13 +63,14 @@ function summaryReply(title: string, owner: string | undefined, text: string, so
 
 export function createWebSummary({
   signal, settings = createOfficialLinkSettings().settings, model = createSummaryModel(),
-  fetcher = fetch, render = renderTemplate,
+  fetcher = fetch, render = renderTemplate, publicPage = createPublicPageReader(),
 }: {
   readonly signal?: AbortSignal
   readonly settings?: ReturnType<typeof createOfficialLinkSettings>["settings"]
   readonly model?: Summary
   readonly fetcher?: OfficialLinkFetch
   readonly render?: typeof renderTemplate
+  readonly publicPage?: ReturnType<typeof createPublicPageReader>
 } = {}) {
   return {
     features(context: MessageFallbackContext) {
@@ -72,12 +86,19 @@ export function createWebSummary({
       const v2ex = "platform" in target
       if (!options?.[v2ex ? "v2ex" : "articles"] || active.aborted ||
           (context.message_type === "private" && !options.private)) return []
+      const generic = isGenericPage(target)
+      const genericConfiguration = generic ? await model.settings().catch(() => undefined) : undefined
+      if (generic && !genericConfiguration) return `暂无法读取公开原文。\n${target.link}`
       let article
-      try { article = await getArticle(target, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)])) }
+      try {
+        const deadline = AbortSignal.any([active, AbortSignal.timeout(8000)])
+        article = generic ? await publicPage(target.link, deadline, genericConfiguration?.summaryBaseUrl)
+          : await getArticle(target, fetcher, deadline)
+      }
       catch { if (active.aborted) return [] }
       if (active.aborted) return []
       if (!article) return `暂无法读取公开原文。\n${target.link}`
-      const configuration = await model.settings().catch(() => undefined)
+      const configuration = generic ? genericConfiguration : await model.settings().catch(() => undefined)
       if (article.text && configuration?.summaryEnabled && !active.aborted) {
         try {
           const fallback = configuration.summaryMode === "yuanbao"

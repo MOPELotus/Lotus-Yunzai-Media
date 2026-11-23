@@ -11,6 +11,7 @@ import { dataPath } from "./core/path.ts"
 import { createSubscriptionConfig, numericId, type SubscriptionSettings } from "./services/subscriptions/config.ts"
 import { createOfficialVideoSettings, officialVideoGames } from "./services/official-video/settings.ts"
 import { createOfficialLinkSettings, officialLinkToggles, parseTrustedTelegramUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
+import { createKuaishouSettings, kuaishouFields } from "./services/kuaishou/settings.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
 
 import type { SubscriptionPlatform } from "./services/subscriptions/types.ts"
@@ -221,9 +222,13 @@ function changed(field: SettingsField, value: FieldInput, settings: Subscription
 
 export function supportGuoba(directory = dataPath, officialVideo = createOfficialVideoSettings(directory),
   root = directory === dataPath ? new URL("../../", import.meta.url) : pathToFileURL(directory + sep),
-  pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig) {
+  pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig, kuaishou = createKuaishouSettings(directory)) {
   const config = createSubscriptionConfig(directory, lockFile)
   const officialLinks = createOfficialLinkSettings(directory, root)
+  const publicShares = [
+    { id: "pipixia", name: "皮皮虾", fields: pipixiaFields, store: pipixia },
+    { id: "kuaishou", name: "快手", fields: kuaishouFields, store: kuaishou },
+  ] as const
   return {
     pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
     configInfo: {
@@ -250,8 +255,10 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       ...officialVideoToggles.map(([key, label]) => ({ field: `officialVideo.${key}`, label, component: "Switch" })),
       ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
         component: "Select", componentProps: { mode: "tags" } })),
-      { component: "SOFT_GROUP_BEGIN", label: "皮皮虾" },
-      ...pipixiaFields.map(([key, label]) => ({ field: `pipixia.${key}`, label, component: "Switch" })),
+      ...publicShares.flatMap(share => [
+        { component: "SOFT_GROUP_BEGIN", label: share.name },
+        ...share.fields.map(([key, label]) => ({ field: `${share.id}.${key}`, label, component: "Switch" })),
+      ]),
       { component: "SOFT_GROUP_BEGIN", label: "公开链接预览" },
       ...officialLinkToggles.map(([key, label]) => ({ field: `officialLinks.${key}`, label, component: "Switch" })),
       { field: "officialLinks.trustedTelegramUsers", label: "Telegram 信任 QQ", component: "Select",
@@ -265,7 +272,8 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           const settings = await loadPublicShareConfig(site, root)
           return [site, { enable: settings.enable, private_preview: settings.privatePreview }]
         })), loadConfig().then(config => config.tools), officialLinks.settings()])
-        return { ...Object.fromEntries(entries), ...Object.fromEntries(shareSettings), pipixia: await pipixia.settings(tools),
+        const shares = await Promise.all(publicShares.map(async share => [share.id, await share.store.settings(tools)]))
+        return { ...Object.fromEntries([...entries, ...shareSettings, ...shares]),
           officialLinks: officialLinkSettings, officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
@@ -280,13 +288,17 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           if (!patch) return Result.error(`请填写有效的${publicShareSiteNames[site]}设置。`, 422)
           if (Object.keys(patch).length) sharePatches.set(site, patch)
         }
-        const pipixiaPatch: Partial<PipixiaSettings> = {}
-        for (const [key] of pipixiaFields) {
-          const name = `pipixia.${key}`
-          if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
-          const value = values[name]
-          if (typeof value !== "boolean") return Result.error("请填写有效的皮皮虾开关。", 422)
-          pipixiaPatch[key] = value
+        const publicSharePatches = new Map<typeof publicShares[number]["store"], Partial<PipixiaSettings>>()
+        for (const share of publicShares) {
+          const patch: Partial<PipixiaSettings> = {}
+          for (const [key] of share.fields) {
+            const name = `${share.id}.${key}`
+            if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
+            const value = values[name]
+            if (typeof value !== "boolean") return Result.error(`请填写有效的${share.name}开关。`, 422)
+            patch[key] = value
+          }
+          if (Object.keys(patch).length) publicSharePatches.set(share.store, patch)
         }
         const officialLinkPatch: OfficialLinkPatch = {}
         for (const [key] of officialLinkToggles) {
@@ -323,7 +335,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         }
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
         for (const [site, patch] of sharePatches) await savePublicShare(root, site, patch)
-        if (Object.keys(pipixiaPatch).length) await pipixia.save(pipixiaPatch)
+        for (const [store, patch] of publicSharePatches) await store.save(patch)
         if (Object.keys(officialLinkPatch).length) await officialLinks.save(officialLinkPatch)
         return Result.ok()
       },

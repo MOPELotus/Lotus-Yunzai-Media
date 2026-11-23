@@ -4,7 +4,7 @@ const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.co
 const miyousheVideoDomains = new Set(["prod-vod-sign.miyoushe.com", "prod-vod-sign.mihoyo.com"])
 const acfunVideoHosts = new Set(["tx-safety-video.acfun.cn", "ali-safety-video.acfun.cn"])
 const acfunImageHosts = new Set(["tx-free-imgs.acfun.cn"])
-export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video"
+export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video" | "kuaishou-video"
 
 function acfunCdnUrl(value: string | URL, hosts: ReadonlySet<string>) {
   const url = URL.parse(String(value))
@@ -31,6 +31,19 @@ export function publicShareVideoUrl(value: string | URL, kind: keyof typeof publ
 
 export function isMiyousheVideoUrl(url: URL) {
   return url.protocol === "https:" && !url.port && !url.username && !url.password && !url.hash && miyousheVideoDomains.has(url.hostname)
+}
+
+export function kuaishouCoverUrl(value: string | URL) {
+  const url = URL.parse(String(value))
+  if (url?.protocol === "https:" && !url.port && !url.username && !url.password && !url.hash &&
+      /^p\d+\.a\.(?:yximgs|kwimgs)\.com$/u.test(url.hostname)) return url
+}
+
+export function kuaishouVideoUrl(value: string | URL) {
+  const url = URL.parse(String(value))
+  if (url?.protocol === "https:" && !url.port && !url.username && !url.password && !url.hash &&
+      /^(?:[a-z]{2}mov\d+\.a\.kwimgs\.com|v\d+(?:-\d+)?\.kwaicdn\.com)$/u.test(url.hostname) &&
+      /\.mp4$/u.test(url.pathname)) return url
 }
 
 export function isPipixiaVideoUrl(url: URL) {
@@ -77,6 +90,15 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
     if (kind === "netease-mv") {
       const url = neteaseMvUrl(value)
       if (!url) throw new Error("媒体地址不属于网易云 MV CDN。")
+      return url
+    }
+    if (kind === "image") {
+      const cover = kuaishouCoverUrl(value)
+      if (cover) return cover
+    }
+    if (kind === "kuaishou-video") {
+      const url = kuaishouVideoUrl(value)
+      if (!url) throw new Error("媒体地址不属于快手视频 CDN。")
       return url
     }
     if (kind === "pipixia-video") {

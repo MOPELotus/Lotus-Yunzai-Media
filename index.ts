@@ -1,5 +1,6 @@
 import type { CommandModule } from "../../lib/commands.ts"
 import { createAcfunCommands } from "./services/acfun/command.ts"
+import { createKuaishouCommands } from "./services/kuaishou/command.ts"
 import { createPipixiaCommands } from "./services/pipixia/command.ts"
 import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
 import { createBilibiliVideoCommands } from "./services/bilibili/video-command.ts"
@@ -37,6 +38,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const douyin = createDouyinCommands(services)
   const acfun = createAcfunCommands(services)
   const pipixia = createPipixiaCommands(services)
+  const kuaishou = createKuaishouCommands(services)
   const biliLogin = createBilibiliLogin(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
@@ -46,7 +48,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   return {
     ...subscriptions,
     async dispose() {
-      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), acfun.dispose(), pipixia.dispose(), biliVideo.dispose(), music.dispose(),
+      await Promise.all([subscriptions.dispose(), stopPartner?.(), maintenance?.dispose(), douyin.dispose(), acfun.dispose(), pipixia.dispose(), kuaishou.dispose(), biliVideo.dispose(), music.dispose(),
         officialVideo.dispose(), miyoushePost.dispose(), publicShare.dispose()])
     },
     commands: { ...subscriptions.commands, "#mcwiki": async argument => await mcwiki(argument) ?? [] },
@@ -67,6 +69,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (articleFeatures.length) return articleFeatures
       const pipixiaFeatures = pipixia.features(context)
       if (pipixiaFeatures.length) return pipixiaFeatures
+      const kuaishouFeatures = kuaishou.features(context)
+      if (kuaishouFeatures.length) return kuaishouFeatures
       const shortVideoFeatures = douyin.features(context)
       return shortVideoFeatures.length ? shortVideoFeatures : officialLinks.features(context)
     },
@@ -77,7 +81,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (environment.matches(message)) return environment.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await music.fallback(message, context) ??
-        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ??
+        await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ??
         await douyin.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }

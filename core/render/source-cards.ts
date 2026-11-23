@@ -6,7 +6,7 @@ import { fetchImageBytes } from "./image.ts"
 import { plainGameText } from "./plain-text.ts"
 import type { ArticleBlock } from "../../services/media/message.ts"
 
-export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "acfun-info" | "pipixia-info" | "article"
+export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "acfun-info" | "pipixia-info" | "kuaishou-info" | "article"
 
 export interface RenderOptions {
  readonly mode?: Parameters<typeof renderPng>[3]
@@ -242,7 +242,7 @@ async function newsImage(p: SourceCanvas,src: string | Buffer | undefined){
 }
 function mediaStats(data: SourceCard,template: SourceTemplate){
  const s=data.stat||{},format=(n: number | undefined)=>n===undefined?'未记录':damageNumber(n)
- const stats=data.type==='live'?[['直播状态',data.liveStatus],['在线人数',format(data.online)]]:[['点赞',format(s.like)],['评论',format(s.reply)],...(template==='pipixia-info'?[['播放',format(s.view)]]:[['收藏',format(s.favorite)]]),...(template==='bilibili-info'?[['投币',format(s.coin)],['播放',format(s.view)],['弹幕',format(s.danmaku)]]:template==='acfun-info'?[['播放',format(s.view)],['弹幕',format(s.danmaku)],['香蕉',format(s.coin)]]:[['分享',format(s.share)]])]
+ const stats=data.type==='live'?[['直播状态',data.liveStatus],['在线人数',format(data.online)]]:[['点赞',format(s.like)],['评论',format(s.reply)],...((template==='pipixia-info'||template==='kuaishou-info')?[['播放',format(s.view)]]:[['收藏',format(s.favorite)]]),...(template==='bilibili-info'?[['投币',format(s.coin)],['播放',format(s.view)],['弹幕',format(s.danmaku)]]:template==='acfun-info'?[['播放',format(s.view)],['弹幕',format(s.danmaku)],['香蕉',format(s.coin)]]:[['分享',format(s.share)]])]
  return stats.map(([label,value])=>`${label} ${value||'未记录'}`).join('    ')
 }
 interface MediaNewsHeader {

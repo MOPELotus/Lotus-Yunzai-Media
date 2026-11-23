@@ -1,14 +1,15 @@
 import type { MediaFetch } from "../media/cdn.ts"
 
 const redirectStatuses = new Set([301, 302, 303, 307, 308])
-const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+const desktopAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 
-export async function readPublicSharePage(start: URL, accept: (url: URL) => boolean, fetch: MediaFetch, signal: AbortSignal) {
+export async function readPublicSharePage(start: URL, accept: (url: URL) => boolean, fetch: MediaFetch, signal: AbortSignal, headers: Readonly<Record<string, string>> = {
+  "User-Agent": desktopAgent, Accept: "text/html,application/xhtml+xml",
+}) {
   const maxBytes = 2_000_000
   let url = start
   for (let hop = 0; hop <= 5 && accept(url); hop++) {
-    const response = await fetch(url.href, { credentials: "omit", redirect: "manual", signal,
-      headers: { "User-Agent": userAgent, Accept: "text/html,application/xhtml+xml" } })
+    const response = await fetch(url.href, { credentials: "omit", redirect: "manual", signal, headers })
     if (redirectStatuses.has(response.status)) {
       await response.body?.cancel()
       const location = response.headers.get("location")

@@ -274,9 +274,12 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         ...publicShareToggles.map(([key, label, bottomHelpMessage]) => ({
           field: `${site}.${key}`,
           label: site === "wxchannels" && key === "enable" ? "解析视频号公开分享"
+            : site === "xhs" ? (key === "enable" ? "解析小红书公开笔记" : "小红书私聊自动预览")
             : key === "enable" ? `${label} ${site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site]}` : label,
           bottomHelpMessage: site === "wxchannels" ? (key === "enable"
-            ? "预览公开作品，可打开原文在微信中观看。" : "开启后也可在好友私聊预览。") : bottomHelpMessage, component: "Switch",
+            ? "预览公开作品，可打开原文在微信中观看。" : "开启后也可在好友私聊预览。")
+            : site === "xhs" ? (key === "enable" ? "显示官方匿名返回的笔记简介和封面。" : "开启后也可在好友私聊预览。")
+            : bottomHelpMessage, component: "Switch",
         })),
       ]),
       { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },

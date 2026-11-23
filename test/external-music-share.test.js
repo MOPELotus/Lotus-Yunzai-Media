@@ -74,6 +74,32 @@ test("QQ 数字曲目从官方同号页面校验唯一 MID，再走已接的 QQ 
     new Response(qqPage(qq, [mid, "004lfH1n1uKTn5"])))).rejects.toThrow("唯一")
 })
 
+test("波点旧歌曲和 MV 读取匿名官方详情，按原编号和 MV 标记核实", async () => {
+  const share = "https://h5app.kuwo.cn/m/bodian/playMusic.html?uid=3216773&musicId=192015898"
+  const mv = "https://h5app.kuwo.cn/m/bodian/play.html?mvId=118987&opusId=770096"
+  const checks = []
+  const official = async (actual, init) => {
+    expect(actual.origin + actual.pathname).toBe("https://bd-api.kuwo.cn/api/service/music/info")
+    expect(init).toMatchObject({ credentials: "omit", redirect: "error" })
+    expect(init.headers.devId).toMatch(/^[a-f\d]{16}$/u)
+    expect(actual.searchParams.get("uid")).toBe("-1")
+    const id = Number(actual.searchParams.get("musicId"))
+    checks.push(id)
+    return Response.json({ code: 200, data: { id, isMv: id === 118987 ? 1 : 0,
+      name: id === 118987 ? "枫" : "Forever", artist: id === 118987 ? "周杰伦" : "Dwhite" } })
+  }
+  expect(await readExternalMusicShare(parseMusicShare(share), signal, official)).toEqual({
+    title: "Forever", author: "Dwhite", url: "https://h5app.kuwo.cn/m/bodian/playMusic.html?musicId=192015898",
+  })
+  expect(await readExternalMusicShare(parseMusicShare(mv), signal, official)).toEqual({
+    title: "枫", author: "周杰伦", url: "https://h5app.kuwo.cn/m/bodian/play.html?mvId=118987",
+  })
+  expect(checks).toEqual([192015898, 118987])
+  expect(parseMusicShare(share + "&musicId=2")).toBeUndefined()
+  await expect(readExternalMusicShare(parseMusicShare(mv), signal, async () =>
+    Response.json({ code: 200, data: { id: 118987, name: "枫", isMv: 0 } }))).rejects.toThrow("编号")
+})
+
 test("实际媒体分发回官方元数据和曲目链接，显式播放提示原平台，未请求备用音源", async () => {
   const module = createMusicCommands({
     signal,

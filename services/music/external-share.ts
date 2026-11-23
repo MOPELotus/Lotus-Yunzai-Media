@@ -1,9 +1,10 @@
 export type ExternalMusicShare = {
-  readonly platform: "apple" | "spotify" | "soda"
+  readonly platform: "apple" | "spotify" | "soda" | "bodian"
   readonly kind: "external-share"
   readonly id: string
   readonly url: string
   readonly region?: string
+  readonly video?: boolean
 }
 
 const numericId = /^[1-9]\d{0,19}$/u
@@ -35,6 +36,13 @@ export function parseExternalMusicShare(url: URL): ExternalMusicShare | undefine
     const id = parameter(url, "track_id")
     if (id && numericId.test(id)) return { kind: "external-share", platform: "soda", id,
       url: "https://music.douyin.com/qishui/share/track?track_id=" + id }
+  }
+  if (url.hostname === "h5app.kuwo.cn") {
+    const video = path === "/m/bodian/play.html"
+    if (!video && path !== "/m/bodian/playMusic.html") return
+    const id = parameter(url, video ? "mvId" : "musicId")
+    if (id && numericId.test(id)) return { kind: "external-share", platform: "bodian", id, video,
+      url: "https://h5app.kuwo.cn" + path + (video ? "?mvId=" : "?musicId=") + id }
   }
 }
 
@@ -68,7 +76,7 @@ const request = (url: URL, signal: AbortSignal, fetch: typeof globalThis.fetch, 
     "User-Agent": url.hostname.endsWith(".douyin.com") ? "Mozilla/5.0 (Linux; Android 13)" : "Mozilla/5.0",
   } })
 
-export const externalMusicLabels = { apple: "Apple Music", spotify: "Spotify", soda: "汽水音乐" } as const
+export const externalMusicLabels = { apple: "Apple Music", spotify: "Spotify", soda: "汽水音乐", bodian: "波点音乐" } as const
 
 export async function readExternalMusicShare(
   share: ExternalMusicShare, signal: AbortSignal, fetch = globalThis.fetch,
@@ -91,6 +99,18 @@ export async function readExternalMusicShare(
     const title = field(data.title)
     if (title && data.provider_name === "Spotify" && embed?.origin === "https://open.spotify.com" &&
         embed.pathname === "/embed/track/" + share.id) return { title, url: share.url }
+  } else if (share.platform === "bodian") {
+    const endpoint = new URL("https://bd-api.kuwo.cn/api/service/music/info")
+    endpoint.search = new URLSearchParams({ musicId: share.id, uid: "-1", token: "" }).toString()
+    const response = await fetch(endpoint, { signal: active, credentials: "omit", redirect: "error", headers: {
+      "User-Agent": "Dart/2.18 (dart:io)", plat: "ar", ver: "3.1.0", channel: "aliopen",
+      devId: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+    } })
+    const data = record(JSON.parse(await boundedBody(response, 64 * 1024, active)))
+    const item = record(data.data)
+    const title = field(item.name)
+    if (data.code === 200 && title && Number.isSafeInteger(item.id) && String(item.id) === share.id &&
+        (!share.video || item.isMv === 1)) return { title, author: field(item.artist), url: share.url }
   } else {
     if (!share.id) {
       const response = await request(new URL(share.url), active, fetch, "manual")

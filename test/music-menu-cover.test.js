@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { setImageRenderPreset } from "@lotus-yunzai/skia"
 import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -88,6 +89,16 @@ test("点歌菜单公开行和主人云盘行保持原序号，私有封面不�
     expect(await run("#B站点歌 视频", group)).toEqual([])
     expect(contents.at(-1)[0][0]).toMatchObject({ number: 1, source: "B 站视频", length: "总长 6:42", artist: "作者" })
     expect(covers).not.toContain(privateCover)
+
+    const beforeLow = contents.length
+    setImageRenderPreset("low")
+    try {
+      expect(await run("#点歌 低配歌曲", group)).toEqual([])
+      expect(contents.slice(beforeLow).map(([, scale]) => scale)).toEqual([4])
+      expect(String(messages.at(-1))).toContain("1. 公开歌曲 · 歌手 · 网易云 · 4:29")
+    } finally {
+      setImageRenderPreset("standard")
+    }
   } finally {
     await module.dispose()
     await rm(root, { recursive: true, force: true })

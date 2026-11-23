@@ -596,9 +596,11 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (sessions.get(key) !== session || active.aborted) return
       const card = { title, subtitle: session.keyword, badge: `第 ${session.page} 页`, message, musicRows }
       const limitBytes = context.inlineImageByteLimit ?? maxInlineBytes
-      const renderScale = Number(Bun.env.LOTUS_RENDER_SCALE ?? nativeImageRasterScale())
+      // The shared renderer already scales the requested 4× canvas for the low preset.
+      const standard = nativeImageRasterScale() === 4
+      const renderScale = standard ? Number(Bun.env.LOTUS_RENDER_SCALE ?? 4) : 4
       let image = await renderMusicMenu(card, { renderScale }).catch(() => undefined)
-      if (image && image.length > limitBytes && renderScale > 2 && !active.aborted) {
+      if (image && image.length > limitBytes && standard && renderScale > 2 && !active.aborted) {
         image = await renderMusicMenu(card, { renderScale: 2 }).catch(() => undefined)
       }
       if (sessions.get(key) === session && !active.aborted) {

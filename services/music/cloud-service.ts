@@ -1,6 +1,6 @@
 import { isChatFileName, maxChatFileBytes, type ChatFile } from "../../../../lib/chat-files.ts"
 import type { TuneWeaveRequestOptions } from "../tuneweave/service.ts"
-import { findOwnedNeteaseAccount, verifyNeteaseAccount } from "./netease-account.ts"
+import { findOwnedNeteaseAccount, verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
 import type { MusicService, MusicStream, MusicTrack } from "./service.ts"
 
 const trackReference = /^netease:[1-9]\d{0,21}$/u
@@ -68,7 +68,7 @@ export class NeteaseCloudLibrary {
 
   async verify(api: MusicService, owner: number, signal: AbortSignal) {
     const binding = await this.binding(api, owner, signal)
-    await verifyNeteaseAccount(api, binding, signal).catch(error => {
+    await verifyOrRenewNeteaseAccount(api, binding, signal).catch(error => {
       if (error?.code === "authentication_required") throw new Error("网易云登录已过期，请在当前好友私聊重新扫码。")
       throw error
     })

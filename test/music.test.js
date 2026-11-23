@@ -279,6 +279,14 @@ test("复用明确过期的网易云或 QQ 登录会先续期同一 UID，再核
         : ["/v1/account", "/v1/auth/session/refresh"])
       expect((await readMusicAccounts(accountsFile))[platform].credential).toBe(result === "success" && caller ? "twc1_rotated" : old.credential)
     }
+    if (platform === "netease") {
+      await saveMusicAccount(platform, old, { file: accountsFile })
+      state = "expired"
+      calls.length = 0
+      expect(await new NeteaseCloudLibrary().verify(service, 42, signal)).toMatchObject({ uid: old.uid, alias })
+      expect(calls).toEqual(["/v1/account", "/v1/auth/session/refresh", "/v1/account"])
+      expect((await readMusicAccounts(accountsFile)).netease.credential).toBe(caller ? "twc1_rotated" : "")
+    }
   }
 })
 

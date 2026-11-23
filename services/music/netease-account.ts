@@ -1,5 +1,6 @@
 import type { TuneWeaveQrProfile } from "../tuneweave/auth.ts"
 import { readMusicAccounts, type MusicAccount } from "./accounts.ts"
+import { musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
 import type { MusicService } from "./service.ts"
 
 export const neteaseAccountId = /^[1-9]\d{0,21}$/u
@@ -67,10 +68,25 @@ function checkedProfile(profile: TuneWeaveQrProfile | undefined, accountSelected
   return profile
 }
 
-export async function refreshServerNeteaseAccount(api: Pick<MusicService, "tuneweave">, account: OwnedNeteaseAccount, signal: AbortSignal) {
+async function refreshServerNeteaseAccount(api: Pick<MusicService, "tuneweave">, account: OwnedNeteaseAccount, signal: AbortSignal) {
   const { alias, uid } = account
   const result = await api.tuneweave.request<TuneWeaveQrProfile>("/v1/auth/session/refresh", { method: "POST", signal, redirect: "error",
     body: { platform: "netease", account: alias, credential_mode: "server" }, accountSelection: { platform: "netease", alias } })
   signal.throwIfAborted()
   return checkedProfile(result.data, result.accountSelected, alias, uid)
+}
+
+export async function verifyOrRenewNeteaseAccount(api: MusicService, account: OwnedNeteaseAccount, signal: AbortSignal) {
+  try { return await verifyNeteaseAccount(api, account, signal) }
+  catch (error) {
+    if (!musicAuthenticationRequired(error)) throw error
+  }
+  const { owner, alias, uid } = account
+  const current = await findOwnedNeteaseAccount(api, owner, signal)
+  if (current?.alias !== alias || current.uid !== uid) throw new Error("网易云绑定已变更，请重试。")
+  const saved = (await readMusicAccounts(api.accountsFile)).netease
+  if (saved && recordedNeteaseOwner(saved, owner) && saved.alias === alias && String(saved.uid) === uid &&
+      saved.credential?.startsWith("twc1_")) await refreshOwnMusicAccount(api, "netease", owner, signal, account)
+  else await refreshServerNeteaseAccount(api, account, signal)
+  return verifyNeteaseAccount(api, account, signal)
 }

@@ -17,7 +17,7 @@ import type { PublicMusicTarget } from "./share-link.ts"
 import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
 import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner,
-  refreshServerNeteaseAccount, verifyNeteaseAccount } from "./netease-account.ts"
+  verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
 import { musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
@@ -155,22 +155,12 @@ export class MusicService {
       if (music?.alias === "default" && (!recordedNeteaseOwner(music, owner) || String(music.uid) !== account.uid)) return false
     }
     let profile
-    try { profile = await verifyNeteaseAccount(this, account, signal) }
+    try {
+      profile = legacy ? await verifyNeteaseAccount(this, account, signal) : await verifyOrRenewNeteaseAccount(this, account, signal)
+    }
     catch (error) {
-      if (!musicAuthenticationRequired(error)) throw error
-      if (legacy) return false
-      const current = await findOwnedNeteaseAccount(this, owner, signal)
-      if (current?.alias !== account.alias || current.uid !== account.uid) throw new Error("网易云绑定已变更，请重试。")
-      const saved = (await readMusicAccounts(this.accountsFile)).netease
-      try {
-        if (saved && recordedNeteaseOwner(saved, owner) && saved.alias === account.alias && String(saved.uid) === account.uid &&
-            saved.credential?.startsWith("twc1_")) await refreshOwnMusicAccount(this, "netease", owner, signal, account)
-        else await refreshServerNeteaseAccount(this, account, signal)
-        profile = await verifyNeteaseAccount(this, account, signal)
-      } catch (refreshError) {
-        if (musicAuthenticationRequired(refreshError)) return false
-        throw refreshError
-      }
+      if (musicAuthenticationRequired(error)) return false
+      throw error
     }
     const latest = await findOwnedNeteaseAccount(this, owner, signal)
     if (currentBinding ? latest?.alias !== account.alias || latest.uid !== account.uid : Boolean(latest)) {

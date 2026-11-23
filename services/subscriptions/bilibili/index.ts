@@ -3,6 +3,7 @@ import { publicCount } from "../profile.ts"
 import { ExpiredSubscriptionSession, readWithSubscriptionSession, type SubscriptionSession } from "../session.ts"
 import type { DynamicActivity, DynamicPost, SubscriptionProfile, SubscriptionProvider } from "../types.ts"
 import type { BiliSharedSession } from "./shared.ts"
+import { createAuthorArchive } from "../xhh-author-source.ts"
 
 interface LiveInfo {
   title?: unknown
@@ -185,8 +186,8 @@ export function normalizeBiliDynamic(input: unknown, expectedUid?: string, allow
 export function createBiliProvider({ fetch: request = globalThis.fetch, session, shared }: BiliProviderOptions = {}): SubscriptionProvider & {
   fetchPost(id: string, signal?: AbortSignal): Promise<DynamicPost | undefined>
 } {
-  async function get(route: string, query: Record<string, string>, signal?: AbortSignal,
-    beforeAnonymous?: (active?: AbortSignal) => Promise<BiliPublicData | undefined>) {
+  async function get<T = BiliPublicData>(route: string, query: Record<string, string>, signal?: AbortSignal,
+    beforeAnonymous?: (active?: AbortSignal) => Promise<T | undefined>) {
     const url = new URL(route, apiRoot)
     url.search = new URLSearchParams(query).toString()
     const timeout = AbortSignal.timeout(15000)
@@ -200,7 +201,7 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
         if (response.status === 403 || response.status === 412) throw new PublicAccessDenied(message)
         throw new Error(message)
       }
-      const json = await response.json() as { code?: unknown; data?: BiliPublicData }
+      const json = await response.json() as { code?: unknown; data?: T }
       if (json.code === -404) return
       if (json.code === -101) throw new ExpiredSubscriptionSession("B 站登录已失效")
       if (json.code === -352 || json.code === -403) throw new PublicAccessDenied("B 站公开接口返回 " + json.code)
@@ -208,6 +209,7 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
       return json.data
     }, beforeAnonymous)
   }
+  const fetchLatestAuthorVideo = createAuthorArchive(get)
 
   async function expand(post: DynamicPost, signal?: AbortSignal) {
     if (post.type !== "DYNAMIC_TYPE_ARTICLE" || post.content.length < 480) return post
@@ -239,7 +241,7 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
   }
 
   return {
-    id: "bilibili", label: "B站", typeNames: biliTypes,
+    id: "bilibili", label: "B站", typeNames: biliTypes, fetchLatestAuthorVideo,
     async fetchPost(id, signal) {
       if (!accountId(id)) return
       const data = await get("/x/polymer/web-dynamic/v1/detail", { id, platform: "web", features: "itemOpusStyle,opusBigCover,ugcDelete" }, signal)

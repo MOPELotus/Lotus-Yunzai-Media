@@ -160,6 +160,19 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     } }
   }
 
+  async function quotedTarget(context: MessageFallbackContext, cardOnly = false) {
+    if (context.isDelegated || signal?.aborted || context.reply_id === undefined) return
+    const source = await context.lookupReply?.().catch(() => undefined)
+    const card = source?.message[0]
+    if (!source || signal?.aborted) return
+    if (card?.type === "json" || card?.type === "light_app") return quotedBiliCardLink(card.data) ?? undefined
+    if (cardOnly) return
+    const scope = quoteScope(context)
+    const priorKey = scope && scope + ":" + context.reply_id
+    const preview = priorKey && source.user_id === context.self_id && previews.get(priorKey)
+    if (preview && preview.expires > Date.now()) return preview.target
+  }
+
   async function sendOriginals(context: MessageFallbackContext, sources: readonly string[], transport: BilibiliService["fetch"]) {
     const active = signal ?? new AbortController().signal
     const limit = Math.min(context.inlineImageByteLimit ?? Infinity, 8 * 1024 ** 2)
@@ -347,18 +360,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         if (action.kind === "quote") {
           options = await settings("bilibili")
           if (!options.parseVideoLink || signal?.aborted) return
-          const source = await context.lookupReply?.().catch(() => undefined)
-          const card = source?.message[0]
-          if (!source || signal?.aborted) return
-          if (card?.type === "json" || card?.type === "light_app") {
-            target = quotedBiliCardLink(card.data) || ""
-          } else {
-            const scope = quoteScope(context)
-            const priorKey = scope && scope + ":" + context.reply_id
-            const preview = priorKey && source.user_id === context.self_id && previews.get(priorKey)
-            if (!preview || preview.expires <= Date.now() || action.action === "preview") return
-            target = preview.target
-          }
+          target = await quotedTarget(context, action.action === "preview") || ""
         } else {
           target = service.extractTarget(action.target) || ""
         }
@@ -409,6 +411,17 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
   }
   return {
     fallback,
+    async quotedAuthor(context: MessageFallbackContext) {
+      const target = await quotedTarget(context)
+      const url = target && URL.parse(target)
+      if (!url || signal?.aborted) return
+      const config = await loadGlobalConfig()
+      const service = new BilibiliService({ fetch, tuneweaveConfig: config.tuneweave })
+      const resolved = await service.resolveShortLink(url, signal)
+      if (!isBiliVideoPage(resolved)) return
+      const info = await service.getInfo(resolved.href)
+      if (info.type === "video" && !signal?.aborted) return info.ownerId
+    },
     features(context: MessageFallbackContext) {
       return videoAction(context.normalizedMessage, context) ? featureNames : []
     },

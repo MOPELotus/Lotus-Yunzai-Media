@@ -19,6 +19,9 @@ interface DeliveryOptions {
   now?: () => number
   render?: typeof makeDynamicMessages
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>
+  accepts?: (route: SubscriptionRoute, post: DynamicPost) => boolean
+  onDelivery?: (route: SubscriptionRoute, post: DynamicPost, state: "confirmed" | "unknown", signal: AbortSignal) => Promise<unknown>
+  sendPace?: readonly [minimum: number, maximum: number]
 }
 
 interface Candidate {
@@ -122,7 +125,7 @@ function destinationKey(route: SubscriptionRoute) {
 }
 
 export function createSubscriptionDelivery({providers,config,groups,notifications,getRedis,signal,now=Date.now,render=makeDynamicMessages,
-  wait = (milliseconds, signal) => pause(milliseconds, undefined, { signal })}: DeliveryOptions) {
+  wait = (milliseconds, signal) => pause(milliseconds, undefined, { signal }), accepts = () => true, onDelivery, sendPace}: DeliveryOptions) {
   const controller = new AbortController()
   const active = signal ? AbortSignal.any([signal,controller.signal]) : controller.signal
   const runs = new Map<SubscriptionPlatform, Promise<Report>>()
@@ -161,9 +164,13 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
   }
 
-  function finish(redis: SubscriptionRedis, entries: readonly Claim[], state: CheckinNotifyDelivery) {
-    return redis.eval(settleLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
+  async function finish(redis: SubscriptionRedis, entries: readonly Claim[], state: CheckinNotifyDelivery) {
+    const result = await redis.eval(settleLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
       arguments: [state, ...entries.map(item => item.token)] })
+    if (state !== "rejected" && onDelivery && !active.aborted) {
+      for (const { route, post } of entries) await onDelivery(route, post, state, active)
+    }
+    return result
   }
 
   async function claim(redis: SubscriptionRedis, candidates: readonly Candidate[], report: Report): Promise<Claim[]> {
@@ -316,11 +323,12 @@ export function createSubscriptionDelivery({providers,config,groups,notification
     }
     let pacedDelivery = false
     async function pace() {
-      if (provider.id !== "weibo" || !pacedDelivery) return
+      if (!pacedDelivery) return
       pacedDelivery = false
-      await delay(1000, settings.delay ? 2000 : 0)
+      if (sendPace) await delay(...sendPace)
+      else if (provider.id === "weibo") await delay(1000, settings.delay ? 2000 : 0)
     }
-    function markSent() { if (provider.id === "weibo") pacedDelivery = true }
+    function markSent() { if (sendPace || provider.id === "weibo") pacedDelivery = true }
     let requested = false
     async function postsFor(uid: string): Promise<readonly DynamicPost[]> {
       const cached = postsByUid.get(uid)
@@ -354,10 +362,18 @@ export function createSubscriptionDelivery({providers,config,groups,notification
           if (active.aborted) break
           for (const post of await postsFor(route.uid)) {
             if (active.aborted) break
-            if (!allowedPost(post,route,settings,wall) || candidates.has(post.id)) continue
+            if (!allowedPost(post,route,settings,wall) || !accepts(route, post) || candidates.has(post.id)) continue
             const legacy = receiptKey(provider.id,route,post)
             const journal = "lotus-yunzai:media:subscription:" + provider.id + ":" + route.kind + ":" + route.chat + ":" + post.id
-            if (await redis.get(legacy) !== null || await redis.get(journal) !== null) { report.skipped++; continue }
+            const legacyReceipt = await redis.get(legacy)
+            const journalReceipt = legacyReceipt === null || onDelivery ? await redis.get(journal) : null
+            if (legacyReceipt !== null || journalReceipt !== null) {
+              if (onDelivery && !active.aborted && (journalReceipt === "confirmed" || journalReceipt === "unknown" || legacyReceipt === "1")) {
+                await onDelivery(route, post, journalReceipt === "unknown" ? "unknown" : "confirmed", active)
+              }
+              report.skipped++
+              continue
+            }
             try {
               const payloads=await render(provider,post,settings,{signal:active,inlineImageByteLimit:sender.inlineImageByteLimit})
               candidates.set(post.id, { route, post, payloads, legacy, journal })
@@ -378,7 +394,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
             if (active.aborted || (automatic && !latest.enable)) return []
             const current = configured.filter(route => destinationKey(route) === target)
             const timestamp = Math.floor(now() / 1000)
-            return items.filter(({ post }) => current.some(route => allowedPost(post, route, latest, timestamp)))
+            return items.filter(({ post }) => current.some(route => allowedPost(post, route, latest, timestamp) && accepts(route, post)))
           } catch (error) {
             if (!active.aborted) {
               report.failed++

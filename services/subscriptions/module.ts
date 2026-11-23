@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url"
-import type { MessageFallback } from "../../../../lib/commands.ts"
+import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { BotNotifications } from "../../../../lib/checkin-notify.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { biliSubscriptionLogin } from "./bilibili/login.ts"
@@ -12,6 +12,7 @@ import { createSubscriptionDelivery, type SubscriptionGroups } from "./delivery.
 import { profileText } from "./profile.ts"
 import { subscriptionSession } from "./session.ts"
 import { renderSubscriptionHelp } from "./help.ts"
+import { createAuthorVideoModule } from "./xhh-author-command.ts"
 import type { makeDynamicMessages } from "./render.ts"
 import type {
   GetSubscriptionRedis, LockSubscriptionFile, SubscriptionContext, SubscriptionPlatform, SubscriptionProvider,
@@ -24,6 +25,7 @@ interface SubscriptionServices {
   readonly signal?: AbortSignal
   readonly subscriptionTransport?: () => readonly BotNotifications[]
   readonly mediaRuntime?: { whenReady(start: () => void): () => void }
+  readonly quotedBilibiliAuthor?: (context: MessageFallbackContext) => Promise<string | undefined>
 }
 
 interface SubscriptionOptions {
@@ -103,14 +105,22 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
   const weiboLogin = weiboSubscriptionLogin({ getRedis, session: weiboSession, owner: isSubscriptionOwner, signal: services.signal })
   const dispatch = createSubscriptionDelivery({ providers:sources,config,groups:services.groups,notifications:services.subscriptionTransport,
     getRedis,signal:services.signal,render,now })
+  const authorVideos = sources.bilibili && createAuthorVideoModule({
+    directory, lockFile: services.lockFile, provider: sources.bilibili,
+    settings: () => config.settings("bilibili"), quotedAuthor: services.quotedBilibiliAuthor,
+    groups: services.groups, notifications: services.subscriptionTransport, getRedis, signal: services.signal, render, now,
+  })
   let startup: Promise<void> | undefined
   const cancelReady = services.mediaRuntime?.whenReady(() => {
-    startup ??= dispatch.start().catch(error => console.warn("[media] 订阅 · 启动定时任务失败：" + errorText(error)))
+    startup ??= Promise.all([dispatch.start(), authorVideos?.start()]).then(() => undefined)
+      .catch(error => console.warn("[media] 订阅 · 启动定时任务失败：" + errorText(error)))
   })
   const describe = (provider: SubscriptionProvider) => provider.label + "订阅"
 
   const fallback: MessageFallback = async (message,context) => {
     if (help.test(message.trim())) return renderHelp()
+    const author = await authorVideos?.fallback(message, context)
+    if (author !== undefined) return author
     if (!prefix.test(message)) return
     const command=message.replace(prefix,"").trim()
     const match=edit.exec(command)
@@ -186,9 +196,10 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
   }
   return {
     commands:{}, fallback,
+    features: (context: MessageFallbackContext) => authorVideos?.features(context) ?? [],
     async dispose() {
       cancelReady?.()
-      await dispatch.dispose()
+      await Promise.all([dispatch.dispose(), authorVideos?.dispose()])
       await startup
     },
   }

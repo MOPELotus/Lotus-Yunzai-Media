@@ -10,6 +10,7 @@ type EpisodeData = {
   readonly name?: string
   readonly cover_url?: string
   readonly duration_ms?: number
+  readonly paid?: boolean
 }
 type VoiceSearchItem = {
   readonly type?: string
@@ -26,6 +27,14 @@ interface EpisodeResult {
   readonly ref?: string
   readonly audio_ref?: string
   readonly stream?: MusicStream & { readonly origin_track?: string; readonly resolved_track?: string }
+  readonly extensions?: { readonly episode?: EpisodeData }
+}
+
+export interface EpisodeTranscript {
+  readonly ref?: string
+  readonly audio_ref?: string
+  readonly lyrics?: { readonly track_ref?: string; readonly plain?: string; readonly format?: string;
+    readonly extensions?: { readonly available?: boolean } }
   readonly extensions?: { readonly episode?: EpisodeData }
 }
 
@@ -87,6 +96,24 @@ export function verifiedEpisodePlayback(selection: VoiceSearchSelection, respons
     episode_id: selection.id,
   }
   return { track, stream }
+}
+
+export function verifiedEpisodeTranscript(selection: VoiceSearchSelection, response: EpisodeTranscript | undefined) {
+  const episode = response?.extensions?.episode
+  const lyrics = response?.lyrics
+  if (response?.ref !== selection.ref || response.audio_ref !== selection.audioRef || episode?.ref !== selection.ref ||
+      episode.platform !== "netease" || id(episode.id) !== selection.id || episode.audio?.ref !== selection.audioRef ||
+      episode.audio.platform !== "netease" || id(episode.audio.id) !== selection.audioId || lyrics?.track_ref !== selection.audioRef) {
+    throw new Error("平台返回的播客字幕与所选节目或音轨不一致。")
+  }
+  if (episode.paid === true || lyrics.extensions?.available === false) return
+  if (lyrics.extensions?.available !== true || lyrics.format !== "netease_voice_json" || typeof lyrics.plain !== "string") {
+    throw new Error("平台返回的播客字幕无法核实。")
+  }
+  const text = lyrics.plain.trim()
+  if (!text) return
+  if (text.length > 97_000) throw new Error("播客字幕过长，请打开原节目查看。\n" + neteaseEpisodePage(selection.id))
+  return text
 }
 
 export type { EpisodeData, EpisodeResult, VoiceSearchItem }

@@ -485,7 +485,13 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const { api } = await openMusic()
       active.throwIfAborted()
       if (request.mode === "歌词") {
-        if (!("track" in source)) return "这条播客没有通过曲目歌词入口提供歌词。"
+        if ("episode" in source) {
+          const transcript = await api.episodeTranscript(source.episode, active)
+          if (active.aborted) return
+          if (!transcript) return "这期节目没有公开字幕。"
+          return { type: "forward" as const, nodes: [`《${source.episode.name}》 · 节目字幕`,
+            ...transcript.match(/[\s\S]{1,1000}/gu) ?? [], neteaseEpisodePage(source.episode.id)] }
+        }
         if (source.track.platform === "bilibili") return "B 站视频音轨没有曲目歌词。"
         const lyric = await api.publicLyrics(source.track, active)
         if (active.aborted) return

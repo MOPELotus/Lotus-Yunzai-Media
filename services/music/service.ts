@@ -12,7 +12,8 @@ import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/t
 import { runMediaProcess } from "../media/files.ts"
 import { resolveData } from "../../core/path.ts"
 import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accounts.ts"
-import { neteaseEpisodePage, verifiedEpisodePlayback, voiceSearchSelection, type EpisodeData, type EpisodeResult, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
+import { neteaseEpisodePage, verifiedEpisodePlayback, verifiedEpisodeTranscript, voiceSearchSelection, type EpisodeData,
+  type EpisodeResult, type EpisodeTranscript, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
 import type { PublicMusicTarget } from "./share-link.ts"
 import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
@@ -284,6 +285,11 @@ export class MusicService {
   async firstEpisode(keyword: string, signal?: AbortSignal) {
     const [episode] = await this.searchEpisodes(keyword, { limit: 1, signal })
     if (episode) return this.playEpisode(episode, signal)
+  }
+  async episodeTranscript(episode: VoiceSearchSelection, signal?: AbortSignal) {
+    const result = await this.tuneweave.request<EpisodeTranscript>(`/v1/episodes/${encodeURIComponent(episode.ref)}/lyrics`, { signal, redirect: "error" })
+    signal?.throwIfAborted()
+    return verifiedEpisodeTranscript(episode, result)
   }
   async publicShare(target: PublicMusicTarget, signal?: AbortSignal) {
     const ref = target.platform === "kugou" && target.kind === "mv" ? `kugou:mv:${target.id}` : `${target.platform}:${target.id}`

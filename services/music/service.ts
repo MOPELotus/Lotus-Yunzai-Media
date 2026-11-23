@@ -41,13 +41,14 @@ export interface MusicStream {
   resolved_track?: string
 }
 
-type MusicMv = { readonly ref: string; readonly id: string | number; readonly platform: "netease" | "kuwo" | "qq"; readonly title: string;
+type MusicMv = { readonly ref: string; readonly id: string | number; readonly platform: "netease" | "kuwo" | "qq" | "kugou"; readonly title: string;
   readonly duration_ms?: number; readonly creators?: readonly { readonly name?: string }[] }
 type MusicMvStream = { readonly video_ref?: string; readonly platform?: string; readonly available?: boolean;
   readonly format?: string; readonly fee?: unknown; readonly source_range?: unknown; readonly platform_code?: unknown;
   readonly url?: string; readonly size?: number; readonly duration_ms?: number;
   readonly extensions?: { readonly kind?: string; readonly source_track_id?: string; readonly authorization_source?: string;
-    readonly selected_protocol?: string } }
+    readonly selected_protocol?: string; readonly backend?: string;
+    readonly selected_resource?: { readonly hash?: string; readonly pay_type?: number; readonly privilege?: number } } }
 
 interface MusicLogin {
   platform: string
@@ -183,7 +184,7 @@ export class MusicService {
     if (episode) return this.playEpisode(episode, signal)
   }
   async publicShare(target: PublicMusicTarget, signal?: AbortSignal) {
-    const ref = `${target.platform}:${target.id}`
+    const ref = target.platform === "kugou" && target.kind === "mv" ? `kugou:mv:${target.id}` : `${target.platform}:${target.id}`
     const name = (value: unknown) => typeof value === "string" && value.trim()
     if (target.kind === "mv") {
       const item = await this.tuneweave.request<{ kind?: string; video?: MusicMv }>(
@@ -220,16 +221,27 @@ export class MusicService {
     const cdn: MusicVideoCdn = `${mv.platform}-mv`
     const url = stream?.url && musicVideoCdnUrl(stream.url, cdn)
     if (!url || stream.video_ref !== mv.ref || stream.platform !== mv.platform || stream.available !== true ||
-        stream.format !== "mp4" || stream.source_range != null) {
+        (mv.platform === "kugou" ? stream.format != null && stream.format !== "mp4" : stream.format !== "mp4") ||
+        stream.source_range != null) {
       throw new Error("没有可核实的完整公开 MV，请打开原链接。")
     }
-    const authorized = mv.platform === "qq"
-      ? stream.platform_code === 0 && stream.extensions?.selected_protocol === "mp4" && stream.fee == null &&
-        typeof mv.duration_ms === "number" && mv.duration_ms > 0 && mv.duration_ms === stream.duration_ms
-      : stream.platform_code === 200 && stream.extensions?.kind === "mv" &&
+    let authorized = false
+    const details = stream.extensions
+    const sameDuration = typeof mv.duration_ms === "number" && mv.duration_ms > 0 && mv.duration_ms === stream.duration_ms
+    if (mv.platform === "qq") {
+      authorized = stream.platform_code === 0 && details?.selected_protocol === "mp4" && stream.fee == null && sameDuration
+    } else if (mv.platform === "kugou") {
+      const resource = details?.selected_resource
+      const hash = resource?.hash
+      authorized = stream.platform_code === 0 && stream.fee == null && details?.kind === "mv" &&
+        details.backend === "anonymous_video_tracker" && resource?.pay_type === 0 && resource.privilege === 0 &&
+        typeof hash === "string" && /^[a-f0-9]{32}$/iu.test(hash) &&
+        url.pathname.toLowerCase().endsWith("/" + hash.toLowerCase() + ".mp4") && sameDuration
+    } else {
+      authorized = stream.platform_code === 200 && details?.kind === "mv" &&
         (mv.platform === "netease" ? stream.fee === 0 : stream.fee == null &&
-          stream.extensions.source_track_id === String(mv.id) &&
-          stream.extensions.authorization_source === "current_metadata_and_play_url")
+          details.source_track_id === String(mv.id) && details.authorization_source === "current_metadata_and_play_url")
+    }
     if (!authorized) throw new Error("没有可核实的完整公开 MV，请打开原链接。")
     return { url, size: stream.size, cdn }
   }

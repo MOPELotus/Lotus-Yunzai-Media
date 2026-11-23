@@ -125,6 +125,44 @@ test("公开 MV 校验 TuneWeave 详情、媒体授权、时长和对应 CDN", a
   }
 })
 
+test("酷狗官方 MV 页校验分享码、同编号、足长和授权的资源哈希", async () => {
+  const link = "https://www.kugou.com/mvweb/html/mv_2ir1f4/"
+  const html = new Response('<script>var mv_id = "117613"; var encode_mvid = "2ir1f4";</script>')
+  const target = await resolveMusicShare(parseMusicShare(link), signal, async (url, options) => {
+    expect(url.href).toBe(link)
+    expect(options).toMatchObject({ credentials: "omit", redirect: "error" })
+    return html
+  })
+  expect(target).toEqual({ platform: "kugou", kind: "mv", id: "117613", url: link })
+  await expect(resolveMusicShare(parseMusicShare(link), signal, async () =>
+    new Response('var mv_id = "117613"; var encode_mvid = "another";'))).rejects.toThrow("MV 编号")
+
+  const hash = "9DC24F0A2633F6E451389549B9C5EE87"
+  const ref = "kugou:mv:117613"
+  let paid = false
+  const api = new MusicService({ tuneweave: new TuneWeaveService({
+    config: { api_url: "http://127.0.0.1:12345" },
+    async fetch(target) {
+      const url = new URL(target)
+      expect(decodeURIComponent(url.pathname).startsWith("/v1/videos/" + ref)).toBe(true)
+      if (!url.pathname.endsWith("/stream")) {
+        return Response.json({ ok: true, data: { kind: "mv",
+          video: { ref, id: "117613", platform: "kugou", title: "晴天", duration_ms: 317400 } } })
+      }
+      return Response.json({ ok: true, data: {
+        video_ref: ref, available: true, platform: "kugou",
+        url: "https://mvwebfs.tx.kugou.com/" + hash.toLowerCase() + ".mp4", duration_ms: 317400,
+        platform_code: 0, extensions: { kind: "mv", backend: "anonymous_video_tracker",
+          selected_resource: { hash, pay_type: paid ? 1 : 0, privilege: 0 } },
+      } })
+    },
+  }) })
+  const { mv } = await api.publicShare(target, signal)
+  expect((await api.publicMvStream(mv, signal)).cdn).toBe("kugou-mv")
+  paid = true
+  await expect(api.publicMvStream(mv, signal)).rejects.toThrow("完整公开 MV")
+})
+
 test("实际媒体分发回官方元数据和曲目链接，显式播放提示原平台，未请求备用音源", async () => {
   const module = createMusicCommands({
     signal,

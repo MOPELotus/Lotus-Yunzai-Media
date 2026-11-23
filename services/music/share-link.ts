@@ -10,8 +10,9 @@ export type PublicMusicTarget =
   | { platform: "soda"; kind: "track"; id: string; url: string }
   | { platform: "kuwo"; kind: "track" | "mv"; id: string; url: string }
   | { platform: "kugou"; kind: "track"; id: string; hash: string; url: string }
+  | { platform: "kugou"; kind: "mv"; id: string; url: string }
 type ShortMusicLink = { platform: "netease" | "soda"; kind: "short"; url: string }
-type KugouSharePage = { platform: "kugou"; kind: "share-page"; url: string }
+type KugouSharePage = { platform: "kugou"; kind: "share-page"; url: string; mvCode?: string }
 type StandardMusicShare = PublicMusicTarget | ShortMusicLink | KugouSharePage
 type ShareLink = StandardMusicShare | ExternalMusicShare
 
@@ -84,6 +85,10 @@ export function parseMusicShare(value: string): ShareLink | undefined {
     if (id) return { platform: "kuwo", kind: "mv", id, url: `https://www.kuwo.cn/mvplay/${id}` }
   }
   let shareCode: string | undefined
+  if (url.hostname === "www.kugou.com") {
+    const mvCode = /^\/mvweb\/html\/mv_([a-z0-9]{3,32})$/u.exec(route)?.[1]
+    if (mvCode) return { platform: "kugou", kind: "share-page", mvCode, url: `https://www.kugou.com/mvweb/html/mv_${mvCode}/` }
+  }
   if (url.hostname === "www.kugou.com") shareCode = /^\/share\/([A-Za-z0-9]+)\.html$/u.exec(url.pathname)?.[1]
   if (url.hostname === "m.kugou.com" && url.pathname === "/share/song.html") shareCode = oneParameter(url.searchParams, "chain")
   if (url.hostname === "t1.kugou.com" && url.pathname === "/song.html") shareCode = oneParameter(url.searchParams, "id")
@@ -121,7 +126,14 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
       if (size > limit) throw new Error("酷狗分享页超过读取限制。")
       html += decoder.decode(chunk, { stream: true })
     }
-    const match = kugouSharePattern.exec(html + decoder.decode())
+    html += decoder.decode()
+    if (target.mvCode) {
+      const id = /\bvar\s+mv_id\s*=\s*"([1-9]\d{0,19})"\s*;/u.exec(html)?.[1]
+      const code = /\bvar\s+encode_mvid\s*=\s*"([a-z0-9]+)"\s*;/u.exec(html)?.[1]
+      if (id && code === target.mvCode) return { platform: "kugou", kind: "mv", id, url: target.url }
+      throw new Error("未能核实酷狗分享页中的 MV 编号。")
+    }
+    const match = kugouSharePattern.exec(html)
     let items: unknown
     try { if (match?.[1]) items = JSON.parse(match[1]) }
     catch { throw new Error("酷狗公开分享页返回了无法识别的单曲资料。") }

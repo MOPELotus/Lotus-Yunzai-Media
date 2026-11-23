@@ -7,6 +7,11 @@ import { getOfficialLink, parseOfficialLink, officialLinkNames, type OfficialLin
 
 const link = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
 
+export function* messageLinkValues(message: string, context: MessageFallbackContext) {
+  const contents = buildMediaMessageText({ ...context, msg: message }).replaceAll("\\/", "/")
+  for (const [value] of contents.matchAll(link)) yield value.replace(/[.,!;]+$/u, "")
+}
+
 function identify(message: string, context: MessageFallbackContext) {
   if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private")) return
   if (/^\s*[#＃]/u.test(message)) {
@@ -15,9 +20,8 @@ function identify(message: string, context: MessageFallbackContext) {
     if (input && input.platform === "v2ex") return input
     return
   }
-  const contents = buildMediaMessageText({ ...context, msg: message }).replaceAll("\\/", "/")
-  for (const [value] of contents.matchAll(link)) {
-    const input = parseOfficialLink(value.replace(/[.,!;]+$/u, ""))
+  for (const value of messageLinkValues(message, context)) {
+    const input = parseOfficialLink(value)
     if (input) return input
   }
 }

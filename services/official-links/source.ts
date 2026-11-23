@@ -68,7 +68,7 @@ function text(value: unknown, length: number) {
     .slice(0, length).join("") : ""
 }
 
-async function bounded(fetcher: OfficialLinkFetch, url: URL, signal: AbortSignal, accept: string, limit: number) {
+export async function readOfficialLink(fetcher: OfficialLinkFetch, url: URL, signal: AbortSignal, accept: string, limit: number) {
   const response = await fetcher(url, { redirect: "error", credentials: "omit", signal, headers: { Accept: accept } })
   const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
   const reader = response.body?.getReader()
@@ -95,7 +95,7 @@ async function bounded(fetcher: OfficialLinkFetch, url: URL, signal: AbortSignal
 async function cover(fetcher: OfficialLinkFetch, url: URL | undefined, signal: AbortSignal) {
   if (!url) return
   try {
-    const bytes = await bounded(fetcher, url, signal, "image/jpeg,image/png,image/webp", 2 * 1024 * 1024)
+    const bytes = await readOfficialLink(fetcher, url, signal, "image/jpeg,image/png,image/webp", 2 * 1024 * 1024)
     if (bytes.length) return bytes
   } catch {
     signal.throwIfAborted()
@@ -108,7 +108,7 @@ async function youtube(input: Extract<OfficialLink, { platform: "youtube" | "you
   const link = new URL(input.link)
   link.searchParams.delete("t")
   endpoint.searchParams.set("url", link.href)
-  const bytes = await bounded(fetcher, endpoint, signal, "application/json", 32 * 1024)
+  const bytes = await readOfficialLink(fetcher, endpoint, signal, "application/json", 32 * 1024)
   const raw: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return
   const data = raw as Record<string, unknown>
@@ -131,7 +131,7 @@ async function telegram(input: Extract<OfficialLink, { platform: "telegram" }>, 
   const endpoint = new URL("https://t.me")
   endpoint.pathname = `/${encodeURIComponent(input.username)}/${encodeURIComponent(input.id)}`
   endpoint.searchParams.set("embed", "1")
-  const bytes = await bounded(fetcher, endpoint, signal, "text/html", 192 * 1024)
+  const bytes = await readOfficialLink(fetcher, endpoint, signal, "text/html", 192 * 1024)
   const $ = load(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
   const posts = $(".tgme_widget_message[data-post]").filter((_, post) =>
     $(post).attr("data-post")?.toLowerCase() === `${input.username}/${input.id}`)
@@ -153,27 +153,32 @@ async function telegram(input: Extract<OfficialLink, { platform: "telegram" }>, 
   return { title: "Telegram 公开消息", owner, desc, cover: photoCover }
 }
 
+export async function getV2exArticle(input: Extract<OfficialLink, { platform: "v2ex" }>,
+  fetcher: OfficialLinkFetch, signal: AbortSignal) {
+  const endpoint = new URL("https://www.v2ex.com/api/topics/show.json")
+  endpoint.searchParams.set("id", input.id)
+  const bytes = await readOfficialLink(fetcher, endpoint, signal, "application/json", 256 * 1024)
+  const items: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
+  if (!Array.isArray(items) || items.length !== 1) return
+  const topic = items[0]
+  const link = typeof topic?.url === "string" && parseOfficialLink(topic.url)
+  if (!topic || !Number.isSafeInteger(topic.id) || String(topic.id) !== input.id ||
+      !link || link.platform !== "v2ex" || link.id !== input.id) return
+  const title = text(topic.title, 300)
+  const author = text(topic.member?.username, 100)
+  const node = text(topic.node?.title, 70)
+  if (!title || !author) return
+  const content = typeof topic.content === "string" ? topic.content.replace(/^ {0,3}(?:`{3,}|~{3,})[^\r\n]*\r?$/gmu, "") : ""
+  return { title, owner: [author, node].filter(Boolean).join(" · "), text: text(content, 50_000), link: input.link }
+}
+
 export async function getOfficialLink(input: OfficialLink, fetcher: OfficialLinkFetch, signal: AbortSignal): Promise<PublicPreview | undefined> {
   if (input.platform === "v2ex") {
-    const endpoint = new URL("https://www.v2ex.com/api/topics/show.json")
-    endpoint.searchParams.set("id", input.id)
-    const bytes = await bounded(fetcher, endpoint, signal, "application/json", 256 * 1024)
-    const items: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
-    if (!Array.isArray(items) || items.length !== 1) return
-    const topic = items[0]
-    const link = typeof topic?.url === "string" && parseOfficialLink(topic.url)
-    if (!topic || !Number.isSafeInteger(topic.id) || String(topic.id) !== input.id ||
-        !link || link.platform !== "v2ex" || link.id !== input.id) return
-    const title = text(topic.title, 300)
-    const author = text(topic.member?.username, 100)
-    const node = text(topic.node?.title, 70)
-    if (!title || !author) return
-    const content = typeof topic.content === "string" ? topic.content.replace(/^ {0,3}(?:`{3,}|~{3,})[^\r\n]*\r?$/gmu, "") : ""
-    const body = text(content, 1201)
-    const chars = Array.from(body)
-    return { title, owner: [author, node].filter(Boolean).join(" · "),
-      desc: chars.length > 1200 ? chars.slice(0, 1200).join("") + "…" : body }
+    const article = await getV2exArticle(input, fetcher, signal)
+    if (!article) return
+    const chars = Array.from(article.text)
+    return { title: article.title, owner: article.owner, desc: chars.length > 1200 ? chars.slice(0, 1200).join("") + "…" : article.text }
   }
-  if (input.platform === "x") return xPreview(input, url => bounded(fetcher, url, signal, "application/json", 32 * 1024), publicUrl, text)
+  if (input.platform === "x") return xPreview(input, url => readOfficialLink(fetcher, url, signal, "application/json", 32 * 1024), publicUrl, text)
   return input.platform === "telegram" ? telegram(input, fetcher, signal) : youtube(input, fetcher, signal)
 }

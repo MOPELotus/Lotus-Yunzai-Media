@@ -13,6 +13,7 @@ import { createOfficialVideoSettings, officialVideoGames } from "./services/offi
 import { loadBiliPgcSettings } from "./services/bilibili/pgc.ts"
 import { biliPgcQualities } from "./services/bilibili/pgc-playback.ts"
 import { createOfficialLinkSettings, officialLinkToggles, officialLinkTrustFields, parseTrustedOfficialLinkUsers, type OfficialLinkPatch } from "./services/official-links/settings.ts"
+import { createSummaryModel, parseSummaryModelPatch } from "./services/official-links/summary-model.ts"
 import { createJikeSettings, jikeFields } from "./services/jike/settings.ts"
 import { createKuaishouSettings, kuaishouFields } from "./services/kuaishou/settings.ts"
 import { createPipixiaSettings, pipixiaFields, type PipixiaSettings } from "./services/pipixia/settings.ts"
@@ -228,6 +229,17 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
   pipixia = createPipixiaSettings(directory), loadConfig = loadGlobalConfig, kuaishou = createKuaishouSettings(directory), jike = createJikeSettings(directory)) {
   const config = createSubscriptionConfig(directory, lockFile)
   const officialLinks = createOfficialLinkSettings(directory, root)
+  const summary = createSummaryModel({ directory, root })
+  const summaryFields = [
+    { key: "summaryEnabled", label: "使用模型总结网页", component: "Switch",
+      bottomHelpMessage: "开启后，支持的公开网页正文会发送给下方配置的模型服务。" },
+    { key: "summaryMode", label: "网页总结模式", component: "Select",
+      componentProps: { options: [{ label: "通用兼容接口", value: "general" }, { label: "保留旧元宝设置", value: "yuanbao" }] },
+      bottomHelpMessage: "旧元宝模式仍显示原文预览。切换到通用兼容接口后可生成模型摘要。" },
+    { key: "summaryBaseUrl", label: "网页总结接口地址", component: "Input" },
+    { key: "summaryModel", label: "网页总结模型名", component: "Input" },
+    { key: "summaryApiKey", label: "网页总结 API 密钥", component: "InputPassword" },
+  ] as const
   const publicShares = [
     { id: "pipixia", name: "皮皮虾", fields: pipixiaFields, store: pipixia },
     { id: "kuaishou", name: "快手", fields: kuaishouFields, store: kuaishou },
@@ -277,7 +289,8 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       ...([[officialLinkTrustFields.telegram, "Telegram"], [officialLinkTrustFields.x, "X"]] as const).map(([key, label]) => ({
         field: `officialLinks.${key}`, label: `${label} 信任 QQ`, component: "Select",
         componentProps: { mode: "tags" }, bottomHelpMessage: "留空将只允许主人使用此来源。"
-      }))],
+      })),
+      ...summaryFields.map(({ key, ...schema }) => ({ ...schema, field: `officialLinks.${key}` }))],
       async getConfigData() {
         const entries = await Promise.all(platforms.map(async ({ id, fields }) => {
           const settings = await config.settings(id)
@@ -288,13 +301,15 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           }
           return [id, values]
         }))
-        const [videos, shareSettings, tools, officialLinkSettings] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
+        const [videos, shareSettings, tools, officialLinkSettings, summarySettings] = await Promise.all([officialVideo.settings(), Promise.all(publicShareSites.map(async site => {
           const settings = await loadPublicShareConfig(site, root)
           return [site, { enable: settings.enable, private_preview: settings.privatePreview }]
-        })), loadConfig().then(config => config.tools), officialLinks.settings()])
+        })), loadConfig().then(config => config.tools), officialLinks.settings(), summary.settings()])
+        const { summaryApiKeyConfigured, ...summaryInput } = summarySettings
         const shares = await Promise.all(publicShares.map(async share => [share.id, await share.store.settings(tools)]))
         return { ...Object.fromEntries([...entries, ...shareSettings, ...shares]),
-          officialLinks: officialLinkSettings, officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
+          officialLinks: { ...officialLinkSettings, ...summaryInput, ...(summaryApiKeyConfigured && { summaryApiKey: "configured" }) },
+          officialVideo: { forwardMsg: videos.forward, cover: videos.cover, ...videos.selected,
           groups: videos.groups.map(String), group_config: [...videos.muted].filter(([, games]) => games.size)
             .map(([group, games]) => `${group}: ${[...games].join(", ")}`) } }
       },
@@ -335,6 +350,11 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           if (!users) return Result.error("请填写有效的公开链接信任 QQ。", 422)
           officialLinkPatch[key] = users
         }
+        const summaryPatch = parseSummaryModelPatch(Object.fromEntries(summaryFields.flatMap(({ key }) => {
+          const field = `officialLinks.${key}`
+          return Object.hasOwn(values, field) && (!edited || edited.has(field)) ? [[key, values[field]]] : []
+        })))
+        if (!summaryPatch) return Result.error("请填写有效的网页总结配置。", 422)
         const pgcPatch: Record<string, boolean | number> = {}
         for (const key of ["biliPgcAuto", "biliPgcQuality", "biliPgcDuration"] as const) {
           const field = `bilibili.${key}`
@@ -369,7 +389,9 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         if (Object.keys(videoPatch).length) await officialVideo.save(videoPatch)
         for (const [site, patch] of sharePatches) await savePublicShare(root, site, patch)
         for (const [store, patch] of publicSharePatches) await store.save(patch)
-        if (Object.keys(officialLinkPatch).length) await officialLinks.save(officialLinkPatch)
+        if (Object.keys(officialLinkPatch).length || Object.keys(summaryPatch).length) {
+          await officialLinks.save({ ...officialLinkPatch, ...summaryPatch })
+        }
         return Result.ok()
       },
     },

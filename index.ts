@@ -18,6 +18,7 @@ import { createMiyoushePostCommands } from "./services/official-video/post-comma
 import { createPublicShareCommands } from "./services/public-share/command.ts"
 import { createWeixinChannelsPreview } from "./services/weixin-channels/preview.ts"
 import { createOfficialLinkPreview } from "./services/official-links/command.ts"
+import { createWebSummary } from "./services/web-summary/command.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
@@ -55,6 +56,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const publicShare = createPublicShareCommands(services)
   const weixinChannels = createWeixinChannelsPreview({ signal: services.signal })
   const officialLinks = createOfficialLinkPreview({ ...services.officialLinks, signal: services.signal })
+  const webSummary = createWebSummary({ ...services.officialLinks, signal: services.signal })
   return {
     ...subscriptions,
     async dispose() {
@@ -87,7 +89,9 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       const jikeFeatures = jike.features(context)
       if (jikeFeatures.length) return jikeFeatures
       const shortVideoFeatures = douyin.features(context)
-      return shortVideoFeatures.length ? shortVideoFeatures : officialLinks.features(context)
+      if (shortVideoFeatures.length) return shortVideoFeatures
+      const summaryFeatures = webSummary.features(context)
+      return summaryFeatures.length ? summaryFeatures : officialLinks.features(context)
     },
     async fallback(message, context) {
       if (officialVideo.matches(context.normalizedMessage)) return officialVideo.fallback(context.normalizedMessage, context)
@@ -98,7 +102,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
         await acfun.fallback(message, context) ?? await publicShare.fallback(message, context) ?? await weixinChannels.fallback(message, context) ?? await music.fallback(message, context) ??
         await miyoushePost.fallback(message, context) ?? await pipixia.fallback(message, context) ?? await kuaishou.fallback(message, context) ?? await jike.fallback(message, context) ??
-        await douyin.fallback(message, context) ?? officialLinks.fallback(message, context)
+        await douyin.fallback(message, context) ?? await webSummary.fallback(message, context) ?? officialLinks.fallback(message, context)
     },
   }
 }

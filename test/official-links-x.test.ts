@@ -54,7 +54,7 @@ test("Media 实际分发 X 来源，群权限、旧信任边界与私聊开关�
   const module = await createModule({ lockFile, signal: controller.signal, officialLinks: {
     settings: async trust => {
       expect(trust === false || trust === "x").toBe(true)
-      return { youtube: true, youtubeMusic: true, telegram: true, x: enabled, v2ex: true, private: privateAccess,
+      return { youtube: true, youtubeMusic: true, telegram: true, x: enabled, v2ex: true, articles: true, private: privateAccess,
         trustedXUsers: ["9001"], trustedTelegramUsers: ["9002"] }
     },
     async fetcher(url) {

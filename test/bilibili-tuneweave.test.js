@@ -13,6 +13,45 @@ const parts = [1, 2, 3].map(page => ({ id: "cid:" + (100 + page), page, title: "
 const ok = (data, alias) => Response.json({ ok: true, data, meta: { platform: "bilibili", ...(alias && { account: alias }) } })
 const absent = () => Response.json({ ok: false, error: { code: "authentication_required" } }, { status: 401 })
 
+test("重复请求 B 站登录先核对原别名，能续期时不需要重扫", async () => {
+  const workDir = await mkdtemp(join(tmpdir(), "lotus-bili-login-"))
+  const accountFile = join(workDir, "account.yaml")
+  const alias = "fixture-login"
+  const initial = `tuneweave_account: ${alias}\nsaved_at: first\nuser_id: "123456"\n`
+  const paths = []
+  const profile = { platform: "bilibili", account: alias, authenticated: true, user_id: "123456" }
+  let session = profile
+  let renewal = profile
+  const check = () => new BilibiliService({ accountFile, fetch: async (input, init) => {
+    const url = new URL(input)
+    paths.push(url.pathname)
+    if (url.pathname.endsWith("/refresh")) {
+      expect(init.redirect).toBe("error")
+      expect(JSON.parse(init.body)).toEqual({ platform: "bilibili", account: alias, credential_mode: "server" })
+      return renewal ? ok(renewal, alias) : absent()
+    }
+    expect(url.searchParams.get("account")).toBe(alias)
+    return ok(session, alias)
+  } }).hasReusableLogin()
+  try {
+    expect(await check()).toBe(false)
+    expect(paths).toEqual([])
+    await writeFile(accountFile, initial)
+    expect(await check()).toBe(true)
+    expect(paths.splice(0)).toEqual(["/v1/auth/session"])
+    session = { ...profile, authenticated: false }
+    expect(await check()).toBe(true)
+    expect(paths.splice(0)).toEqual(["/v1/auth/session", "/v1/auth/session/refresh"])
+    renewal = { ...profile, user_id: "123457" }
+    await expect(check()).rejects.toThrow("原 B 站账号续期")
+    renewal = undefined
+    expect(await check()).toBe(false)
+    session = { ...profile, user_id: "123457" }
+    await expect(check()).rejects.toThrow("原 B 站账号")
+    expect(await Bun.file(accountFile).text()).toBe(initial)
+  } finally { await rm(workDir, { recursive: true, force: true }) }
+})
+
 test("引用 B 站分享卡保留单一合法分 P，缺省才使用无页码链接", () => {
   const card = jumpUrl => ({ meta: { news: { jumpUrl } } })
   expect(quotedBiliCardLink(card(link + "?p=2&spm_id_from=demo#section"))).toBe(link + "?p=2")

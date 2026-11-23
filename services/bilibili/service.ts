@@ -74,7 +74,14 @@ interface TuneWeaveQr {
 
 interface TuneWeaveQrResult {
   state: string
-  profile?: { authenticated?: boolean; platform?: string; account?: string; user_id?: string }
+  profile?: TuneWeaveBiliProfile
+}
+
+interface TuneWeaveBiliProfile {
+  authenticated?: boolean
+  platform?: string
+  account?: string
+  user_id?: string
 }
 
 interface LiveRoomResponse {
@@ -356,12 +363,51 @@ export class BilibiliService {
     return current?.tuneweave_account === alias && current.saved_at === record.saved_at && current.user_id === record.user_id
   }
 
-  async tuneRequest<Data>(route: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<Data> {
-    this.selection ??= this.loadAccount().then(stored => {
+  private selectedLogin() {
+    return this.selection ??= this.loadAccount().then(stored => {
       const alias = this.tuneAccount || stored?.tuneweave_account || ""
       return { alias, record: alias && stored?.tuneweave_account === alias ? stored : undefined }
     })
-    const { alias, record } = await this.selection
+  }
+
+  async hasReusableLogin(signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted()
+    const { alias, record } = await this.selectedLogin()
+    if (!alias || !record) return false
+    try {
+      const profile = await this.tuneRequest<TuneWeaveBiliProfile>("/v1/auth/session", { platform: "bilibili" }, signal)
+      if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+      if (profile?.platform !== "bilibili" || profile.account !== alias) throw new Error("TuneWeave 未确认原 B 站账号。")
+      if (profile.authenticated === false) {
+        if (!record.user_id || this.refreshed) return false
+        return await this.refreshLogin(alias, record, signal)
+      }
+      if (profile.authenticated !== true || !profile.user_id || !/^[1-9]\d{0,19}$/u.test(profile.user_id) ||
+          record.user_id && record.user_id !== profile.user_id) throw new Error("TuneWeave 未确认原 B 站账号。")
+      return true
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "authentication_required") return false
+      throw error
+    }
+  }
+
+  private async refreshLogin(alias: string, record: StoredAccount, signal?: AbortSignal): Promise<boolean> {
+    const originalUid = record.user_id
+    if (typeof originalUid !== "string" || !/^[1-9]\d{0,19}$/u.test(originalUid)) return false
+    if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+    this.refreshed = true
+    const { data, accountSelected } = await this.tuneweave.request<TuneWeaveBiliProfile>(
+      "/v1/auth/session/refresh", { method: "POST", signal, redirect: "error",
+        accountSelection: { platform: "bilibili", alias },
+        body: { platform: "bilibili", account: alias, credential_mode: "server" } })
+    if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+    if (!accountSelected || data?.platform !== "bilibili" || data.account !== alias ||
+        data.authenticated === true && data.user_id !== originalUid) throw new Error("TuneWeave 未确认原 B 站账号续期。")
+    return data.authenticated === true
+  }
+
+  async tuneRequest<Data>(route: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<Data> {
+    const { alias, record } = await this.selectedLogin()
     const query = new URLSearchParams({ ...params, ...(alias ? { account: alias } : {}) })
     const endpoint = route + (query.size ? "?" + query : "")
     if (!alias) return this.tuneweave.request<Data>(endpoint, { signal, redirect: "error" })
@@ -379,18 +425,9 @@ export class BilibiliService {
     try { return await read() }
     catch (error) {
       if (!record || this.refreshed || !(error && typeof error === "object" && "code" in error && error.code === "authentication_required")) throw error
-      await verify()
-      const originalUid = record.user_id
-      if (typeof originalUid !== "string" || !/^[1-9]\d{0,19}$/u.test(originalUid)) {
-        throw new Error("旧 B 站账号缺少已核验的 UID，请重新扫码登录。")
+      if (!await this.refreshLogin(alias, record, signal)) {
+        throw Object.assign(new Error("B 站原账号已失效，请重新扫码登录。"), { code: "authentication_required" })
       }
-      this.refreshed = true
-      const { data, accountSelected } = await this.tuneweave.request<{ platform?: string; account?: string; authenticated?: boolean; user_id?: string }>(
-        "/v1/auth/session/refresh", { method: "POST", signal, redirect: "error", accountSelection,
-          body: { platform: "bilibili", account: alias, credential_mode: "server" } })
-      await verify()
-      if (!accountSelected || data?.platform !== "bilibili" || data.account !== alias || data.authenticated !== true ||
-          data.user_id !== originalUid) throw new Error("TuneWeave 未确认原 B 站账号续期。")
       return read()
     }
   }

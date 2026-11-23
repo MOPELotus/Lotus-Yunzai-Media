@@ -66,7 +66,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       const subscriptionFeatures = subscriptions.features(context)
       if (subscriptionFeatures.length) return subscriptionFeatures
       if (officialVideo.matches(context.normalizedMessage)) return ["[media] 米游社官号视频"]
-      if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return biliFeatureNames
+      if (biliLogin.matches(context.normalizedMessage) || environment.matches(context.normalizedMessage)) return biliFeatureNames
       if (biliPgc.matches(context.normalizedMessage, context)) return biliFeatureNames
       const features = biliVideo.features(context)
       if (features.length) return features
@@ -92,7 +92,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
     async fallback(message, context) {
       if (officialVideo.matches(context.normalizedMessage)) return officialVideo.fallback(context.normalizedMessage, context)
       if (message.startsWith("#mcwiki") && /^\S/u.test(message.slice(7))) return mcwiki(message.slice(7))
-      if (message === biliLogin.command) return biliLogin.fallback(message, context)
+      if (biliLogin.matches(message)) return biliLogin.fallback(message, context)
       if (environment.matches(message)) return environment.fallback(message, context)
       if (biliPgc.matches(message, context)) return biliPgc.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??

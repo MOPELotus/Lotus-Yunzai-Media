@@ -9,6 +9,7 @@ import { biliSharedSession } from "../subscriptions/bilibili/shared.ts"
 import { BilibiliService } from "./service.ts"
 
 const command = "#B站登录"
+const switchCommand = "#B站换号"
 const settings = createSubscriptionConfig(dataPath, lockFile)
 
 async function loginError(context: MessageFallbackContext, message: string) {
@@ -21,8 +22,9 @@ async function loginError(context: MessageFallbackContext, message: string) {
 
 export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal }) {
   let signingIn = false
+  const matches = (message: string) => message === command || message === switchCommand
   const fallback: MessageFallback = async (message, context) => {
-    if (message !== command) return
+    if (!matches(message)) return
     const friend = context.privateCredentialSignal
     if (context.isDelegated || context.message_type !== "private" || !friend || context.user_id === undefined ||
         !context.isBotMaster(context.user_id)) {
@@ -41,6 +43,9 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
       const service = new BilibiliService({ tuneweaveConfig: config.tuneweave })
       const shared = biliSharedSession({ createService: async () => service,
         enabled: async () => (await settings.settings("bilibili")).sharedBiliLogin })
+      if (message === command && await service.hasReusableLogin(active)) {
+        return "B 站账号已登录，可继续使用。更换账号请发送 #B站换号。"
+      }
       const allowsSharing = await shared.available(active)
       active.throwIfAborted()
       const qr = await service.createQrLogin({ signal: active })
@@ -87,5 +92,5 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
       if (acquired) signingIn = false
     }
   }
-  return { command, fallback }
+  return { matches, fallback }
 }

@@ -9,6 +9,7 @@ import { createSubscriptionModule } from "./services/subscriptions/module.ts"
 import { startMediaMaintenance } from "./services/tuneweave/startup.ts"
 import { createMediaEnvironment } from "./services/tools/command.ts"
 import { createOfficialVideoCommands } from "./services/official-video/index.ts"
+import { createMiyoushePostCommands } from "./services/official-video/post-command.ts"
 
 type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0]
@@ -32,6 +33,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
   const biliLogin = createBilibiliLogin(services)
   const environment = createMediaEnvironment(services)
   const officialVideo = createOfficialVideoCommands(services)
+  const miyoushePost = createMiyoushePostCommands(services)
   return {
     ...subscriptions,
     async dispose() {
@@ -46,7 +48,9 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       const features = biliVideo.features(context)
       if (features.length) return features
       const songFeatures = music.features(context)
-      return songFeatures.length ? songFeatures : douyin.features(context)
+      if (songFeatures.length) return songFeatures
+      const articleFeatures = miyoushePost.features(context)
+      return articleFeatures.length ? articleFeatures : douyin.features(context)
     },
     async fallback(message, context) {
       if (officialVideo.matches(context.normalizedMessage)) return officialVideo.fallback(context.normalizedMessage, context)
@@ -54,7 +58,7 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       if (message === biliLogin.command) return biliLogin.fallback(message, context)
       if (environment.matches(message)) return environment.fallback(message, context)
       return await subscriptions.fallback(message, context) ?? await biliVideo.fallback(message, context) ??
-        await music.fallback(message, context) ?? douyin.fallback(message, context)
+        await music.fallback(message, context) ?? await miyoushePost.fallback(message, context) ?? douyin.fallback(message, context)
     },
   }
 }

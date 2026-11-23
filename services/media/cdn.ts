@@ -1,5 +1,5 @@
 const douyinDomains = ["douyin.com", "iesdouyin.com", "douyinpic.com", "douyincdn.com", "douyinvod.com", "byteimg.com", "bytefcdn.com", "bytedance.com", "bytecdn.cn", "ixigua.com"]
-const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.com"]
+const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.com", "upload-bbs.miyoushe.com", "upload-bbs.mihoyo.com"]
 
 function mediaUrl(value: string | URL, domains: readonly string[]) {
   const url = new URL(value)

@@ -6,7 +6,7 @@ import { fetchImageBytes } from "./image.ts"
 import { plainGameText } from "./plain-text.ts"
 import type { ArticleBlock } from "../../services/media/message.ts"
 
-export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "douyin-article"
+export type SourceTemplate = "status" | "bilibili-info" | "douyin-info" | "article"
 
 export interface RenderOptions {
  readonly mode?: Parameters<typeof renderPng>[3]
@@ -295,7 +295,7 @@ export async function renderMediaNewsPages(header: MediaNewsHeader, buildBody: (
 
 async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
  // genshin mysNews content order inside Miao help/index's elemental group container.
- const article=template==='douyin-article'
+ const article=template==='article'
  const close=openNews(p,{
   owner:data.owner||'作者资料未记录',
   title:data.title||'作品信息',
@@ -303,7 +303,7 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
   avatar:data.avatar,
   metadata:article?undefined:[data.type==='live'?'直播':data.type==='gallery'?'图集':data.type==='live_photo'?'动态图片':data.type==='article'?'文章':'视频',data.duration?`${Math.floor(data.duration/60)}分${Math.floor(data.duration%60)}秒`:'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?`${data.media.length} 个媒体项`:''].filter(Boolean).join(' · '),
  })
- if(template==='douyin-article'){
+ if(article){
   for(const block of data.blocks||[]){
    if(block.type==='image')for(const src of block.urls||[])await newsImage(p,src)
    else if(block.text)p.y+=p.text(block.text,30,p.y,p.width-60,22,WHITE,{leading:36})+16

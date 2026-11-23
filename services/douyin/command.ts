@@ -64,7 +64,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
           }, { saveId }), `[media] ${info.title}\n作者：${info.owner || "未知"}\n${info.url}`)
           for (const [index, page] of articlePages(info.article).entries()) {
             if (signal.aborted) return
-            const image = await renderTemplate("douyin-article", {
+            const image = await renderTemplate("article", {
               title: info.title, owner: info.owner, page: index + 1, blocks: page, userId: context.user_id,
             }, { saveId: `${saveId}-article-${index}` })
             await replyImage(reply, image, page.map(block => block.text || block.urls?.[0] || "").join("\n"))

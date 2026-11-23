@@ -11,7 +11,6 @@ import { biliPgcDefaultDuration, createBiliPgcPlayback, playbackQuality } from "
 const site = "https://www.bilibili.com"
 const api = "https://api.bilibili.com/pgc/view/web/season"
 const maxResponse = 2 * 1024 * 1024
-const feature = "B 站番剧预览"
 const link = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:https?:\/\/|(?=www\.bilibili\.com\/))[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
 const hosts = new Set(["www.bilibili.com", "bilibili.com", "m.bilibili.com"])
 const playCommand = /^#(?:播放|b站(?:下载|下视频))\s+(\S+)\s*$/iu
@@ -176,47 +175,52 @@ export function createBiliPgcPreview({ signal, fetcher = fetch, options = loadBi
     }
   }
 
+  async function resolved(input: BiliPgcTarget, context: MessageFallbackContext,
+    source: "share" | "quote" | "download"): Promise<MessageReply | undefined> {
+    if (context.isDelegated || (context.message_type !== "group" && context.message_type !== "private")) return
+    const explicit = source === "download"
+    const scopes = [signal, context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal]
+      .filter((scope): scope is AbortSignal => !!scope)
+    const active = AbortSignal.any(scopes)
+    if (active.aborted) return
+    const rules = await options().catch(() => undefined)
+    if (!rules?.enable || (!explicit && context.message_type === "private" && !rules.private) || active.aborted) return
+    const unavailable = `暂无法读取 B 站番剧公开信息。\n${input.url}`
+    try {
+      const data = await fetchBiliPgc(input, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)]))
+      if (active.aborted) return
+      if (!data) return unavailable
+      if (explicit) return play(input, data, context, rules, active, readBiliPgcJson)
+      const selected = input.kind === "ep" ? data.episode : undefined
+      const duration = selected?.duration ? `时长 ${Math.floor(selected.duration / 60)} 分 ${Math.floor(selected.duration % 60)} 秒` : ""
+      const stat = data.stats
+      const follows = number(stat.favorites)
+      const followText = text(stat.follow_text, 50) || (follows === undefined ? "" : `追番 ${follows}`)
+      const info = [selected?.title, selected?.badge && `平台标记 · ${selected.badge}`, duration,
+        data.rating, data.update, followText, data.desc].filter(Boolean).join("\n")
+      const card = { title: data.title, owner: "B 站番剧", id: `${input.kind}${input.id} · 全季统计`,
+        type: "public-link", cover: selected?.cover ?? data.cover, desc: info,
+        stat: { like: number(stat.likes), reply: number(stat.reply), favorite: number(stat.favorite),
+          coin: number(stat.coins), view: number(stat.views), danmaku: number(stat.danmakus) } }
+      const limit = context.inlineImageByteLimit ?? Infinity
+      let image = await render("bilibili-info", card).catch(() => undefined)
+      if (image && image.byteLength > limit && !active.aborted) image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)
+      if (active.aborted) return
+      const preview: MessageReply = image && image.byteLength <= limit
+        ? [{ type: "image", file: image }, { type: "text", text: input.url }]
+        : [data.title, info, input.url].filter(Boolean).join("\n")
+      if (source !== "share" || !rules.automatic || !data.episode) return preview
+      if (await context.reply(preview) && !active.aborted) return play(input, data, context, rules, active, readBiliPgcJson)
+      return []
+    } catch { if (!active.aborted) return unavailable }
+  }
+
   return {
     matches(message: string, context: MessageFallbackContext) { return !signal?.aborted && !!target(message, context) },
-    features: ["[media] B 站解析", `[media] ${feature}`],
+    resolved,
     async fallback(message: string, context: MessageFallbackContext): Promise<MessageReply | undefined> {
       const input = target(message, context)
-      if (!input) return
-      const scopes = [signal, context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal]
-        .filter((scope): scope is AbortSignal => !!scope)
-      const active = AbortSignal.any(scopes)
-      if (active.aborted) return
-      const explicit = playCommand.test(message)
-      const rules = await options().catch(() => undefined)
-      if (!rules?.enable || (!explicit && context.message_type === "private" && !rules.private) || active.aborted) return
-      const unavailable = `暂无法读取 B 站番剧公开信息。\n${input.url}`
-      try {
-        const data = await fetchBiliPgc(input, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)]))
-        if (active.aborted) return
-        if (!data) return unavailable
-        if (explicit) return play(input, data, context, rules, active, readBiliPgcJson)
-        const selected = input.kind === "ep" ? data.episode : undefined
-        const duration = selected?.duration ? `时长 ${Math.floor(selected.duration / 60)} 分 ${Math.floor(selected.duration % 60)} 秒` : ""
-        const stat = data.stats
-        const follows = number(stat.favorites)
-        const followText = text(stat.follow_text, 50) || (follows === undefined ? "" : `追番 ${follows}`)
-        const info = [selected?.title, selected?.badge && `平台标记 · ${selected.badge}`, duration,
-          data.rating, data.update, followText, data.desc].filter(Boolean).join("\n")
-        const card = { title: data.title, owner: "B 站番剧", id: `${input.kind}${input.id} · 全季统计`,
-          type: "public-link", cover: selected?.cover ?? data.cover, desc: info,
-          stat: { like: number(stat.likes), reply: number(stat.reply), favorite: number(stat.favorite),
-            coin: number(stat.coins), view: number(stat.views), danmaku: number(stat.danmakus) } }
-        const limit = context.inlineImageByteLimit ?? Infinity
-        let image = await render("bilibili-info", card).catch(() => undefined)
-        if (image && image.byteLength > limit && !active.aborted) image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)
-        if (active.aborted) return
-        const preview: MessageReply = image && image.byteLength <= limit
-          ? [{ type: "image", file: image }, { type: "text", text: input.url }]
-          : [data.title, info, input.url].filter(Boolean).join("\n")
-        if (!rules.automatic || !data.episode) return preview
-        if (await context.reply(preview) && !active.aborted) return play(input, data, context, rules, active, readBiliPgcJson)
-        return []
-      } catch { if (!active.aborted) return unavailable }
+      if (input) return resolved(input, context, playCommand.test(message) ? "download" : "share")
     },
   }
 }

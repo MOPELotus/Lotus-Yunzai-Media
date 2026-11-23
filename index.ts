@@ -4,7 +4,7 @@ import { createJikeCommands } from "./services/jike/command.ts"
 import { createKuaishouCommands } from "./services/kuaishou/command.ts"
 import { createPipixiaCommands } from "./services/pipixia/command.ts"
 import { createBilibiliLogin } from "./services/bilibili/login-command.ts"
-import { createBilibiliVideoCommands } from "./services/bilibili/video-command.ts"
+import { biliFeatureNames, createBilibiliVideoCommands } from "./services/bilibili/video-command.ts"
 import { createBiliPgcPreview } from "./services/bilibili/pgc.ts"
 import { createDouyinCommands } from "./services/douyin/command.ts"
 import { createMusicCommands } from "./services/music/command.ts"
@@ -22,6 +22,7 @@ type MediaServices = Parameters<typeof createSubscriptionModule>[0] &
   Parameters<typeof createPartnerSchedule>[0] & Parameters<typeof startMediaMaintenance>[0] & Parameters<typeof createOfficialVideoCommands>[0] &
   {
     readonly officialLinks?: Omit<Parameters<typeof createOfficialLinkPreview>[0], "signal">
+    readonly biliVideo?: Pick<Parameters<typeof createBilibiliVideoCommands>[0], "fetch" | "settings">
     readonly biliPgc?: Omit<Parameters<typeof createBiliPgcPreview>[0], "signal">
   }
 
@@ -30,8 +31,8 @@ type MediaCommandModule = Omit<CommandModule, "name"> & { dispose(): Promise<voi
 export default { commands: {} } satisfies Pick<CommandModule, "commands">
 
 export async function createModule(services: MediaServices): Promise<MediaCommandModule> {
-  const biliVideo = createBilibiliVideoCommands(services)
   const biliPgc = createBiliPgcPreview({ ...services.biliPgc, signal: services.signal })
+  const biliVideo = createBilibiliVideoCommands({ ...services, ...services.biliVideo, resolvedPgc: biliPgc.resolved })
   const subscriptions = await createSubscriptionModule({ ...services, quotedBilibiliAuthor: biliVideo.quotedAuthor })
   const maintenance = startMediaMaintenance(services)
   const music = createMusicCommands(services)
@@ -63,8 +64,8 @@ export async function createModule(services: MediaServices): Promise<MediaComman
       const subscriptionFeatures = subscriptions.features(context)
       if (subscriptionFeatures.length) return subscriptionFeatures
       if (officialVideo.matches(context.normalizedMessage)) return ["[media] 米游社官号视频"]
-      if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return ["[media] B 站解析"]
-      if (biliPgc.matches(context.normalizedMessage, context)) return biliPgc.features
+      if (context.normalizedMessage === biliLogin.command || environment.matches(context.normalizedMessage)) return biliFeatureNames
+      if (biliPgc.matches(context.normalizedMessage, context)) return biliFeatureNames
       const features = biliVideo.features(context)
       if (features.length) return features
       const acfunFeatures = acfun.features(context)

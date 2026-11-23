@@ -80,7 +80,6 @@ test("番剧由 Media 先识别，权限及关闭开关不落到普通视频，�
   const dispatch = (input = event, block?: string) => commands.dispatchFallback(input, names => !block || !names.includes(block), () => false)
   try {
     expect(await dispatch(event, "[media] B 站解析")).toBeUndefined()
-    expect(await dispatch(event, "[media] B 站番剧预览")).toBeUndefined()
     enabled = false
     expect(await dispatch()).toBeUndefined()
     enabled = true
@@ -157,6 +156,96 @@ test("新版播放命令和旧 B 站下载形式识别 ep，未有授权不触�
       expect(result).toMatch(/未提供可验证的公开下载权限.*\n.*ep2395158/u)
     }
     expect(calls).toEqual(["/pgc/view/web/season", "/pgc/view/web/season"])
+  } finally {
+    control.abort()
+    await module.dispose()
+  }
+})
+
+test("B 站短链只展开一次再分流番剧、普通视频、分 P、直播和动态", async () => {
+  const control = new AbortController()
+  const calls: string[] = []
+  const shortEpisode = "https://b23.tv/ep2395158"
+  const shortSeason = "https://b23.tv/ss120817"
+  const bvid = "BV17x411w7KC"
+  const ref = `bilibili:bvid:${bvid}`
+  const normal = `https://www.bilibili.com/video/${bvid}`
+  const shortNormal = "https://b23.tv/video"
+  const shortPart = "https://b23.tv/part"
+  const shortLive = "https://b23.tv/live"
+  const shortDynamic = "https://b23.tv/dynamic"
+  const unsafe = "https://b23.tv/unsafe"
+  const destinations = new Map([
+    [shortEpisode, episode + "?share_source=test"], [shortSeason, season],
+    [shortNormal, normal], [shortPart, normal + "?p=2&share_source=test"],
+    [shortLive, "https://live.bilibili.com/800"],
+    [shortDynamic, "https://t.bilibili.com/12345"],
+    [unsafe, "https://example.com/bangumi/play/ep2395158"],
+  ])
+  let parseLink = true
+  const module = await createModule({ lockFile, signal: control.signal,
+    biliVideo: {
+      async settings() {
+        return { ...(await createSubscriptionConfig(join(tmpdir(), "lotus-pgc-unconfigured"), lockFile).settings("bilibili")),
+          parseVideoLink: parseLink }
+      },
+      async fetch(input, options) {
+        const url = new URL(input)
+        if (destinations.has(url.href)) {
+          expect(options).toMatchObject({ method: "HEAD", redirect: "manual", credentials: "omit" })
+          calls.push("HEAD " + url.href)
+          return Response.redirect(destinations.get(url.href)!)
+        }
+        if (url.hostname === "api.live.bilibili.com") {
+          calls.push("live " + url.searchParams.get("room_id"))
+          return Response.json({ code: 0, data: { title: "直播夹具", live_status: 1 } })
+        }
+        if (url.pathname === "/x/polymer/web-dynamic/v1/detail") {
+          calls.push("dynamic " + url.searchParams.get("id"))
+          return Response.json({ code: 0, data: {} })
+        }
+        calls.push("TuneWeave " + decodeURIComponent(url.pathname))
+        const data = url.pathname.endsWith("/parts")
+          ? [1, 2].map(page => ({ video_ref: ref, id: "cid:" + page, page, title: "测试分集 " + page }))
+          : { video: { ref, title: "普通视频夹具", extensions: { bvid, comment_count: 0 } } }
+        return Response.json({ ok: true, data, meta: { platform: "bilibili" } })
+      },
+    },
+    biliPgc: {
+      options: async () => ({ enable: true, private: false, automatic: false, quality: 32, duration: 1800 }),
+      fetcher: async url => { calls.push(url.search); return Response.json(sample) },
+      render: async () => Buffer.from("PGC"),
+    },
+  })
+  const commands = new CommandRegistry()
+  commands.registerModule({ name: "@lotus-yunzai/media", ...module })
+  const dispatch = (event: MessageEvent, blocked = false) =>
+    commands.dispatchFallback(event, names => !blocked || !names.includes("[media] B 站解析"), () => false)
+  const quote = (jumpUrl: string) => ({ ...groupEvent("#解析"), reply_id: 8000,
+    lookupReply: async () => ({ message_id: 8000, user_id: 12345,
+      message: [{ type: "json", data: JSON.stringify({ meta: { news: { jumpUrl } } }) }] }),
+  } satisfies MessageEvent)
+  const picture = (url: string) => [{ type: "image", file: Buffer.from("PGC") }, { type: "text", text: url }] as const
+  try {
+    expect(await dispatch(groupEvent(shortEpisode), true)).toBeUndefined()
+    expect(await dispatch(groupEvent(episode), true)).toBeUndefined()
+    parseLink = false
+    expect(await dispatch(groupEvent(shortEpisode))).toBeUndefined()
+    expect(calls).toEqual([])
+    parseLink = true
+    expect(await dispatch(groupEvent(shortEpisode))).toEqual(picture(episode))
+    expect(await dispatch(quote(shortSeason))).toEqual(picture(season))
+    expect(calls.splice(0)).toEqual(["HEAD " + shortEpisode, "?ep_id=2395158", "HEAD " + shortSeason, "?season_id=120817"])
+    for (const short of [shortNormal, shortPart]) {
+      await dispatch(quote(short))
+      expect(calls.splice(0)).toEqual(["HEAD " + short, "TuneWeave /v1/videos/" + ref, "TuneWeave /v1/videos/" + ref + "/parts"])
+    }
+    await dispatch(groupEvent(shortLive))
+    expect(calls.splice(0)).toEqual(["HEAD " + shortLive, "live 800"])
+    expect(await dispatch(groupEvent(shortDynamic))).toBe("[media] 这条 B 站动态不可用。")
+    expect(calls.splice(0)).toEqual(["HEAD " + shortDynamic, "dynamic 12345"])
+    await dispatch(groupEvent(unsafe))
+    expect(calls.splice(0)).toEqual(["HEAD " + unsafe])
   } finally {
     control.abort()
     await module.dispose()

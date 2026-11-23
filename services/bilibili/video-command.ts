@@ -13,12 +13,13 @@ import type { GetSubscriptionRedis } from "../subscriptions/types.ts"
 import { ToolInstallerService } from "../tools/installer.ts"
 import { biliCommentTarget, createBiliComments, type BiliComment, type BiliCommentTarget } from "./comments.ts"
 import { createBiliCommentWriter } from "./comment-write.ts"
+import { parseBiliPgcLink, type createBiliPgcPreview } from "./pgc.ts"
 import {
   BilibiliService, biliDynamicId, formatBilibiliPreviewText, formatNumber, isBiliVideoPage, normalizeDownloadConfig,
   quotedBiliCardLink, resolveCommandPath,
 } from "./service.ts"
 
-const featureNames = ["[media] B 站解析"] as const
+export const biliFeatureNames = ["[media] B 站解析"] as const
 const searchWindow = 120_000
 const tukuPageSize = 42
 const link = /(?:bilibili\.com|b23\.tv|bili2233\.cn|\bBV[1-9A-Za-z]{10}\b|\bav\d+\b)/iu
@@ -80,6 +81,7 @@ interface Services {
   readonly settings?: typeof subscriptionSettings.settings
   readonly renderComments?: typeof renderStatusCard
   readonly getRedis?: GetSubscriptionRedis
+  readonly resolvedPgc?: ReturnType<typeof createBiliPgcPreview>["resolved"]
 }
 
 function videoAction(message: string, context: MessageFallbackContext): VideoAction | undefined {
@@ -159,7 +161,7 @@ async function readOriginal(url: string, byteLimit: number, signal: AbortSignal,
 }
 
 export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, settings = subscriptionSettings.settings,
-  renderComments = renderStatusCard,
+  renderComments = renderStatusCard, resolvedPgc,
   getRedis = () => (globalThis as { redis?: ReturnType<GetSubscriptionRedis> }).redis }: Services) {
   const sessions = new Map<string, SearchSession>()
   const previews = new Map<string, Preview & { expires: number }>()
@@ -492,8 +494,15 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         if (url?.hostname !== "live.bilibili.com") {
           options ??= await settings("bilibili")
           if (!options.parseVideoLink || signal?.aborted) return
-          const destination = url && service.resolveShortLink(url, signal)
+          const active = commentSignal(context)
+          if (active?.aborted) return
+          const destination = url && service.resolveShortLink(url, active)
           const resolved = await (action.kind === "quote" ? destination?.catch(() => undefined) : destination)
+          const pgc = resolvedPgc && resolved && parseBiliPgcLink(resolved.href)
+          if (resolvedPgc && pgc) {
+            if (action.kind === "quote" && action.action !== "preview") return
+            return resolvedPgc(pgc, context, action.kind === "quote" ? "quote" : "share")
+          }
           const id = resolved && biliDynamicId(resolved)
           if (id) {
             const provider = createBiliProvider({ fetch })
@@ -549,7 +558,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       if (info.type === "video" && !signal?.aborted) return info.ownerId
     },
     features(context: MessageFallbackContext) {
-      return videoAction(context.normalizedMessage, context) ? featureNames : []
+      return videoAction(context.normalizedMessage, context) ? biliFeatureNames : []
     },
     async dispose() {
       cancelRecovery?.()

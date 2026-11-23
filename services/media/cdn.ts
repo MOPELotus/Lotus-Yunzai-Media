@@ -1,9 +1,10 @@
 const douyinDomains = ["douyin.com", "iesdouyin.com", "douyinpic.com", "douyincdn.com", "douyinvod.com", "byteimg.com", "bytefcdn.com", "bytedance.com", "bytecdn.cn", "ixigua.com"]
-const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.com", "upload-bbs.miyoushe.com", "upload-bbs.mihoyo.com"]
+const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.com", "upload-bbs.miyoushe.com", "upload-bbs.mihoyo.com",
+  "pic.weishi.qq.com", "xp.qpic.cn", "web-f01.izuiyou.com"]
 const miyousheVideoDomains = new Set(["prod-vod-sign.miyoushe.com", "prod-vod-sign.mihoyo.com"])
 const acfunVideoHosts = new Set(["tx-safety-video.acfun.cn", "ali-safety-video.acfun.cn"])
 const acfunImageHosts = new Set(["tx-free-imgs.acfun.cn"])
-export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video" | "pipixia-video"
+export type CdnKind = "image" | "miyoushe-video" | "netease-mv" | "acfun-image" | "acfun-video" | "weishi-video" | "zuiyou-video" | "pipixia-video"
 
 function acfunCdnUrl(value: string | URL, hosts: ReadonlySet<string>) {
   const url = URL.parse(String(value))
@@ -16,6 +17,16 @@ export function acfunVideoUrl(value: string | URL) {
 
 export function acfunImageUrl(value: string | URL) {
   return acfunCdnUrl(value, acfunImageHosts)
+}
+
+const publicVideoHosts = { "weishi-video": "v.weishi.qq.com", "zuiyou-video": "web-v01.izuiyou.com" }
+
+export function publicShareVideoUrl(value: string | URL, kind: keyof typeof publicVideoHosts) {
+  const url = URL.parse(String(value))
+  if (!url || !["https:", "http:"].includes(url.protocol) || url.hostname !== publicVideoHosts[kind] ||
+      url.port || url.username || url.password || url.hash) return
+  url.protocol = "https:"
+  return url
 }
 
 export function isMiyousheVideoUrl(url: URL) {
@@ -73,6 +84,11 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
       if (!isPipixiaVideoUrl(url)) throw new Error("媒体地址不属于皮皮虾视频 CDN。")
       return url
     }
+    if (kind === "weishi-video" || kind === "zuiyou-video") {
+      const url = publicShareVideoUrl(value, kind)
+      if (!url) throw new Error("视频地址不属于分享来源的 CDN。")
+      return url
+    }
     if (kind !== "miyoushe-video") return mediaUrl(value, domains)
     const url = new URL(value)
     if (!isMiyousheVideoUrl(url)) throw new Error("媒体地址不属于米游社视频 CDN。")
@@ -81,7 +97,7 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
   let url = target(value)
   for (let hop = 0; hop <= 5; hop++) {
     const response = await fetchImpl(url.href, { ...options,
-      ...((kind === "miyoushe-video" || kind === "netease-mv" || kind === "acfun-video" || kind === "acfun-image" || kind === "pipixia-video") && { credentials: "omit" as const }), redirect: "manual" })
+      ...(kind && { credentials: "omit" as const }), redirect: "manual" })
     if (![301, 302, 303, 307, 308].includes(response.status)) return response
     await response.body?.cancel()
     const location = response.headers.get("location")

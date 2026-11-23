@@ -9,6 +9,7 @@ import { readMusicAccounts, saveMusicAccount } from "../services/music/accounts.
 import { readPartnerLog, partnerLogNodes } from "../services/music/partner-log.ts"
 import { TuneWeaveService } from "../services/tuneweave/service.ts"
 import { NeteaseCloudLibrary } from "../services/music/cloud-service.ts"
+import { readQqCollection } from "../services/music/personal.ts"
 
 const temp = []
 async function directory() {
@@ -483,6 +484,60 @@ test("音乐续期阻断跨平台错误、异 UID、并发换绑和重试后仍�
     expect(renewals).toBe(failure === "other platform" ? 0 : 1)
     expect((await readMusicAccounts(file))[platform]).toEqual(failure === "race" ? changed :
       { ...original, credential: failure === "still expired" ? "twc1_next" : original.credential })
+  }
+})
+
+test("旧公共 QQ 登录与仅有服务端别名的网易云可续原账号，续期不授予私人权限", async () => {
+  const accountsFile = join(await directory(), "music.yaml")
+  for (const [platform, credential] of [["qq", "twc1_legacy"], ["netease", ""]]) {
+    const alias = "old-" + platform, uid = "42"
+    const signal = new AbortController().signal
+    const song = { ...track, ref: platform + ":1042", platform }
+    for (const action of ["search", "resolve"]) {
+      const calls = []
+      const newCredential = credential && "twc1_renewed"
+      let renewed = false
+      const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+        const url = new URL(request.url)
+        const incoming = request.headers.get("x-tuneweave-credential")
+        calls.push(url.pathname)
+        const meta = { platform, account: alias }
+        if (url.pathname === "/v1/auth/session/refresh") {
+          expect(incoming).toBe(credential || null)
+          expect(await request.json()).toEqual({ platform, account: alias, credential_mode: credential ? "both" : "server" })
+          renewed = true
+          return Response.json({ ok: true, meta, data: { ...meta, authenticated: true, user_id: uid,
+            ...(credential && { caller_credential: { platform, value: newCredential } }) } })
+        }
+        if (!renewed) {
+          expect(incoming).toBe(credential || null)
+          return Response.json({ ok: false, error: { platform, code: "authentication_required" } }, { status: 401 })
+        }
+        expect(incoming).toBe(newCredential || null)
+        const data = url.pathname === "/v1/search" ? [{ type: "track", data: song }]
+          : { url: "https://audio.example.test/test", resolved_platform: platform, origin_track: song.ref, resolved_track: song.ref }
+        return Response.json({ ok: true, meta, data }, { headers: {
+          ...(newCredential && { "X-TuneWeave-Updated-Credential": `${platform}=${newCredential}` }),
+        } })
+      } })
+      try {
+        await saveMusicAccount(platform, { alias, uid, credential }, { file: accountsFile })
+        const service = new MusicService({ accountsFile, tuneweaveConfig: { api_url: server.url.origin } })
+        if (action === "search") {
+          expect(await service.search(platform, "隔离样本", 1, { signal })).toEqual({ tracks: [song], accountStatus: "selected" })
+        } else expect((await service.resolve(song, { exact: true, signal })).resolved_track).toBe(song.ref)
+        expect(calls).toHaveLength(3)
+        expect(calls[1]).toBe("/v1/auth/session/refresh")
+        expect((await readMusicAccounts(accountsFile))[platform]).toEqual({ alias, uid, credential: newCredential })
+        if (platform === "qq") {
+          await expect(readQqCollection(service, "favorites", 99, 1, signal)).rejects.toMatchObject({ code: "authentication_required" })
+          expect(await service.reuseMusicLogin(platform, 99, signal, true)).toBe(false)
+          expect(calls).toHaveLength(3)
+        }
+      } finally {
+        await server.stop(true)
+      }
+    }
   }
 })
 

@@ -19,7 +19,7 @@ import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
 import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner,
   verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
-import { canRefreshPublicMusic, musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
+import { canRefreshPublicMusic, musicAuthenticationRequired, refreshOwnMusicAccount, refreshPublicMusicAccount } from "./personal.ts"
 
 export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
 export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
@@ -138,17 +138,15 @@ export class MusicService {
       return await request(accounts)
     } catch (error) {
       const signedIn = accounts[platform]
-      if (!canRefreshPublicMusic(platform) || !musicAuthenticationRequired(error, platform) || !signedIn?.alias ||
-          !signedIn.uid || !signedIn.credential?.startsWith("twc1_") || signedIn.owner === undefined ||
-          !Number.isSafeInteger(signedIn.owner) || signedIn.owner <= 0) throw error
+      if (!canRefreshPublicMusic(platform) || !musicAuthenticationRequired(error, platform) || !signedIn?.alias || !signedIn.uid ||
+          !signedIn.credential?.startsWith("twc1_") && (platform !== "netease" || signedIn.credential)) throw error
       const renewalSignal = signal ?? new AbortController().signal
-      const profile = await refreshOwnMusicAccount(this, platform, signedIn.owner, renewalSignal, {
-        alias: signedIn.alias, uid: String(signedIn.uid), credential: signedIn.credential,
-      })
+      const profile = await refreshPublicMusicAccount(this, platform, signedIn, renewalSignal)
+      const credential = signedIn.credential ? profile.caller_credential?.value : signedIn.credential
       const current = (await readMusicAccounts(this.accountsFile))[platform]
       renewalSignal.throwIfAborted()
       if (current?.alias !== signedIn.alias || current.uid !== signedIn.uid || current.owner !== signedIn.owner ||
-          current.credential !== profile.caller_credential?.value) throw new Error("公共音乐账号已变更，请重新点歌。")
+          current.credential !== credential) throw new Error("公共音乐账号已变更，请重新点歌。")
       return request({ ...accounts, [platform]: current })
     }
   }

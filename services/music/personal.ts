@@ -4,13 +4,14 @@ import type { MusicService, MusicStream, MusicTrack } from "./service.ts"
 
 export type MusicCollection = "radio" | "daily" | "favorites"
 type PrivatePlatform = "qq" | "netease"
-const publicRefreshPlatforms = ["kugou", "soda", "kuwo", "migu"] as const
-export type RefreshPlatform = PrivatePlatform | typeof publicRefreshPlatforms[number]
+const refreshPlatforms = ["netease", "qq", "kugou", "soda", "kuwo", "migu"] as const
+export type RefreshPlatform = typeof refreshPlatforms[number]
 
-export function canRefreshPublicMusic(platform: string): platform is typeof publicRefreshPlatforms[number] {
-  return publicRefreshPlatforms.some(candidate => candidate === platform)
+export function canRefreshPublicMusic(platform: string): platform is RefreshPlatform {
+  return refreshPlatforms.some(candidate => candidate === platform)
 }
-interface Binding { platform: RefreshPlatform; alias: string; uid: string; owner: number; saved: MusicAccount }
+interface StoredBinding { platform: RefreshPlatform; alias: string; uid: string; owner?: number; saved: MusicAccount }
+interface Binding extends StoredBinding { owner: number }
 interface RefreshResult extends TuneWeaveQrProfile {
   caller_credential?: { value?: string; platform?: string }
   extensions?: { refreshed?: boolean }
@@ -71,9 +72,13 @@ async function binding(api: MusicService, platform: RefreshPlatform, owner: numb
   return { platform, alias: saved.alias, uid, owner, saved }
 }
 
-async function assertCurrent(api: MusicService, expected: Binding, signal: AbortSignal) {
-  const actual = await binding(api, expected.platform, expected.owner, signal)
-  if (actual.alias !== expected.alias || actual.uid !== expected.uid || actual.saved.credential !== expected.saved.credential) {
+async function assertCurrent(api: MusicService, expected: StoredBinding, signal: AbortSignal) {
+  signal.throwIfAborted()
+  const actual = expected.owner === undefined ? (await readMusicAccounts(api.accountsFile))[expected.platform]
+    : (await binding(api, expected.platform, expected.owner, signal)).saved
+  signal.throwIfAborted()
+  if (!actual || actual.alias !== expected.alias || actual.uid !== expected.saved.uid || actual.owner !== expected.saved.owner ||
+      actual.credential !== expected.saved.credential) {
     throw new Error("音乐账号已变更，请重新查询。")
   }
 }
@@ -97,12 +102,22 @@ async function verify(api: MusicService, expected: Binding, signal: AbortSignal)
   return profile
 }
 
-async function refreshMusicBinding(api: MusicService, expected: Binding, signal: AbortSignal) {
+async function refreshMusicBinding(api: MusicService, expected: StoredBinding, signal: AbortSignal,
+  mode: "both" | "server" = "both") {
   const key = JSON.stringify([api.tuneweave.config.api_url, api.accountsFile, expected.platform])
   if (refreshing.has(key)) throw new Error("此平台的音乐登录正在续期。")
   refreshing.add(key)
-  try { return await renew(api, expected, signal) }
+  try { return await renew(api, expected, signal, mode) }
   finally { refreshing.delete(key) }
+}
+
+export async function refreshPublicMusicAccount(api: MusicService, platform: RefreshPlatform, saved: MusicAccount, signal: AbortSignal) {
+  const { alias, credential } = saved
+  const uid = String(saved.uid ?? "")
+  const mode = credential?.startsWith("twc1_") ? "both" : "server"
+  if (!alias || !/^[A-Za-z0-9_-]{1,128}$/u.test(alias) || !/^[A-Za-z0-9_-]{1,128}$/u.test(uid) ||
+      mode === "server" && (platform !== "netease" || credential)) throw loginRequired(platform)
+  return refreshMusicBinding(api, { platform, alias, uid, saved }, signal, mode)
 }
 
 export async function refreshOwnMusicAccount(api: MusicService, platform: RefreshPlatform, owner: number, signal: AbortSignal,
@@ -113,14 +128,15 @@ export async function refreshOwnMusicAccount(api: MusicService, platform: Refres
   return refreshMusicBinding(api, current, signal)
 }
 
-async function renew(api: MusicService, expected: Binding, signal: AbortSignal) {
+async function renew(api: MusicService, expected: StoredBinding, signal: AbortSignal, mode: "both" | "server") {
   const { platform } = expected
   const credential = expected.saved.credential
-  if (!credential?.startsWith("twc1_")) throw loginRequired(platform)
+  if (mode === "both" && !credential?.startsWith("twc1_")) throw loginRequired(platform)
   await assertCurrent(api, expected, signal)
   let updatedCredential: string | undefined
   const { data, accountSelected } = await api.tuneweave.request<RefreshResult>("/v1/auth/session/refresh", { method: "POST", signal,
-    redirect: "error", body: { platform, account: expected.alias, credential_mode: "both" }, credentials: [credential],
+    redirect: "error", body: { platform, account: expected.alias, credential_mode: mode },
+    ...(mode === "both" && credential && { credentials: [credential] }),
     accountSelection: { platform, alias: expected.alias },
     onCredentialUpdates(updates) {
       const selected = updates.filter(update => update.platform === platform)
@@ -138,9 +154,12 @@ async function renew(api: MusicService, expected: Binding, signal: AbortSignal) 
   if (!accountSelected || data?.platform !== platform || data.account !== expected.alias ||
       data.user_id != null && String(data.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
   if (data.authenticated === false) throw loginRequired(platform)
-  if (data.authenticated !== true || String(data.user_id) !== expected.uid || data.caller_credential?.platform !== platform ||
-      !data.caller_credential.value?.startsWith("twc1_")) throw new Error("音乐账号身份无法核实。")
+  if (data.authenticated !== true || String(data.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
   await assertCurrent(api, expected, signal)
+  if (mode === "server") return data
+  if (data.caller_credential?.platform !== platform || !data.caller_credential.value?.startsWith("twc1_")) {
+    throw new Error("音乐账号身份无法核实。")
+  }
   const saved = await saveMusicAccount(platform, { credential: data.caller_credential.value }, { file: api.accountsFile, expected: expected.saved, signal })
     .catch(() => { throw new Error("无法保存音乐登录续期结果。") })
   if (!saved) {

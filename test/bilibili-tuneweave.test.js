@@ -44,6 +44,8 @@ test("重复请求 B 站登录先核对原别名，能续期时不需要重扫",
     expect(paths.splice(0)).toEqual(["/v1/auth/session", "/v1/auth/session/refresh"])
     renewal = { ...profile, user_id: "123457" }
     await expect(check()).rejects.toThrow("原 B 站账号续期")
+    renewal = { ...profile, authenticated: undefined }
+    await expect(check()).rejects.toThrow("原 B 站账号续期")
     renewal = undefined
     expect(await check()).toBe(false)
     session = { ...profile, user_id: "123457" }

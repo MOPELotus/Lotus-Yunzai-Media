@@ -401,7 +401,7 @@ export class BilibiliService {
         accountSelection: { platform: "bilibili", alias },
         body: { platform: "bilibili", account: alias, credential_mode: "server" } })
     if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
-    if (!accountSelected || data?.platform !== "bilibili" || data.account !== alias ||
+    if (!accountSelected || data?.platform !== "bilibili" || data.account !== alias || typeof data.authenticated !== "boolean" ||
         data.authenticated === true && data.user_id !== originalUid) throw new Error("TuneWeave 未确认原 B 站账号续期。")
     return data.authenticated === true
   }

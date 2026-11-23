@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { TuneWeaveService, TUNEWEAVE_MANIFEST_URL } from "../services/tuneweave/service.ts"
+import { selectTuneWeaveArtifact, TuneWeaveService, TUNEWEAVE_MANIFEST_URL } from "../services/tuneweave/service.ts"
 import { startMediaMaintenance } from "../services/tuneweave/startup.ts"
 import { ToolInstallerService } from "../services/tools/installer.ts"
 
@@ -151,6 +151,65 @@ test("TuneWeave 联网校验失败但原服务可用时仍重查，确认同一�
   } finally {
     await maintenance.dispose()
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("TuneWeave 更新按兼容契约选择，只有已验历史版本可以缺省", async () => {
+  const legacy = { version: "1.0.0-beta.3", artifacts: [] }
+  const current = { version: "1.0.0-beta.4", api_version: "v1", artifacts: [] }
+  let manifest = legacy
+  const service = new TuneWeaveService({ async fetch(url) {
+    expect(url).toBe(TUNEWEAVE_MANIFEST_URL)
+    return Response.json(manifest)
+  } })
+  expect(await service.releaseManifest()).toEqual(legacy)
+  manifest = { ...current, compatibility_profiles: ["future-client", "tuneweave-http-v1"] }
+  expect(await service.releaseManifest()).toEqual(manifest)
+
+  for (const [value, error] of [
+    [current, "未声明"],
+    [{ ...current, compatibility_profiles: ["future-client"] }, "不兼容"],
+    [{ ...legacy, api_version: "v1", compatibility_profiles: ["tuneweave-http-v1", "tuneweave-http-v1"] }, "声明无效"],
+    [{ ...current, compatibility_profiles: null }, "声明无效"],
+    [{ ...current, compatibility_profiles: ["tuneweave-http-v1", "不可用"] }, "声明无效"],
+    [{ ...current, api_version: "v2", compatibility_profiles: ["tuneweave-http-v1"] }, "声明无效"],
+  ]) {
+    manifest = value
+    await expect(service.releaseManifest()).rejects.toThrow(error)
+  }
+
+  const official = "https://github.com/MOPELotus/TuneWeave/releases/download/"
+  expect(() => selectTuneWeaveArtifact({ ...current, artifacts: [{
+    platform: "linux", architecture: "x86_64", download_url: official + "v1.0.0-beta.4/tuneweave",
+    verification: { algorithm: "sha256", checksum_url: official + "v1.0.0-beta.3/tuneweave.sha256" },
+  }] }, "linux", "x64")).toThrow("版本与下载地址不一致")
+})
+
+test("未声明兼容性的发布件不替换健康的 TuneWeave 本机服务", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-tuneweave-incompatible-"))
+  const endpoint = "http://127.0.0.1:17833"
+  const calls = []
+  try {
+    const service = new TuneWeaveService({
+      root: directory,
+      config: { api_url: endpoint },
+      spawn() { throw new Error("现有进程不得重启") },
+      async fetch(url) {
+        calls.push(url)
+        if (url === TUNEWEAVE_MANIFEST_URL) return Response.json({ version: "1.0.0-beta.4", api_version: "v1", artifacts: [] })
+        if (url === endpoint + "/healthz") return Response.json({ ok: true, data: { version: "1.0.0-beta.3" } })
+        expect(url).toBe(endpoint + "/v1/capabilities?platform=netease")
+        return Response.json({ ok: true, data: [{ platform: "netease", registered: true,
+          capabilities: ["platform_api", "qr_login", "account_profile", "caller_managed_credentials"] }] })
+      },
+    })
+    const result = await service.initialize({ platform: "netease" })
+    expect(result).toMatchObject({ version: "1.0.0-beta.3", reachable: true, already: true, updateDeferred: true })
+    expect(result.message).toContain("未声明客户端兼容性")
+    expect(calls).toEqual([endpoint + "/healthz", endpoint + "/v1/capabilities?platform=netease", TUNEWEAVE_MANIFEST_URL,
+      endpoint + "/healthz", endpoint + "/v1/capabilities?platform=netease"])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
 })
 

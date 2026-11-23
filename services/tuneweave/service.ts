@@ -115,6 +115,30 @@ interface TuneWeaveArtifact {
 interface TuneWeaveManifest {
   version: string
   artifacts: TuneWeaveArtifact[]
+  api_version?: unknown
+  compatibility_profiles?: unknown
+}
+
+class TuneWeaveCompatibilityError extends Error {}
+
+function requireCompatibleManifest(manifest: TuneWeaveManifest) {
+  if (!manifest || typeof manifest.version !== "string" || !Array.isArray(manifest.artifacts)) {
+    throw new TuneWeaveCompatibilityError("TuneWeave 发布清单格式无效")
+  }
+  if (!Object.hasOwn(manifest, "compatibility_profiles")) {
+    if (manifest.version.replace(/^v/u, "") === "1.0.0-beta.3" &&
+        (manifest.api_version === undefined || manifest.api_version === "v1")) return
+    throw new TuneWeaveCompatibilityError("此 TuneWeave 发行版未声明客户端兼容性")
+  }
+  const profiles = manifest.compatibility_profiles
+  if (manifest.api_version !== "v1" || !Array.isArray(profiles) || profiles.length < 1 || profiles.length > 16 ||
+      profiles.some(profile => typeof profile !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile)) ||
+      new Set(profiles).size !== profiles.length) {
+    throw new TuneWeaveCompatibilityError("TuneWeave 发布清单的客户端兼容性声明无效")
+  }
+  if (!profiles.includes("tuneweave-http-v1")) {
+    throw new TuneWeaveCompatibilityError("此 TuneWeave 发行版与当前媒体客户端不兼容")
+  }
 }
 
 interface TuneWeaveRelease {
@@ -326,7 +350,9 @@ export class TuneWeaveService {
         signal?.throwIfAborted()
         const current = await this.status(platform, signal, signal ? "error" : undefined)
         if (!current.ok || compareTuneWeaveVersions(current.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw error
-        return { ...current, already: true, updateDeferred: true, message: "现有 TuneWeave 服务可用，联网更新或校验暂未完成，稍后重试。" }
+        const message = error instanceof TuneWeaveCompatibilityError ? error.message + "，已保留现有服务。"
+          : "现有 TuneWeave 服务可用，联网更新或校验暂未完成，稍后重试。"
+        return { ...current, already: true, updateDeferred: true, message }
       }
     })
   }
@@ -335,6 +361,7 @@ export class TuneWeaveService {
     const response = await this.publicDownload(TUNEWEAVE_MANIFEST_URL, undefined, signal)
     if (!response.ok) throw new Error(`TuneWeave 版本清单下载失败：HTTP ${response.status}`)
     const manifest: TuneWeaveManifest = await response.json()
+    requireCompatibleManifest(manifest)
     if (compareTuneWeaveVersions(manifest.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw new Error(`发布包 ${manifest.version} 低于要求 ${TUNEWEAVE_REQUIRED_VERSION}`)
     return manifest
   }
@@ -357,10 +384,9 @@ export class TuneWeaveService {
 
   async downloadRelease(manifest?: TuneWeaveManifest, signal?: AbortSignal): Promise<TuneWeaveRelease> {
     signal?.throwIfAborted()
-    manifest ||= await this.releaseManifest(signal)
+    if (manifest) requireCompatibleManifest(manifest)
+    else manifest = await this.releaseManifest(signal)
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
-    const releasePath = `/MOPELotus/TuneWeave/releases/download/v${String(manifest.version).replace(/^v/, "")}/`
-    if (![artifact.download_url, artifact.verification.checksum_url].every(value => new URL(value).pathname.startsWith(releasePath))) throw new Error("TuneWeave 发布清单版本与下载地址不一致")
     await fs.mkdir(path.dirname(this.executable), { recursive: true })
     const file = `${this.executable}.download-${crypto.randomUUID()}`
     try {
@@ -573,9 +599,11 @@ export function selectTuneWeaveArtifact(manifest: TuneWeaveManifest, platform: s
   const architecture = releaseArchitectures[arch]
   const artifact = manifest?.artifacts?.find(item => item.platform === system && item.architecture === architecture)
   if (!artifact || artifact.verification?.algorithm !== "sha256") throw new Error(`TuneWeave 暂无 ${platform}/${arch} 的预编译文件，请自行部署。`)
+  const releasePath = `/MOPELotus/TuneWeave/releases/download/v${manifest.version.replace(/^v/u, "")}/`
   for (const value of [artifact.download_url, artifact.verification.checksum_url]) {
     const url = new URL(value)
     if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/MOPELotus/TuneWeave/releases/download/")) throw new Error("TuneWeave 下载地址不属于官方发布仓库。")
+    if (!url.pathname.startsWith(releasePath)) throw new Error("TuneWeave 发布清单版本与下载地址不一致")
   }
   return artifact
 }

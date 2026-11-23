@@ -12,6 +12,7 @@ interface DownloadOptions {
   readonly timeoutMs?: number
   readonly maxBytes?: number
   readonly kind?: MediaKind
+  readonly signal?: AbortSignal
 }
 
 export function sniffMedia(bytes: Buffer): { kind: MediaKind; ext: string } | null {
@@ -30,15 +31,17 @@ export function sniffMedia(bytes: Buffer): { kind: MediaKind; ext: string } | nu
 }
 
 /** No resumptions across mirrors. Failed transfers never become final files. */
-export async function downloadMedia(url: string, targetBase: string, { fetch: fetchImpl = globalThis.fetch, headers = {}, timeoutMs = 600000, maxBytes = 0, kind }: DownloadOptions = {}) {
+export async function downloadMedia(url: string, targetBase: string, { fetch: fetchImpl = globalThis.fetch, headers = {}, timeoutMs = 600000, maxBytes = 0, kind, signal }: DownloadOptions = {}) {
   const controller = new AbortController()
+  const active = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const temp = `${targetBase}.part`
   let length = 0
   let expected = 0
   let prefix = Buffer.alloc(0)
   try {
-    const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: controller.signal })
+    active.throwIfAborted()
+    const response = await fetchCdn(fetchImpl, url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: active })
     if (!response.ok || !response.body) throw new Error(`媒体下载失败 HTTP ${response.status}`)
     expected = Number(response.headers.get("content-length")) || 0
     if (maxBytes > 0 && expected > maxBytes) throw new Error("媒体大小超过下载限制")
@@ -48,7 +51,8 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
       if (maxBytes > 0 && length > maxBytes) callback(new Error("媒体大小超过下载限制"))
       else callback(null, chunk)
     } })
-    await pipeline(Readable.from(response.body.values(), { objectMode: false }), guard, createWriteStream(temp, { flags: "wx" }))
+    await pipeline(Readable.from(response.body.values(), { objectMode: false }), guard, createWriteStream(temp, { flags: "wx" }), { signal: active })
+    active.throwIfAborted()
     if (length === 0 || expected > 0 && length !== expected) throw new Error("媒体下载不完整")
     const detected = sniffMedia(prefix)
     if (!detected || kind && detected.kind !== kind) throw new Error("返回内容不是预期媒体，可能为错误页面或无效 CDN 响应")
@@ -58,7 +62,7 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   } catch (error) {
     const timedOut = controller.signal.aborted || error instanceof Error && error.name === "AbortError"
     controller.abort()
-    throw new Error(timedOut ? "媒体下载超时" : error instanceof Error ? error.message : String(error), { cause: error })
+    throw new Error(signal?.aborted ? "媒体下载已取消" : timedOut ? "媒体下载超时" : error instanceof Error ? error.message : String(error), { cause: error })
   } finally {
     clearTimeout(timer)
     controller.abort()

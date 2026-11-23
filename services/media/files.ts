@@ -27,6 +27,7 @@ interface MediaSendContext extends Pick<MessageEvent, "deliverMedia" | "uploadFi
 interface MediaSendOptions {
   readonly file_name?: string
   readonly video_size_limit_mb?: number | string
+  readonly signal?: AbortSignal
 }
 
 interface ProcessOptions {
@@ -48,7 +49,7 @@ export async function sendMediaFile(e: MediaSendContext, file: string, config: M
   // QQ maps equal file contents to the same internal cache even when the
   // download directories and NapCat temporary filenames are distinct.
   const hash = createHash("md5")
-  for await (const chunk of createReadStream(file)) hash.update(chunk)
+  for await (const chunk of createReadStream(file, { signal: config.signal })) hash.update(chunk)
   const botId = e.self_id ?? e.bot?.self_id ?? e.bot?.uin ?? "unknown-bot"
   const key = `${String(botId)}:${hash.digest("hex")}`
   const previous = mediaUploadQueues.get(key)
@@ -56,6 +57,7 @@ export async function sendMediaFile(e: MediaSendContext, file: string, config: M
   mediaUploadQueues.set(key, current)
   try {
     if (previous) await previous
+    config.signal?.throwIfAborted()
     return await sendIsolatedMediaFile(e, file, config)
   } finally {
     release()
@@ -72,6 +74,7 @@ async function sendIsolatedMediaFile(e: MediaSendContext, file: string, config: 
   const video = [".mp4", ".mkv", ".flv", ".mov", ".m4v"].includes(ext) &&
     stat.size <= Number(config.video_size_limit_mb || 100) * 1024 * 1024
   const type = image ? "image" : video ? "video" : "file"
+  config.signal?.throwIfAborted()
   if (e.deliverMedia) {
     const result = await e.deliverMedia({ path: file, name, type })
     if (result === "confirmed") return true
@@ -80,7 +83,8 @@ async function sendIsolatedMediaFile(e: MediaSendContext, file: string, config: 
 
   // The byte transport remains available for hosts without file-backed delivery.
   if (stat.size > 16 * 1024 * 1024) throw new Error("当前会话无法发送此大小的媒体文件。")
-  const bytes = await fs.readFile(file)
+  const bytes = await fs.readFile(file, { signal: config.signal })
+  config.signal?.throwIfAborted()
   if (type === "file" && e.uploadFile) {
     const result = await e.uploadFile({ name, bytes })
     if (result === "confirmed") return true
@@ -106,6 +110,7 @@ export async function runMediaProcess(command: string, args: readonly string[], 
     } catch { child.kill(signal) }
   }
   const completion = new Promise<{ code: 0; output: string }>((resolve, reject) => {
+    if (signal?.aborted) throw new Error("媒体处理已取消")
     child = spawnImpl(command, args, { cwd, env, windowsHide: true, detached: grouped })
     let output = ""
     let timedOut = false
@@ -116,8 +121,15 @@ export async function runMediaProcess(command: string, args: readonly string[], 
       kill("SIGTERM")
       killTimer = setTimeout(() => kill("SIGKILL"), 2000)
     }, timeoutMs)
-    const onAbort = () => { aborted = true; kill("SIGTERM"); killTimer = setTimeout(() => kill("SIGKILL"), 2000) }
-    signal?.addEventListener("abort", onAbort, { once: true })
+    const onAbort = () => {
+      aborted = true
+      clearTimeout(timer)
+      if (killTimer) return
+      kill("SIGTERM")
+      killTimer = setTimeout(() => kill("SIGKILL"), 2000)
+    }
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener("abort", onAbort, { once: true })
     const cleanup = () => { clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener("abort", onAbort) }
     const collect = (chunk: Buffer | string) => { output = (output + chunk.toString()).slice(-16000) }
     child.stdout?.on("data", collect)

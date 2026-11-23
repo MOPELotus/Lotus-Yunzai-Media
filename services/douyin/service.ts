@@ -18,13 +18,7 @@ type MediaKind = "image" | "video"
 type DownloadCandidate = Pick<MediaSource, "urls" | "codec">
 type WorkTarget = Pick<DouyinTarget, "id"> | DouyinTarget
 
-interface VideoPreparationOptions {
-  tools_path?: string
-  timeout_ms?: number
-  codec?: string
-}
-
-type VideoPreparation = (file: string, options: VideoPreparationOptions) => Promise<{ file: string; warnings: string[] }>
+type VideoPreparation = (file: string, options: NonNullable<Parameters<typeof prepareVideo>[1]>) => ReturnType<typeof prepareVideo>
 
 interface DownloadSettings {
   enable?: boolean
@@ -56,6 +50,7 @@ interface ServiceOptions {
 }
 
 interface DownloadHooks {
+  signal?: AbortSignal
   onEvent?: (event: { type: "download-start"; message: string }) => void | Promise<void>
 }
 
@@ -106,13 +101,17 @@ export class DouyinService {
   extractTarget(message: unknown) { return extractDouyinTarget(message) }
   resolveTarget(input: string) { return resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: this.timeoutMs }) }
 
-  async getInfo(input: string | WorkTarget, { deadline = Infinity } = {}): Promise<DouyinWork> {
+  async getInfo(input: string | WorkTarget, { deadline = Infinity, signal }: { deadline?: number; signal?: AbortSignal } = {}): Promise<DouyinWork> {
+    const fetch: DouyinFetch = signal ? (url, options) => this.fetch(url, {
+      ...options, signal: options?.signal ? AbortSignal.any([signal, options.signal]) : signal,
+    }) : this.fetch
     const requestBudget = () => {
+      signal?.throwIfAborted()
       const remaining = Math.min(this.timeoutMs, deadline - Date.now())
       if (remaining <= 0) throw new DouyinError("timeout", "作品下载超时")
       return remaining
     }
-    const target = typeof input === "string" ? await resolveDouyinTarget(input, { fetch: this.fetch, timeoutMs: requestBudget() }) : input
+    const target = typeof input === "string" ? await resolveDouyinTarget(input, { fetch, timeoutMs: requestBudget() }) : input
     if (!/^\d+$/.test(target?.id || "")) throw new DouyinError("invalid_link", "抖音作品 ID 无效")
     let previous: string | VisitorSession = ""
     let primaryError: unknown
@@ -120,25 +119,30 @@ export class DouyinService {
       try {
         const getVisitor: (options: VisitorRequest) => Promise<string | VisitorSession> = this.visitor.getSession || this.visitor.get
         previous = await getVisitor.call(this.visitor, { refresh: attempt > 0, previous, timeoutMs: requestBudget() })
-        const detail = await fetchWebDetail(target.id, previous, { fetch: this.fetch, timeoutMs: requestBudget(), sign: this.sign, now: this.now() })
+        const detail = await fetchWebDetail(target.id, previous, { fetch, timeoutMs: requestBudget(), sign: this.sign, now: this.now() })
         return normalizeDouyinWork(detail, { source: "web", expectedId: target.id })
       } catch (error) {
+        signal?.throwIfAborted()
         if ((error as { code?: string }).code === "unavailable" || Date.now() >= deadline) throw error
         primaryError = error
       }
     }
     try {
-      const detail = await fetchSsrDetail(target.id, { fetch: this.fetch, timeoutMs: requestBudget() })
+      const detail = await fetchSsrDetail(target.id, { fetch, timeoutMs: requestBudget() })
       return normalizeDouyinWork(detail, { source: "ssr", expectedId: target.id })
     } catch (error) {
+      signal?.throwIfAborted()
       if ((error as { code?: string }).code === "unavailable") throw error
       throw new DouyinError("parse_failed", "抖音主接口与分享页面均未取得可用作品，请检查链接或稍后重试", { cause: new AggregateError([primaryError, error]) })
     }
   }
 
   async download(input: string | WorkTarget | DouyinWork, config: DownloadConfig = {}, hooks: DownloadHooks = {}) {
+    const { signal } = hooks
+    signal?.throwIfAborted()
     const download = normalizeDouyinDownloadConfig(config)
-    const info = typeof input === "object" && "platform" in input && input.platform === "douyin" ? input : await this.getInfo(input)
+    const info = typeof input === "object" && "platform" in input && input.platform === "douyin" ? input : await this.getInfo(input, { signal })
+    signal?.throwIfAborted()
     const limitFailure = mediaLimitFailure(info, download)
     if (limitFailure) return limitFailure
     const task = await createMediaTask(this.tasksDir)
@@ -150,6 +154,7 @@ export class DouyinService {
     let consumed = 0
     let refreshed: Promise<DouyinWork> | undefined
     const remainingTime = () => {
+      signal?.throwIfAborted()
       const remaining = deadline - Date.now()
       if (remaining <= 0) throw new Error("作品下载超时")
       return remaining
@@ -167,11 +172,12 @@ export class DouyinService {
               headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/" },
               timeoutMs: remainingTime(),
               maxBytes: cap > 0 ? cap - consumed : 0,
+              signal,
             }
             const result = await downloadMedia(url, base, options)
             consumed += result.sizeBytes
             if (kind === "video") {
-              const prepared = await this.prepareVideo(result.file, { ...download, timeout_ms: remainingTime(), codec: candidate.codec })
+              const prepared = await this.prepareVideo(result.file, { ...download, timeout_ms: remainingTime(), codec: candidate.codec, signal })
               warnings.push(...prepared.warnings)
               result.file = prepared.file
             }
@@ -182,13 +188,16 @@ export class DouyinService {
             for (const ext of [".mp4", ".mkv", ".flv", ".jpg", ".png", ".webp", ".gif", ".avif", ".heic", "-compatible.mp4"]) {
               await fs.rm(`${base}${ext}`, { force: true }).catch(() => {})
             }
+            signal?.throwIfAborted()
           }
         }
       }
       throw lastError || new Error("媒体地址缺失")
     }
     try {
+      signal?.throwIfAborted()
       await hooks.onEvent?.({ type: "download-start", message: `开始下载抖音作品 ${info.id}` })
+      signal?.throwIfAborted()
       if (info.article) {
         const file = path.join(task.dir, "000-正文.txt")
         const text = [info.title, `作者：${info.owner}`, info.url, "", ...info.article.blocks.map(block => block.type === "text" ? block.text : `[图片] ${block.urls[0]}`)].join("\n\n")
@@ -202,14 +211,16 @@ export class DouyinService {
           try {
             let result
             try { result = await downloadItem(candidates, `${prefix}-${suffix}`, kind) } catch (firstError) {
-              if (!refreshed) { remainingTime(); refreshed = this.getInfo(info.url, { deadline }) }
+              if (!refreshed) { remainingTime(); refreshed = this.getInfo(info.url, { deadline, signal }) }
               const fresh = await refreshed
+              signal?.throwIfAborted()
               const replacement = fresh.media.find(entry => entry.index === item.index)
               if (!replacement) throw firstError
               result = await downloadItem(kind === "image" ? [{ urls: replacement.urls }] : selectVideoSources(replacement.sources, download), `${prefix}-${suffix}`, kind)
             }
             files.push(result.file); artifacts.push({ ...result, index: item.index })
           } catch (error) {
+            signal?.throwIfAborted()
             failedItems.push({ index: item.index, kind, message: (error as Error).message })
           }
         }
@@ -223,9 +234,10 @@ export class DouyinService {
         if (failedItems.length) await fs.writeFile(path.join(task.dir, "下载缺项.txt"), failedItems.map(item => `第${item.index}项 ${item.kind}：${item.message}`).join("\n"), "utf8")
         const packFiles = failedItems.length ? [...files, path.join(task.dir, "下载缺项.txt")] : files
         const target = path.join(task.dir, `${safeMediaName(info.title)}-${info.id}.zip`)
-        await this.pack(packFiles, target, { cwd: task.dir, timeoutMs: remainingTime() })
+        await this.pack(packFiles, target, { cwd: task.dir, timeoutMs: remainingTime(), signal })
         output = [target]
       }
+      signal?.throwIfAborted()
       return { ok: true, info, taskDir: task.dir, taskId: task.id, files: output, artifacts, warnings, partial: failedItems.length > 0, failedItems }
     } catch (error) {
       await this.releaseTask({ taskDir: task.dir }).catch(cleanupError => (globalThis as typeof globalThis & { logger?: { warn?: (message: string) => void } }).logger?.warn?.(`[media] 抖音任务清理失败： ${cleanupError.message}`))

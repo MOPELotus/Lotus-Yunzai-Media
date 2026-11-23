@@ -1,14 +1,19 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
+import { loadGlobalConfig } from "../core/config/global.ts"
 import { BilibiliService, formatBilibiliPreviewText } from "../services/bilibili/service.ts"
 import { extractDouyinTarget, resolveDouyinTarget } from "../services/douyin/links.ts"
 import { generateABogus } from "../services/douyin/signature.ts"
 import { normalizeDouyinWork } from "../services/douyin/model.ts"
+import { createDouyinCommands } from "../services/douyin/command.ts"
+import { DouyinService } from "../services/douyin/service.ts"
 import { fetchCdn } from "../services/media/cdn.ts"
 import { mediaDeliveryUnknown, sendMediaFile } from "../services/media/files.ts"
 import { articlePages, buildMediaMessageText, isMediaCommandText } from "../services/media/message.ts"
+import { CommandRegistry } from "../../../lib/commands.ts"
 
 const directories = []
 async function fixtureFile(name, bytes = "小文件") {
@@ -21,6 +26,90 @@ async function fixtureFile(name, bytes = "小文件") {
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+})
+
+test("宿主卸载抖音命令时中止正在传输的 CDN 下载并清理任务目录", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-stop-"))
+  directories.push(directory)
+  const entered = Promise.withResolvers()
+  const lifecycle = new AbortController()
+  const work = normalizeDouyinWork({ aweme_id: "12345678", desc: "取消测试",
+    video: { play_addr: { url_list: ["https://fixture.douyincdn.com/media"] } },
+  })
+  let requests = 0
+  let requestSignal
+  const service = new DouyinService({ tasksDir: directory, async fetch(_url, init) {
+    requests++
+    requestSignal = init.signal
+    return new Response(new ReadableStream({
+      pull(stream) {
+        stream.enqueue(Uint8Array.of(0, 0, 0, 12, 102, 116, 121, 112, 105, 115, 111, 109))
+        entered.resolve()
+        return new Promise(resolve => {
+          requestSignal.addEventListener("abort", () => {
+            try { stream.error(requestSignal.reason) } catch {}
+            resolve()
+          }, { once: true })
+        })
+      },
+    }))
+  } })
+  let lookups = 0
+  service.getInfo = async () => { lookups++; return work }
+  const module = createDouyinCommands({ signal: lifecycle.signal }, {
+    makeService: () => service,
+    loadConfig: () => loadGlobalConfig(pathToFileURL(directory + "/")),
+  })
+  const registry = new CommandRegistry()
+  registry.registerModule({ name: "@lotus-yunzai/media", commands: {}, fallback: module.fallback, fallbackFeatures: module.features })
+  const messages = []
+  const event = { msg: "#抖音下载 https://www.douyin.com/video/12345678", message_type: "private",
+    user_id: 42, isMaster: true, reply: text => { messages.push(text); return true } }
+  const inFlight = registry.dispatchFallback(event, () => true, () => true)
+  try {
+    await entered.promise
+    await module.dispose()
+    expect(requestSignal.aborted).toBe(true)
+    expect(await readdir(directory)).toEqual([])
+    expect(await inFlight).toEqual([])
+    expect(await registry.dispatchFallback(event, () => true, () => true)).toBeUndefined()
+    expect([requests, lookups, messages]).toEqual([1, 1, []])
+  } finally {
+    await module.dispose()
+    await inFlight
+  }
+})
+
+test.each(["transcode", "zip"])("抖音下载在 %s 阶段沿用取消信号，停止时不留下输出或重试", async phase => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-output-stop-"))
+  directories.push(directory)
+  const controller = new AbortController()
+  const work = normalizeDouyinWork({ aweme_id: "12345678", desc: "取消测试",
+    video: { play_addr: { url_list: ["https://fixture.douyincdn.com/media"] } },
+  })
+  if (phase === "zip") work.media.push({ ...work.media[0], index: 2 })
+  const stages = []
+  const service = new DouyinService({ tasksDir: directory,
+    async fetch() {
+      return new Response(Uint8Array.of(0, 0, 0, 12, 102, 116, 121, 112, 105, 115, 111, 109))
+    },
+    async prepareVideo(file, options) {
+      stages.push("transcode")
+      expect(options.signal).toBe(controller.signal)
+      if (phase === "transcode") controller.abort()
+      return { file, warnings: [] }
+    },
+    async pack(_files, target, options) {
+      stages.push("zip")
+      expect(options.signal).toBe(controller.signal)
+      await writeFile(target, "partial output")
+      controller.abort()
+      return target
+    },
+  })
+  await expect(service.download(work, {}, { signal: controller.signal })).rejects.toThrow()
+  expect(await readdir(directory)).toEqual([])
+  expect(stages).toEqual(phase === "zip" ? ["transcode", "transcode", "zip"] : ["transcode"])
 })
 
 test("自动解析跳过显式媒体命令的参数，仍接受直接分享的链接和编号", () => {

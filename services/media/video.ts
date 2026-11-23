@@ -7,6 +7,7 @@ interface VideoOptions {
   readonly tools_path?: string
   readonly timeout_ms?: number
   readonly codec?: string
+  readonly signal?: AbortSignal
 }
 
 interface Stream {
@@ -28,13 +29,13 @@ export async function findMediaTool(name: string, toolsPath = "data/tools/bin") 
   return null
 }
 
-export async function prepareVideo(file: string, { tools_path, timeout_ms = 600000, codec }: VideoOptions = {}) {
+export async function prepareVideo(file: string, { tools_path, timeout_ms = 600000, codec, signal }: VideoOptions = {}) {
   const warnings: string[] = []
   const ffprobe = await findMediaTool("ffprobe", tools_path)
   let videoCodec = codec
   let audioCodec: string | undefined
   if (ffprobe) {
-    const probe = await runMediaProcess(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { cwd: path.dirname(file), timeoutMs: Math.min(timeout_ms, 30000) })
+    const probe = await runMediaProcess(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { cwd: path.dirname(file), timeoutMs: Math.min(timeout_ms, 30000), signal })
     const report: unknown = JSON.parse(probe.output)
     const raw = report && typeof report === "object" && "streams" in report ? report.streams : undefined
     const streams = Array.isArray(raw) ? raw.filter(isStream) : []
@@ -50,7 +51,7 @@ export async function prepareVideo(file: string, { tools_path, timeout_ms = 6000
   const target = file.replace(/\.[^.]+$/, "-compatible.mp4")
   await runMediaProcess(ffmpeg, ["-nostdin", "-v", "error", "-i", file, "-map", "0:v:0", "-map", "0:a?",
     "-c:v", videoCodec === "h264" ? "copy" : "libx264", "-c:a", audioCodec === "aac" || !audioCodec ? "copy" : "aac", "-movflags", "+faststart", target],
-  { cwd: path.dirname(file), timeoutMs: timeout_ms })
+  { cwd: path.dirname(file), timeoutMs: timeout_ms, signal })
   const stat = await fs.stat(target)
   if (!stat.size) throw new Error("FFmpeg 未生成有效视频")
   return { file: target, warnings }

@@ -23,20 +23,40 @@ export async function downloadRanges(urls: string | readonly (string | undefined
   let lastError
   for (const url of new Set((typeof urls === "string" ? [urls] : urls ?? []).filter((item): item is string => Boolean(item)))) {
     if (parentSignal.aborted) throw new Error("下载已取消或超时")
-    const parsed = new URL(url)
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("下载地址协议无效")
     const temp = `${target}.${randomUUID()}.part`, controller = new AbortController(), transferSignal = AbortSignal.any([parentSignal, controller.signal])
     let handle: Awaited<ReturnType<typeof fs.open>> | undefined
-    const full = async (response: Response) => {
-      if (!response.ok || !response.body) throw new Error(`下载失败 HTTP ${response.status}`)
-      const expected = Number(response.headers.get("content-length")) || 0
-      if (maxBytes && expected > maxBytes) throw new Error("下载文件超出大小限制")
+    const full = async (response: Response, probedLength?: number) => {
+      if (response.status !== 200 || !response.body || response.headers.has("content-range")) {
+        await response.body?.cancel().catch(() => {})
+        throw new Error(`完整下载响应无效 HTTP ${response.status}`)
+      }
+      const contentLength = response.headers.get("content-length")
+      const declared = contentLength === null ? undefined : Number(contentLength)
+      if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 1 ||
+          (probedLength !== undefined && probedLength !== declared))) {
+        await response.body.cancel().catch(() => {})
+        throw new Error("下载文件体积与探测不一致")
+      }
+      const expected = probedLength ?? declared
+      if (maxBytes && expected !== undefined && expected > maxBytes) {
+        await response.body.cancel().catch(() => {})
+        throw new Error("下载文件超出大小限制")
+      }
       let received = 0
-      await pipeline(Readable.from(response.body.values(), { objectMode: false }), new Transform({ transform(chunk: Buffer, _encoding, done) { received += chunk.length; done(maxBytes && received > maxBytes ? new Error("下载文件超出大小限制") : null, chunk) } }), createWriteStream(temp, { flags: "wx" }), { signal: transferSignal })
-      if (!received || expected && received !== expected) throw new Error("下载文件不完整")
+      const guard = new Transform({ transform(chunk: Buffer, _encoding, done) {
+        received += chunk.length
+        if (maxBytes && received > maxBytes) return done(new Error("下载文件超出大小限制"))
+        if (expected !== undefined && received > expected) return done(new Error("下载文件体积与探测不一致"))
+        done(null, chunk)
+      } })
+      await pipeline(Readable.from(response.body.values(), { objectMode: false }), guard,
+        createWriteStream(temp, { flags: "wx" }), { signal: transferSignal })
+      if (!received || expected !== undefined && received !== expected) throw new Error("下载文件不完整")
       return received
     }
     try {
+      const parsed = new URL(url)
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("下载地址协议无效")
       const base = { "Accept-Encoding": "identity", ...headers }
       const probe = await request(url, { headers: { ...base, Range: "bytes=0-0" }, signal: transferSignal })
       let total: number
@@ -48,7 +68,7 @@ export async function downloadRanges(urls: string | readonly (string | undefined
         const resourceLength = total = Number(range[1])
         if (!Number.isSafeInteger(total) || total <= 0 || maxBytes && total > maxBytes) throw new Error("下载文件体积无效或超出限制")
         const count = Math.max(1, Math.min(16, Math.floor(concurrency), Math.ceil(total / (2 * 1024 * 1024))))
-        if (count === 1) total = await full(await request(url, { headers: base, signal: transferSignal }))
+        if (count === 1) await full(await request(url, { headers: base, signal: transferSignal }), resourceLength)
         else {
           const opened = handle = await fs.open(temp, "wx"); await opened.truncate(total)
           const etag = probe.headers.get("etag"), modified = probe.headers.get("last-modified"), validator = etag && !etag.startsWith("W/") ? etag : modified
@@ -80,6 +100,7 @@ export async function downloadRanges(urls: string | readonly (string | undefined
           await handle.sync(); await handle.close(); handle = undefined
         }
       }
+      parentSignal.throwIfAborted()
       await fs.rename(temp, target)
       return { file: target, sizeBytes: total }
     } catch (error) { controller.abort(); lastError = error }

@@ -55,14 +55,27 @@ export async function sendMediaFile(e: MediaSendContext, file: string, config: M
   const key = `${String(botId)}:${hash.digest("hex")}`
   const previous = mediaUploadQueues.get(key)
   const { promise: current, resolve: release } = Promise.withResolvers<void>()
-  mediaUploadQueues.set(key, current)
+  // A cancelled waiter may return before the running upload finishes.
+  const tail = previous ? previous.then(() => current) : current
+  mediaUploadQueues.set(key, tail)
+  void tail.then(() => {
+    if (mediaUploadQueues.get(key) === tail) mediaUploadQueues.delete(key)
+  })
+
+  const signal = config.signal
+  const { promise: cancelled, reject } = Promise.withResolvers<never>()
+  const onAbort = () => reject(signal?.reason)
   try {
-    if (previous) await previous
-    config.signal?.throwIfAborted()
+    signal?.throwIfAborted()
+    if (previous) {
+      signal?.addEventListener("abort", onAbort, { once: true })
+      await Promise.race([previous, cancelled])
+    }
+    signal?.throwIfAborted()
     return await sendIsolatedMediaFile(e, file, config)
   } finally {
+    signal?.removeEventListener("abort", onAbort)
     release()
-    if (mediaUploadQueues.get(key) === current) mediaUploadQueues.delete(key)
   }
 }
 
@@ -162,9 +175,22 @@ export async function runMediaProcess(command: string, args: readonly string[], 
 
 export async function packMediaFiles(files: readonly string[], target: string, options: ProcessOptions = {}) {
   if (process.platform === "win32") {
-    const quote = (value: string) => `'${value.replace(/'/g, "''")}'`
-    await runMediaProcess("powershell.exe", ["-NoProfile", "-Command",
-      `Compress-Archive -LiteralPath ${files.map(quote).join(",")} -DestinationPath ${quote(target)}`], options)
+    options.signal?.throwIfAborted()
+    const cwd = options.cwd ?? process.cwd()
+    const destination = path.resolve(cwd, target)
+    const requestDir = await fs.mkdtemp(path.join(path.dirname(destination), ".lotus-media-archive-"))
+    try {
+      const request = path.join(requestDir, "request.json")
+      const contents = { files: files.map(file => path.resolve(cwd, file)), target: destination }
+      await fs.writeFile(request, JSON.stringify(contents), { encoding: "utf8", mode: 0o600 })
+      const command = "$request = Get-Content -LiteralPath $env:LOTUS_MEDIA_ARCHIVE_REQUEST -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop; Compress-Archive -LiteralPath $request.files -DestinationPath $request.target -ErrorAction Stop"
+      await runMediaProcess("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+        ...options,
+        env: { ...(options.env ?? process.env), LOTUS_MEDIA_ARCHIVE_REQUEST: request },
+      })
+    } finally {
+      await fs.rm(requestDir, { recursive: true, force: true })
+    }
   } else {
     await runMediaProcess("zip", ["-j", target, ...files], options)
   }

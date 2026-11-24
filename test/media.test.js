@@ -307,7 +307,7 @@ test("发送保留显示文件名并按视频阈值改用上传，未确认时�
   expect(sent).toHaveLength(2)
 })
 
-test("同一账号的相同媒体发送串行，另一账号没有等待", async () => {
+test("相同媒体等待时可取消，下一份仍等前一份完成，另一账号不受影响", async () => {
   const first = await fixtureFile("1.mp4")
   const second = await fixtureFile("2.mp4")
   const trace = []
@@ -321,12 +321,23 @@ test("同一账号的相同媒体发送串行，另一账号没有等待", async
     }}
   }
   const head = sendMediaFile(event(99,"第一份",true),first)
-  await started.promise
-  const sameBot = sendMediaFile(event(99,"本账号下一份"),second)
-  await sendMediaFile(event(42,"另一账号"),second)
-  expect(trace).toEqual(["第一份","另一账号"])
-  block.resolve()
-  await Promise.all([head,sameBot])
+  const controller = new AbortController()
+  const aborted = new Error("取消排队")
+  let cancelled
+  let sameBot
+  try {
+    await started.promise
+    cancelled = sendMediaFile(event(99,"已取消"),second,{signal:controller.signal}).catch(error => error)
+    await Bun.sleep(75)
+    controller.abort(aborted)
+    expect(await Promise.race([cancelled,Bun.sleep(500).then(() => "仍在等待")])).toBe(aborted)
+    sameBot = sendMediaFile(event(99,"本账号下一份"),second)
+    await sendMediaFile(event(42,"另一账号"),second)
+    expect(trace).toEqual(["第一份","另一账号"])
+  } finally {
+    block.resolve()
+    await Promise.all([head,cancelled,sameBot])
+  }
   expect(trace).toEqual(["第一份","另一账号","本账号下一份"])
 })
 

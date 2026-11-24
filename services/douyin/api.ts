@@ -1,7 +1,7 @@
 import { WEB_UA, generateABogus } from "./signature.ts"
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
 import { signVisitorUrl } from "./guest-signature.ts"
-import type { AwemeDetail } from "./model.ts"
+import { douyinWorkId, type AwemeDetail } from "./model.ts"
 import type { VisitorSession } from "./visitor.ts"
 
 export type DetailSigner = (query: string, options: { userAgent: string; now: number }) => string
@@ -42,13 +42,17 @@ export async function fetchWebDetail(id: string, visitor: string | VisitorSessio
     if (/ArgusSecurityPlugin|Uifid Not Found/i.test(text)) throw new DouyinError("risk_control", "抖音风控要求额外游客校验")
     throw new DouyinError("api_http", `抖音作品接口 HTTP ${response.status}`)
   }
-  let data: DetailResponse
-  try { data = JSON.parse(text) as DetailResponse } catch { throw new DouyinError("api_empty", "抖音作品接口返回空数据或非 JSON") }
-  const message = String(data.status_msg || data.message || "")
+  let payload: unknown
+  try { payload = JSON.parse(text) } catch {}
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new DouyinError("api_empty", "抖音作品接口返回的详情结构无效")
+  }
+  const data = payload as DetailResponse
+  const message = typeof data.status_msg === "string" ? data.status_msg : typeof data.message === "string" ? data.message : ""
   if (data.status_code !== 0) {
     if (/已删除|不存在|私密|无权|不可见/.test(message)) throw new DouyinError("unavailable", message)
     throw new DouyinError("api_rejected", "抖音作品接口拒绝请求或遭遇风控")
   }
-  if (!data.aweme_detail || String(data.aweme_detail.aweme_id || "") !== id) throw new DouyinError("api_empty", "接口未返回匹配的作品详情")
+  if (!data.aweme_detail || douyinWorkId(data.aweme_detail.aweme_id) !== id) throw new DouyinError("api_empty", "接口未返回匹配的作品详情")
   return data.aweme_detail
 }

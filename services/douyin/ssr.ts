@@ -1,9 +1,9 @@
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
 import { MOBILE_UA, targetFromUrl, validateDouyinUrl } from "./links.ts"
-import type { AwemeDetail } from "./model.ts"
+import { douyinWorkId, type AwemeDetail } from "./model.ts"
 
 interface RouterData {
-  loaderData?: Record<string, { videoInfoRes?: { item_list?: AwemeDetail[]; status_msg?: string } }>
+  loaderData?: Record<string, { itemId?: string | number; videoInfoRes?: { item_list?: unknown; status_msg?: string } }>
 }
 
 /** Balanced JSON scan: braces inside escaped strings do not terminate the object. */
@@ -33,13 +33,18 @@ export function extractRouterData(html: string): RouterData {
 }
 
 export function detailFromRouter(router: RouterData, id: string) {
+  let detail: AwemeDetail | undefined
   for (const value of Object.values(router?.loaderData || {})) {
+    const loaderId = douyinWorkId(value?.itemId)
+    if (loaderId && loaderId !== id) continue
     const result = value?.videoInfoRes
-    const detail = result?.item_list?.find(item => String(item?.aweme_id || "") === id)
-    if (detail) return detail
-    const message = String(result?.status_msg || "")
+    const message = typeof result?.status_msg === "string" ? result.status_msg : ""
     if (/已删除|不存在|私密|无权|不可见/.test(message)) throw new DouyinError("unavailable", message)
+    if (!detail && Array.isArray(result?.item_list)) {
+      detail = result.item_list.find(item => item && typeof item === "object" && douyinWorkId(item.aweme_id) === id)
+    }
   }
+  if (detail) return detail
   throw new DouyinError("ssr_empty", "分享页面没有可用的作品详情")
 }
 

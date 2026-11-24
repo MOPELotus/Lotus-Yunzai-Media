@@ -118,11 +118,33 @@ interface NormalizeOptions {
   expectedId?: string
 }
 
-const positive = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : undefined
-const count = (value: unknown) => value !== null && value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : undefined
-const jsonObject = <T extends object>(value?: T | string): Partial<T> => {
-  if (value && typeof value === "object") return value
-  try { return (JSON.parse(value || "{}") || {}) as Partial<T> } catch { return {} }
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+}
+
+export function douyinWorkId(value: unknown) {
+  if (typeof value === "string" && /^[1-9]\d{0,19}$/u.test(value)) return value
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value)
+}
+
+function positive(value: unknown) {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return
+  const number = Number(value)
+  if (Number.isFinite(number) && number > 0) return number
+}
+
+function count(value: unknown) {
+  if (typeof value !== "number" && (typeof value !== "string" || !/^\d+$/u.test(value))) return
+  const number = Number(value)
+  if (Number.isSafeInteger(number) && number >= 0) return number
+}
+
+function jsonObject<T extends object>(value?: T | string): Partial<T> {
+  let parsed: unknown = value
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value) } catch { return {} }
+  }
+  return isObject(parsed) ? parsed as Partial<T> : {}
 }
 
 export function mediaUrls(value: unknown) {
@@ -135,7 +157,8 @@ export function mediaUrls(value: unknown) {
 }
 
 function plainText(value: unknown) {
-  const text = String(value || "")
+  if (typeof value !== "string") return ""
+  const text = value
   if (!/<\/?[a-z][\s\S]*>/i.test(text)) return text.trim()
   const $ = load(text)
   $("script,style").remove()
@@ -168,7 +191,7 @@ function sourceFromAddress(address: WireAddress | undefined, entry: WireVariant 
 
 export function videoSources(video: WireVideo = {}): MediaSource[] {
   const variants = Array.isArray(video.bit_rate) ? video.bit_rate : []
-  const sources = variants.map(entry => sourceFromAddress(entry.play_addr, entry)).filter((source): source is MediaSource => Boolean(source))
+  const sources = variants.filter(isObject).map(entry => sourceFromAddress(entry.play_addr, entry)).filter((source): source is MediaSource => Boolean(source))
   for (const [key, h264] of [["play_addr_h264", true], ["play_addr", false], ["download_addr", false]] as const) {
     const source = sourceFromAddress(video[key], { h264 })
     if (source && !sources.some(item => item.urls.join("\n") === source.urls.join("\n"))) sources.push(source)
@@ -196,7 +219,7 @@ export function selectVideoSources(sources: MediaSource[], config: { quality?: s
 function articleBlocks(info: WireArticle, warnings: string[]) {
   const content = jsonObject<ArticleContent>(info.article_content)
   const fe = jsonObject<ArticleImages>(info.fe_data)
-  const images = Array.isArray(fe.image_list) ? fe.image_list : []
+  const images = Array.isArray(fe.image_list) ? fe.image_list.filter(isObject) : []
   const replacements = new Map(images.map(image => [image.markdown_url, image.ai_high_image_url || image.high_image_url || image.origin_image_url || image.markdown_url]))
   const blocks: ArticleBlock[] = []
   const markdown = typeof content.markdown === "string" ? content.markdown : ""
@@ -206,7 +229,7 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
     for (const match of markdown.matchAll(expression)) {
       const text = plainText(markdown.slice(offset, match.index))
       if (text) blocks.push({ type: "text", text })
-      const urls = mediaUrls(replacements.get(match[2]) || match[2])
+      const urls = [...new Set([...mediaUrls(replacements.get(match[2])), ...mediaUrls(match[2])])]
       if (urls.length) blocks.push({ type: "image", urls, caption: match[1] })
       offset = match.index + match[0].length
     }
@@ -239,12 +262,14 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
 }
 
 export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expectedId }: NormalizeOptions = {}) {
-  const id = String(detail?.aweme_id || "")
-  if (!/^\d+$/.test(id) || expectedId && id !== expectedId) throw new DouyinError("invalid_detail", "作品详情 ID 不匹配")
+  const id = douyinWorkId(detail?.aweme_id)
+  if (!id || expectedId && id !== expectedId) throw new DouyinError("invalid_detail", "作品详情 ID 不匹配")
   const warnings = source === "ssr" ? ["使用分享页面降级解析，部分统计或清晰度信息可能缺失"] : []
   const images = Array.isArray(detail.images) ? detail.images : []
-  const isArticle = detail.aweme_type === 163 || Boolean(detail.article_info)
-  const media = images.map((image, index): MediaItem => {
+  const articleInfo = isObject(detail.article_info) ? detail.article_info : undefined
+  const isArticle = detail.aweme_type === 163 || Boolean(articleInfo)
+  const media = images.map((entry, index): MediaItem => {
+    const image: WireImage = isObject(entry) ? entry : {}
     const urls = mediaUrls(image)
     const motion = videoSources(image.video || {})
     const type = image.clip_type === 4 && motion.length ? "video" : motion.length || image.clip_type === 5 ? "live_photo" : "image"
@@ -252,13 +277,15 @@ export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expec
     if ((type === "live_photo" || image.clip_type === 4) && !motion.length) warnings.push(`第 ${index + 1} 项动态资源缺失，保留静态图`)
     return { index: index + 1, type, urls, sources: motion, width: positive(image.width), height: positive(image.height) }
   })
-  const article = isArticle ? articleBlocks(detail.article_info || {}, warnings) : undefined
+  const article = isArticle ? articleBlocks(articleInfo || {}, warnings) : undefined
   const sources = isArticle || images.length ? [] : videoSources(detail.video || {})
   const type = isArticle ? "article" : images.length ? (media.some(item => item.type === "live_photo") ? "live_photo" : "gallery") : "video"
   if (type === "video") media.push({ index: 1, type: "video", sources, urls: [] })
   if (article) {
     media.splice(0, media.length, ...article.blocks.filter(block => block.type === "image").map((block, index) => ({ ...block, index: index + 1, sources: [] })))
-    if (!article.blocks.length && detail.desc) article.blocks.push({ type: "text", text: plainText(detail.desc) })
+    const description = plainText(detail.desc)
+    if (!article.blocks.length && description) article.blocks.push({ type: "text", text: description })
+    if (!article.blocks.length) throw new DouyinError("no_media", "作品详情缺少可用的文章正文或图片")
   }
   if ((type === "video" && !sources.length) || (type !== "video" && !isArticle && !media.some(item => item.urls.length || item.sources.length))) {
     throw new DouyinError("no_media", "作品详情缺少可用媒体资源")
@@ -266,11 +293,12 @@ export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expec
   const author = detail.author || {}
   const statistics = detail.statistics || {}
   const createdAt = positive(detail.create_time)
-  const title = plainText(detail.article_info?.article_title || detail.preview_title || detail.item_title || detail.desc || `抖音作品 ${id}`)
+  const title = [articleInfo?.article_title, detail.preview_title, detail.item_title, detail.desc].map(plainText).find(Boolean) || `抖音作品 ${id}`
+  const owner = plainText(author.nickname)
   return {
-    platform: "douyin" as const, id, type, title, desc: plainText(detail.desc), owner: author.nickname || "",
-    author: { id: String(author.uid || ""), secUid: author.sec_uid || "", name: author.nickname || "", avatar: mediaUrls(author.avatar_thumb)[0] },
-    cover: article?.cover || mediaUrls(detail.video?.origin_cover)[0] || mediaUrls(detail.video?.cover)[0] || media[0]?.urls?.[0] || "",
+    platform: "douyin" as const, id, type, title, desc: plainText(detail.desc), owner,
+    author: { id: String(author.uid || ""), secUid: author.sec_uid || "", name: owner, avatar: mediaUrls(author.avatar_thumb)[0] },
+    cover: article?.cover || mediaUrls(detail.video?.origin_cover)[0] || mediaUrls(detail.video?.cover)[0] || media.find(item => item.urls.length)?.urls[0] || "",
     url: `https://www.douyin.com/${isArticle ? "article" : images.length ? "note" : "video"}/${id}`,
     createdAt, duration: (positive(detail.video?.duration || detail.duration) || 0) / 1000,
     stat: { like: count(statistics.digg_count), reply: count(statistics.comment_count), favorite: count(statistics.collect_count), share: count(statistics.share_count), view: count(statistics.play_count) },

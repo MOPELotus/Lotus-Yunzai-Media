@@ -78,10 +78,23 @@ export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRun
       if (active.aborted || partner?.enable !== true) return
       if (startupDay && (startupDay !== formatLocalIso(now()).slice(0,10) ||
         !pastPartnerSlot(partner, now()))) return
-      if (await hasRunToday() || active.aborted) return
-      if (startupDay) await ensureReady(config, active)
-      if (active.aborted) return
-      const report = await execute(config, trigger, { signal:active, once:true })
+      let report: ScheduleResult
+      try {
+        if (await hasRunToday() || active.aborted) return
+        if (startupDay) {
+          const serviceReady = await ensureReady(config, active).then(() => true, () => false)
+          if (!serviceReady) { logFailure(); return }
+        }
+        if (active.aborted) return
+        report = await execute(config, trigger, { signal:active, once:true })
+      } catch {
+        if (active.aborted) return
+        logFailure()
+        report = { trigger, time:formatLocalIso(now()), accounts:[{
+          nickname:"合伙人任务执行失败", total:0, success:0, skip:0, fail:1, attempts:0,
+          details:["请检查 TuneWeave 状态和最近日志。"], evaluations:[],
+        }] }
+      }
       if (active.aborted || "skipped" in report || partner.notify_master === false || !mediaRuntime?.notifyMasters) return report
       const { image, text } = await render("合伙人自动任务", report)
       if (!active.aborted) await mediaRuntime.notifyMasters(image ? { type:"image", file:image } : text, active)

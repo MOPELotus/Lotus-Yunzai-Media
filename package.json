@@ -7,6 +7,7 @@
     "entry": "./index.ts"
   },
   "dependencies": {
+    "@lotus-yunzai/captcha": "workspace:*",
     "@lotus-yunzai/skia": "workspace:*",
     "cheerio": "1.0.0",
     "qrcode": "1.5.4",

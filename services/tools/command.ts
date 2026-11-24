@@ -14,6 +14,10 @@ type Progress = (message: string) => Promise<void>
 
 const mediaPreparation = {
   loadConfig: loadGlobalConfig,
+  async prepareCaptcha(signal?: AbortSignal) {
+    const { prepareCaptchaModels } = await import("@lotus-yunzai/captcha")
+    await prepareCaptchaModels({ signal })
+  },
   prepareTools: (config: Config["tools"], onProgress: Progress, signal?: AbortSignal) =>
     new ToolInstallerService({ config }).ensureAll({ signal, onProgress }),
   prepareTuneWeave: (config: Config["tuneweave"], onProgress: Progress, signal?: AbortSignal) =>
@@ -25,7 +29,11 @@ function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : "检查失败"
 }
 
-export function createMediaEnvironment({ signal }: { readonly signal?: AbortSignal }, preparation = mediaPreparation) {
+type Preparation = Omit<typeof mediaPreparation, "prepareCaptcha"> & {
+  prepareCaptcha?: typeof mediaPreparation.prepareCaptcha
+}
+
+export function createMediaEnvironment({ signal }: { readonly signal?: AbortSignal }, preparation: Preparation = mediaPreparation) {
   const fallback: MessageFallback = async (message, context) => {
     if (!matches(message) || signal?.aborted) return
     if (context.isDelegated || context.canManagePackages !== true) {
@@ -77,13 +85,27 @@ export function createMediaEnvironment({ signal }: { readonly signal?: AbortSign
     await progress(`TuneWeave：${tuneResult.value}`)
     if (signal?.aborted) return []
 
+    let captchaFailure: string | undefined
+    if (preparation.prepareCaptcha) {
+      await progress("正在准备验证码模型，下载并校验缺失文件。")
+      if (signal?.aborted) return []
+      try {
+        await preparation.prepareCaptcha(signal)
+        await progress("验证码模型：已准备完成。")
+      } catch {
+        if (signal?.aborted) return []
+        captchaFailure = "验证码模型准备失败，请重新发送初始化指令重试。"
+      }
+      if (signal?.aborted) return []
+    }
+
     const status = items.every(item => item.ok) ? "检查完成" : "存在失败"
     const rows = items.map(({ label, value }) => ({ label, value }))
     const summary = ["媒体环境 · " + status, ...rows.map(item => item.label + "：" + item.value)].join("\n")
     const image = await preparation.render({ title: "媒体环境", subtitle: status, items: rows }).catch(() => undefined)
     if (signal?.aborted) return []
-    if (image && await context.reply({ type: "image", file: image })) return []
-    return summary
+    if (image && await context.reply({ type: "image", file: image })) return captchaFailure ?? []
+    return [summary, captchaFailure].filter(Boolean).join("\n")
   }
   return { matches, fallback }
 }

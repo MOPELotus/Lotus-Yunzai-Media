@@ -109,3 +109,49 @@ test("宿主停止时结束当前准备，不启动下一个工具或发送最�
   expect(await command.fallback(commands[0]!, context(message => { replies.push(message); return true }))).toEqual([])
   expect(replies).toEqual(["[media] 正在检查媒体环境，补齐缺失组件并检查更新。"])
 })
+
+test("三个整体初始化入口同时准备验证码模型，沿用权限和取消信号", async () => {
+  for (const name of commands) {
+    const received: unknown[] = []
+    const controller = new AbortController()
+    let downloads = 0
+    const command = createMediaEnvironment({ signal: controller.signal }, {
+      loadConfig: async () => config,
+      prepareTools: async () => ({ ok: true, skipped: true, binDir: "/fixture", items: [] }),
+      prepareTuneWeave: async () => ({ ok: true, reachable: true, version: "1.2.3", requiredVersion: "1.0.0", requiresUpdate: false,
+        apiUrl: "https://fixture.invalid", message: "检查完成", capabilities: [], already: true }),
+      async prepareCaptcha(signal) { expect(signal).toBe(controller.signal); downloads++ },
+      render: async () => { throw new Error("fixture no image") },
+    })
+    expect(await command.fallback(name, context(() => true, { canManagePackages: false }))).toContain("只有机器人主人")
+    expect(downloads).toBe(0)
+    const reply = await command.fallback(name, context(message => { received.push(message); return true }))
+    expect(reply).toContain("媒体环境 · 检查完成")
+    expect(downloads).toBe(1)
+    expect(received).toContain("[media] 验证码模型：已准备完成。")
+  }
+})
+
+test("模型失败保留媒体结果并明确文字提示；取消停止结果发送", async () => {
+  for (const mode of ["fail", "cancel"] as const) {
+    const received: unknown[] = []
+    const controller = new AbortController()
+    let tools = 0, tune = 0, renders = 0
+    const command = createMediaEnvironment({ signal: controller.signal }, {
+      loadConfig: async () => config,
+      prepareTools: async () => { tools++; return { ok: true, skipped: false, binDir: "/fixture", items: [] } },
+      prepareTuneWeave: async () => { tune++; return { ok: true, reachable: true, version: "1.2.3", requiredVersion: "1.0.0", requiresUpdate: false,
+        apiUrl: "https://fixture.invalid", message: "检查完成", capabilities: [], already: true } },
+      async prepareCaptcha() { if (mode === "cancel") controller.abort(); throw new Error("private source error") },
+      render: async () => { renders++; return Buffer.from("fixture") },
+    })
+    const reply = await command.fallback(commands[0]!, context(message => { received.push(message); return true }))
+    expect(tools).toBe(1); expect(tune).toBe(1)
+    if (mode === "cancel") { expect(reply).toEqual([]); expect(renders).toBe(0) }
+    else {
+      expect(reply).toBe("验证码模型准备失败，请重新发送初始化指令重试。")
+      expect(renders).toBe(1)
+      expect(JSON.stringify(received)).not.toContain("private source error")
+    }
+  }
+})

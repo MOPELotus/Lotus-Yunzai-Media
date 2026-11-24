@@ -70,6 +70,49 @@ test("普通点歌翻页失败或空页保留上一页的号位", async () => {
   } finally { await music.dispose() }
 })
 
+test.each(["取消搜索", "取消翻页", "替换翻页", "断开翻页"])("%s会停止本次搜歌，不发迟到失败或旧列表", async scenario => {
+  const lease = new AbortController()
+  const started = Promise.withResolvers()
+  const release = Promise.withResolvers()
+  const replies = []
+  const api = {
+    config: { search_limit: 10 },
+    async search(_platform, keyword, page, { signal }) {
+      if (keyword === "新曲") return { tracks: [additional] }
+      if (page === 2 || scenario === "取消搜索") {
+        started.resolve(signal)
+        await release.promise
+        throw new Error("不应发送的迟到错误")
+      }
+      return { tracks: [song] }
+    },
+  }
+  const music = createMusicCommands({ openMusic: async () => ({ api, defaultPlatform: "qq", timeoutMs: 120_000 }),
+    renderMusicMenu: async () => undefined })
+  const context = { message_type: "group", group_id: 1, user_id: 2, self_id: 3, groupActivitySignal: lease.signal,
+    async reply(value) { replies.push(value); return true } }
+  let pending
+  try {
+    if (scenario === "取消搜索") pending = music.fallback("#qq搜歌旧曲", context)
+    else {
+      expect(await music.fallback("#qq搜歌旧曲", context)).toEqual([])
+      pending = music.fallback("#音乐下一页", context)
+    }
+    const signal = await started.promise
+    expect(signal.aborted).toBe(false)
+    if (scenario === "替换翻页") expect(await music.fallback("#QQ音乐点歌 新曲", context)).toEqual([])
+    else if (scenario === "断开翻页") lease.abort()
+    else expect(await music.fallback("#音乐取消", context)).toBe("已取消本次音乐操作。")
+    expect(signal.aborted).toBe(true)
+    const count = replies.length
+    release.resolve()
+    expect(await pending).toEqual([])
+    expect(replies).toHaveLength(count)
+    if (scenario === "替换翻页") expect(replies.at(-1)).toContain(additional.name)
+    if (scenario.startsWith("取消")) expect(await music.fallback("#听1", context)).toBeUndefined()
+  } finally { release.resolve(); await pending; await music.dispose() }
+})
+
 test.each(["取消指令","会话断开","替换搜索"])("普通点歌遇到 %s 停止借出媒体并清理任务", async scenario => {
   const started = Promise.withResolvers()
   const ready = Promise.withResolvers()

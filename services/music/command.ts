@@ -65,7 +65,8 @@ type SessionBase = { readonly api: MusicService; expires: number }
 type SearchMenu = { retired: boolean; timer?: ReturnType<typeof setTimeout>; recall?: RecallOwnReply }
 type CloudSearch = NonNullable<Awaited<ReturnType<ReturnType<typeof createCloudCommands>["search"]>>>
 type SearchSession = SessionBase & { readonly stage: "search"; readonly platform: string; readonly keyword: string;
-  readonly timeoutMs: number; readonly podcast: boolean; readonly multiple?: true; page: number; tracks?: readonly MusicTrack[];
+  readonly controller: AbortController; readonly timeoutMs: number; readonly podcast: boolean; readonly multiple?: true; page: number;
+  tracks?: readonly MusicTrack[];
   readonly collection?: MusicCollection; binding?: Awaited<ReturnType<typeof readQqCollection>>["binding"];
   exhausted?: boolean; menu?: SearchMenu;
   episodes?: Awaited<ReturnType<MusicService["searchEpisodes"]>>; cloud?: CloudSearch; loading?: boolean }
@@ -221,7 +222,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
   }
 
   function drop(key: string, session: Session) {
-    if (session.stage === "polling") session.controller.abort()
+    if (session.stage === "polling" || session.stage === "search") session.controller.abort()
     if (session.stage === "search") retireMenu(session)
     if (sessions.get(key) === session) sessions.delete(key)
   }
@@ -550,18 +551,21 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
 
   async function showResults(context: Context, key: string, session: SearchSession) {
     session.loading = true
+    const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+    const active = AbortSignal.any([moduleSignal, session.controller.signal, ...(connection ? [connection] : [])])
     try {
+      active.throwIfAborted()
       if (session.collection) {
-        const connection = credentialScope(context)
-        if (connection && context.user_id !== undefined) {
-          await showCollection(context, key, session, session.collection, context.user_id, AbortSignal.any([moduleSignal, connection]))
+        if (credentialScope(context) && context.user_id !== undefined) {
+          await showCollection(context, key, session, session.collection, context.user_id, active)
         }
         return
       }
       const api = session.api
-      const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
-      const active = connection ? AbortSignal.any([moduleSignal, connection]) : moduleSignal
-      if (!session.multiple && session.platform === "netease" && session.page === 1) session.cloud = await cloud.search(context, api, session.keyword)
+      if (!session.multiple && session.platform === "netease" && session.page === 1) {
+        session.cloud = await cloud.search(context, api, session.keyword, active)
+      }
+      active.throwIfAborted()
       const limit = session.multiple ? multiplePageSize : api.config.search_limit
       const start = (session.page - 1) * limit
       const matching = session.cloud?.tracks ?? []
@@ -632,11 +636,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         image = await renderMusicMenu(card, { renderScale: 2 }).catch(() => undefined)
       }
       if (sessions.get(key) === session && !active.aborted) {
-        if (requestedCloud.length && session.cloud) await cloud.assertVisible(context, api, session.cloud.binding)
+        if (requestedCloud.length && session.cloud) await cloud.assertVisible(context, api, session.cloud.binding, active)
+        if (active.aborted || sessions.get(key) !== session) return
         const options = menuReplyOptions(key, session)
         await imageReply(context, image && image.length <= limitBytes ? image : undefined, [message, ...results.map(row =>
           row.number + ". " + [row.name, row.artist, row.source, row.length].filter(Boolean).join(" · "))].join("\n"), options, active)
       }
+    } catch (error) {
+      if (!active.aborted) throw error
     } finally {
       session.loading = false
     }
@@ -656,7 +663,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     if (active.aborted || sessions.get(key) !== session) return
     await verifyQqSelection(session.api, result.binding, active)
     if (!active.aborted && sessions.get(key) === session) {
-      await imageReply(context, image, [title, hint, ...items.map(item => `${item.label}. ${item.value}`)].join("\n"), menuReplyOptions(key, session))
+      await imageReply(context, image, [title, hint, ...items.map(item => `${item.label}. ${item.value}`)].join("\n"), menuReplyOptions(key, session), active)
     }
   }
 
@@ -687,7 +694,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const status = await refreshOwnMusicAccount(api, selection.platform, context.user_id!, active)
         if (!active.aborted) return `${musicNames[selection.platform]}${status.extensions?.refreshed === false ? "登录仍有效。" : "登录已续期。"}`
       } else {
-        const session: SearchSession = { stage: "search", api, platform: "qq", keyword: "", timeoutMs, podcast: false,
+        const session: SearchSession = { stage: "search", api, controller: new AbortController(), platform: "qq", keyword: "", timeoutMs, podcast: false,
           page: selection.page, collection: selection.collection, expires: Date.now() + timeoutMs }
         replace(key, session)
         try { await showResults(context, key, session) }
@@ -961,7 +968,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const sessionTimeout = multiple
           ? (multipleTimeout && multipleTimeout > 0 && multipleTimeout <= 2_147_483_647 ? multipleTimeout : defaultMultipleTimeoutMs)
           : timeoutMs
-        const session: SearchSession = { stage: "search", api, platform, timeoutMs: sessionTimeout, keyword, podcast, page: 1,
+        const session: SearchSession = { stage: "search", api, controller: new AbortController(), platform, timeoutMs: sessionTimeout, keyword, podcast, page: 1,
           multiple, expires: Date.now() + sessionTimeout }
         replace(key, session)
         try { await showResults(context, key, session) }

@@ -85,10 +85,10 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
     }
   }
 
-  async function search(context: Context, api: MusicService, keyword: string) {
+  async function search(context: Context, api: MusicService, keyword: string, querySignal: AbortSignal) {
     const scope = privateScope(context)
     if (!scope || accountBusy?.()) return
-    const active = AbortSignal.any([scope.active, AbortSignal.timeout(5000)])
+    const active = AbortSignal.any([scope.active, querySignal, AbortSignal.timeout(5000)])
     try {
       const binding = await library.verify(api, scope.owner, active)
       const { tracks } = await library.list(api, binding, active)
@@ -97,10 +97,10 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
     } catch { /* Catalog search remains available when the private library is unreachable. */ }
   }
 
-  async function assertVisible(context: Context, api: MusicService, binding: Binding) {
+  async function assertVisible(context: Context, api: MusicService, binding: Binding, querySignal: AbortSignal) {
     const scope = privateScope(context)
     if (!scope || scope.owner !== binding.owner) throw new Error("当前会话无法访问此网易云盘。")
-    await library.assertCurrent(api, binding, scope.active)
+    await library.assertCurrent(api, binding, AbortSignal.any([scope.active, querySignal]))
   }
 
   async function play(context: Context, api: MusicService, expected: Binding, selected: CloudTrack) {

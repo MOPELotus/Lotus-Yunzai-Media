@@ -296,6 +296,7 @@ export class TuneWeaveService {
       signal?.throwIfAborted()
       // Public release files only. curl honors deployment proxy settings on
       // Node versions where fetch does not; account requests never use this.
+      if (!Bun.which("curl")) throw new Error("TuneWeave 官方发布文件下载失败，且未找到 curl，无法使用备用下载方式。请检查网络或安装 curl 后重试。")
       const { stdout } = await runFile("curl", ["--fail", "--location", "--silent", "--show-error", "--retry", "3", "--retry-all-errors", "--connect-timeout", "15", "--max-time", String(Math.ceil(timeoutMs / 1000)), url], {
         encoding: "buffer", maxBuffer: 128 * 1024 * 1024, windowsHide: true, signal,
       }).catch(() => { throw new Error("TuneWeave 官方发布文件下载失败，请检查网络/代理；网络受限时需要可用的 curl。") })

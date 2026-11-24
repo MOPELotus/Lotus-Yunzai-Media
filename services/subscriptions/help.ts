@@ -1,3 +1,4 @@
+import { builtinResourceDirectory } from "../../../../lib/builtin-resources.ts";
 import { join } from "node:path"
 import { loadImage, type Image } from "skia-canvas"
 import { drawInfoText, infoCardColors, measureInfoText, renderInfoCard, type InfoCardOptions } from "@lotus-yunzai/skia/info-card"
@@ -49,7 +50,7 @@ const sections: HelpSection[] = [
   platformSection("微博", "博主", "视频、图文、文章、转发"),
 ]
 
-const assetDirectories = [resolveData("yuki-plugin/resources"), resolveRoot("plugins/yuki-plugin/resources")]
+const assetDirectories = [resolveData("yuki-plugin/resources"), resolveRoot("plugins/yuki-plugin/resources"), builtinResourceDirectory("social/yuki")]
 const width = 788
 
 async function legacyImage(relative: string) {

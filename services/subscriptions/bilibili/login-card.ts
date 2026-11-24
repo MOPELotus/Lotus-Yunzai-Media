@@ -1,18 +1,23 @@
+import { prepareBuiltinFonts, builtinFontFallback } from "../../../../../packages/skia/builtin-fonts.ts";
+import { builtinResourceDirectory } from "../../../../../lib/builtin-resources.ts";
 import { join } from "node:path"
 import QRCode from "qrcode"
 import { FontLibrary } from "skia-canvas"
 import { renderPng } from "@lotus-yunzai/skia"
 import { resolveData, resolveRoot } from "../../../core/path.ts"
 
-let font = "sans-serif"
+let font = builtinFontFallback
 let fontLoaded: Promise<void> | undefined
 
 async function loadFont() {
+  prepareBuiltinFonts();
   for (const file of [resolveData("yuki-plugin/resources/fonts/OPSans.woff2"),
-    resolveRoot(join("plugins", "yuki-plugin", "resources", "fonts", "OPSans.woff2"))]) {
+    resolveRoot(join("plugins", "yuki-plugin", "resources", "fonts", "OPSans.woff2")),
+    join(builtinResourceDirectory("social/yuki"), "fonts/OPSans.woff2"),
+    join(builtinResourceDirectory("core/passport"), "fonts/MiSans-VF.ttf")]) {
     if (await Bun.file(file).exists()) {
       const families = FontLibrary.use("MediaSubscriptionLogin", [file])
-      if (families) font = '"MediaSubscriptionLogin", sans-serif'
+      if (families) font = `"MediaSubscriptionLogin", ${builtinFontFallback}`
       return
     }
   }

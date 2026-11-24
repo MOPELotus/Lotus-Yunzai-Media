@@ -465,6 +465,9 @@ export function normalizeArch(arch: string = process.arch) {
 
 async function extractArchive(spawnImpl: typeof spawn, archive: string, target: string, options: ProcessOptions = {}) {
   const lower = archive.toLowerCase()
+  const command = lower.endsWith(".zip") ? process.platform === "win32" ? "powershell.exe" : "unzip"
+    : /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(lower) ? "tar" : undefined
+  if (command && !Bun.which(command)) throw new Error(`无法解包媒体工具：缺少 ${command}，请安装该工具后重新运行 bun run bootstrap。`)
   if (lower.endsWith(".zip")) {
     if (process.platform === "win32") {
       const command = `Expand-Archive -LiteralPath '${archive.replace(/'/g, "''")}' -DestinationPath '${target.replace(/'/g, "''")}' -Force`

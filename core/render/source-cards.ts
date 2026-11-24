@@ -1,3 +1,6 @@
+import { prepareBuiltinFonts, builtinFontFallback } from "../../../../packages/skia/builtin-fonts.ts";
+import { existsSync } from "node:fs";
+import { builtinResourceDirectory } from "../../../../lib/builtin-resources.ts";
 import path from "node:path"
 import { Canvas, FontLibrary, loadImage, type CanvasRenderingContext2D, type Image, type EngineDetails } from "skia-canvas"
 import { renderPng } from "@lotus-yunzai/skia"
@@ -80,18 +83,20 @@ export function renderMode(configured = process.env.LOTUS_SKIA_MODE): NonNullabl
 // Bilibili and Douyin retain the genshin mysNews layout drawn by Lotus-ReFactor.
 export const mediaNewsColors = { gold: '#d3bc8e', text: '#fff', muted: '#c2c5cb', rule: 'rgba(211,188,142,.35)' } as const
 const { gold: GOLD, text: WHITE, muted: MUTED, rule: RULE } = mediaNewsColors
-const TEXT='"MediaSourceText", MiSans, sans-serif'
+const TEXT=`"MediaSourceText", MiSans, ${builtinFontFallback}`
 let fontsLoaded=false
 const cache=new Map<string, Promise<Image | null>>()
 
 
-const background = path.join(resourcesPath, "miao-theme/bg/bg-hydro.webp")
+const configuredBackground = path.join(resourcesPath, "miao-theme/bg/bg-hydro.webp")
+const background = existsSync(configuredBackground) ? configuredBackground : path.join(builtinResourceDirectory("templates/atlas"), "bg/bg-hydro.webp")
 
 async function init() {
+ prepareBuiltinFonts();
  if(fontsLoaded)return
  for (const [name, candidates] of [
-  ["MediaSourceText", [path.join(resourcesPath,"miao-theme/fonts/HYWH-65W.ttf"),resolveData("atlas/theme/fonts/HYWH-65W.ttf")]],
-  ["MiSans", [path.join(resourcesPath,"fonts/MiSans-VF.ttf"),resolveData("atlas/theme/fonts/MiSans-VF.ttf")]],
+  ["MediaSourceText", [path.join(resourcesPath,"miao-theme/fonts/HYWH-65W.ttf"),resolveData("atlas/theme/fonts/HYWH-65W.ttf"),path.join(builtinResourceDirectory("templates/atlas"),"fonts/HYWH-65W.ttf")]],
+  ["MiSans", [path.join(resourcesPath,"fonts/MiSans-VF.ttf"),resolveData("atlas/theme/fonts/MiSans-VF.ttf"),path.join(builtinResourceDirectory("core/passport"),"fonts/MiSans-VF.ttf")]],
  ] as const) {
   for (const candidate of candidates) {
    if (await Bun.file(candidate).exists()) { FontLibrary.use(name,[candidate]); break }

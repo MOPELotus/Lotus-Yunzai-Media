@@ -35,6 +35,32 @@ test("同类同名媒体任务各占一份目录，释放失败一侧不会删�
   }
 })
 
+test("只能释放本机具有有效旧版标记的直接任务目录", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lotus-media-owners-"))
+  try {
+    const owner = { version: 1, pid: process.pid, host: hostname() }
+    for (const [name, marker] of [
+      ["保留目录", JSON.stringify(owner)],
+      ["task-malformed", "旧文件中的一行说明"],
+      ["task-foreign", JSON.stringify({ ...owner, host: "另一台主机" })],
+    ] as const) {
+      const dir = join(root, name)
+      await mkdir(dir)
+      await writeFile(join(dir, taskMarker), marker)
+      await writeFile(join(dir, "original.mp4"), "keep")
+      await expect(releaseMediaTask(root, dir)).rejects.toThrow()
+      expect(await readFile(join(dir, "original.mp4"), "utf8")).toBe("keep")
+    }
+    const old = join(root, "task-legacy")
+    await mkdir(old)
+    await writeFile(join(old, taskMarker), JSON.stringify(owner))
+    await releaseMediaTask(root, old)
+    expect(await readdir(root)).not.toContain("task-legacy")
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test.skipIf(process.platform !== "linux")("恢复只清理同主机已退出的所有者和子进程组，未知状态继续保留", async () => {
   const root = await mkdtemp(join(tmpdir(), "lotus-media-recovery-"))
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" })
@@ -56,6 +82,7 @@ test.skipIf(process.platform !== "linux")("恢复只清理同主机已退出的�
       write("task-group-live", owner, { state: "running", pid: child.pid }),
       write("task-starting", owner, { state: "starting" }),
       write("task-bad-process", owner, "<broken>"),
+      write("task-unverifiable-process", owner),
       write("task-no-owner", undefined),
       write("task-bad-owner", "<broken>"),
       write("task-foreign", { ...owner, host: "different-host" }),
@@ -63,12 +90,13 @@ test.skipIf(process.platform !== "linux")("恢复只清理同主机已退出的�
       write("task-dead", owner),
       write("keep-not-task", owner),
     ])
-    expect(await recoverMediaTasks(root)).toEqual({ removed: 2, retained: 8 })
+    await symlink(join(root, "missing-process-status"), join(root, "task-unverifiable-process", processMarker), "file")
+    expect(await recoverMediaTasks(root)).toEqual({ removed: 2, retained: 9 })
     process.kill(-child.pid!, "SIGTERM")
     await finished
-    expect(await recoverMediaTasks(root)).toEqual({ removed: 1, retained: 7 })
+    expect(await recoverMediaTasks(root)).toEqual({ removed: 1, retained: 8 })
     expect((await readdir(root)).sort()).toEqual(["keep-not-task", "task-bad-owner", "task-bad-process",
-      "task-foreign", "task-no-owner", "task-owner-live", "task-starting"])
+      "task-foreign", "task-no-owner", "task-owner-live", "task-starting", "task-unverifiable-process"])
   } finally {
     if (child.exitCode === null && child.signalCode === null && child.pid) process.kill(-child.pid, "SIGKILL")
     await finished.catch(() => {})

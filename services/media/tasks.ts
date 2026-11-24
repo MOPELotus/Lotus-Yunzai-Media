@@ -23,6 +23,17 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 const MARKER = ".lotus-media-task.json"
 
+async function readMarker(dir: string, name: string) {
+  const file = path.join(dir, name)
+  const stat = await fs.lstat(file)
+  if (!stat.isFile() || stat.size > 4096) throw new Error("媒体任务标记无效")
+  return record(JSON.parse(await fs.readFile(file, "utf8")))
+}
+
+function hasLocalOwner(marker: Record<string, unknown> | undefined): marker is { pid: number } {
+  return marker?.version === 1 && marker.host === os.hostname() && validPid(marker.pid)
+}
+
 export function isInside(root: string, candidate: string) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate))
   return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
@@ -44,7 +55,8 @@ export async function createMediaTask(root: string) {
 }
 
 export async function releaseMediaTask(root: string, dir: string | undefined) {
-  if (!dir || !isInside(root, dir) || path.dirname(path.resolve(dir)) !== path.resolve(root)) {
+  if (!dir || !isInside(root, dir) || path.dirname(path.resolve(dir)) !== path.resolve(root) ||
+      !path.basename(path.resolve(dir)).startsWith("task-")) {
     throw new Error("拒绝清理不属于当前媒体任务的目录")
   }
   const stat = await fs.lstat(dir).catch(error => {
@@ -53,7 +65,7 @@ export async function releaseMediaTask(root: string, dir: string | undefined) {
   })
   if (!stat) return
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("媒体任务目录无效")
-  await fs.readFile(path.join(dir, MARKER), "utf8")
+  if (!hasLocalOwner(await readMarker(dir, MARKER))) throw new Error("无法核实本机媒体任务标记")
   await fs.rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
 }
 
@@ -77,14 +89,14 @@ export async function recoverMediaTasks(root: string) {
     const dir = path.join(root, entry.name)
     if (!entry.isDirectory() || !entry.name.startsWith("task-")) { result.retained++; continue }
     try {
-      const marker = record(JSON.parse(await fs.readFile(path.join(dir, MARKER), "utf8")))
-      if (marker?.version !== 1 || marker.host !== os.hostname() || !validPid(marker.pid)) {
+      const marker = await readMarker(dir, MARKER)
+      if (!hasLocalOwner(marker)) {
         result.retained++; continue
       }
       const alive = processIsLive(marker.pid)
       let childAlive = false
       try {
-        const child = record(JSON.parse(await fs.readFile(path.join(dir, ".lotus-media-process.json"), "utf8")))
+        const child = await readMarker(dir, ".lotus-media-process.json")
         childAlive = child?.state !== "running" || !validPid(child.pid) || processIsLive(-child.pid)
       } catch (error) {
         if (!absent(error)) childAlive = true

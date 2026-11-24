@@ -367,6 +367,36 @@ test("取消与串号确认保留原音乐身份和凭据", async () => {
   expect((await readMusicAccounts(accountsFile)).qq).toEqual(current)
 })
 
+test("扫码确认的登录状态、账号标识和凭据平台须可核实", async () => {
+  const accountsFile = join(await directory(), "music.yaml")
+  const current = { alias: "lotus-music-qq", uid: "42", credential: "twc1_old" }
+  const login = { platform: "qq", alias: current.alias, key: "synthetic", owner: 42 }
+  const profile = { platform: login.platform, account: login.alias, authenticated: true, user_id: "43" }
+  let confirmation = { ...profile, authenticated: "false" }
+  let recovered = { ...profile, user_id: {} }
+  let credential = { platform: "qq", value: "twc1_new" }
+  const service = new MusicService({ accountsFile, tuneweave: { request: async (route, options) => {
+    if (route === "/v1/auth/qr/synthetic") return { state: "confirmed", profile: confirmation, caller_credential: credential }
+    expect(route).toBe("/v1/account?platform=qq&account=lotus-music-qq")
+    expect(options.redirect).toBe("error")
+    return recovered
+  } } })
+  await saveMusicAccount("qq", current, { file: accountsFile })
+  await expect(service.waitLogin(login)).rejects.toThrow("身份未核验")
+  expect((await readMusicAccounts(accountsFile)).qq).toEqual(current)
+
+  confirmation = profile
+  credential = { platform: "netease", value: "twc1_wrong_platform" }
+  await expect(service.waitLogin(login)).rejects.toThrow("登录凭据平台不匹配")
+  expect((await readMusicAccounts(accountsFile)).qq).toEqual(current)
+
+  confirmation = { ...profile, user_id: undefined }
+  recovered = profile
+  credential = { platform: "qq", value: "twc1_new" }
+  await expect(service.waitLogin(login)).resolves.toEqual({ ok: true })
+  expect((await readMusicAccounts(accountsFile)).qq).toMatchObject({ uid: "43", credential: "twc1_new" })
+})
+
 test("点歌扫码保留网易云五分钟等候和其他平台三分钟等候", async () => {
   const now = spyOn(Date, "now")
   const calls = []

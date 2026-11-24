@@ -89,7 +89,7 @@ interface MusicServiceOptions {
 type Capability = { platform: string; registered?: boolean; capabilities?: string[] }
 type SearchItem = { type: string; data: MusicTrack }
 type QrCode = { transaction_id?: string; url?: string; image_data_url?: string }
-type QrStatus = { state: string; profile?: TuneWeaveQrProfile; caller_credential?: { value?: string } }
+type QrStatus = { state: string; profile?: TuneWeaveQrProfile; caller_credential?: { platform?: string; value?: string } }
 type ProbeResult = { format?: { duration?: string | number }; streams?: { codec_type?: string }[] }
 type DownloadRequest = { headers?: Record<string, string>; signal?: AbortSignal }
 
@@ -484,10 +484,16 @@ export class MusicService {
       if (signal?.aborted) throw new Error("扫码登录已取消")
       if (result.state === "confirmed") {
         const profile = await resolveQrProfile(this.tuneweave, { platform: login.platform, alias: login.alias, profile: result.profile, signal })
+        const caller = result.caller_credential
+        if (caller?.platform != null && caller.platform !== login.platform) throw new Error("登录凭据平台不匹配，请重新登录")
+        if (caller != null && (typeof caller.value !== "string" || !/^twc1_[A-Za-z0-9_-]+$/u.test(caller.value))) {
+          throw new Error("登录凭据格式无效，请重新登录")
+        }
+        const nickname = typeof profile.nickname === "string" ? profile.nickname : ""
         if (login.platform === "netease") await this.partner.saveAccount({
-          uid: profile.user_id, nickname: profile.nickname, qq: login.owner, tuneweave_account: login.alias,
+          uid: profile.user_id, nickname, qq: login.owner, tuneweave_account: login.alias,
         }, { signal })
-        await saveMusicAccount(login.platform, { alias: login.alias, uid: profile.user_id, nickname: profile.nickname || "", credential: result.caller_credential?.value || "",
+        await saveMusicAccount(login.platform, { alias: login.alias, uid: profile.user_id, nickname, credential: caller?.value ?? "",
           owner: login.owner }, { file: this.accountsFile, signal })
         return { ok: true }
       }

@@ -28,10 +28,16 @@ export async function resolveQrProfile(tuneweave: QrProfileRequest, { platform, 
     if (signal?.aborted) throw new Error("扫码登录已取消")
   }
   const checkBinding = (value: TuneWeaveQrProfile | undefined | null) => {
-    if (value?.platform && value.platform !== platform || value?.account && value.account !== alias) throw new Error("平台登录账号不匹配，请重新登录")
+    if ((value?.platform != null && value.platform !== platform) || (value?.account != null && value.account !== alias)) {
+      throw new Error("平台登录账号不匹配，请重新登录")
+    }
   }
-  const verified = (value: TuneWeaveQrProfile | undefined | null): value is VerifiedQrProfile =>
-    Boolean(value?.authenticated && value.user_id)
+  const verified = (value: TuneWeaveQrProfile | undefined | null): value is VerifiedQrProfile => {
+    const uid = value?.user_id
+    return value?.authenticated === true && (typeof uid === "string"
+      ? uid.length > 0 && uid.trim() === uid && !/[\u0000-\u001f\u007f]/u.test(uid)
+      : typeof uid === "number" && Number.isSafeInteger(uid) && uid > 0)
+  }
   checkCancelled()
   checkBinding(profile)
   if (!verified(profile)) {

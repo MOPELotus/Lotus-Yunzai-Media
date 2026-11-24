@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises"
+import { ReleaseHttpError, retryReleaseRequest, releaseFailure } from "../release-network.ts"
 import fs from "node:fs/promises"
 import fsSync from "node:fs"
 import path from "node:path"
@@ -253,7 +255,7 @@ export class ToolInstallerService {
       if (typeof this.fetch !== "function") throw new Error("fetch is unavailable")
       if (name === "ffmpeg") await removeSharedFfmpegArtifacts(toolsDir)
       await emitProgress(onProgress, `工具链：查询 ${tool.repo} 最新版本`)
-      const release = await this.fetchLatestRelease(tool.repo, normalized.github_api, null, signal)
+      const release = await this.fetchLatestRelease(tool.repo, normalized.github_api, null, signal, onTaskProgress)
       const asset = pickReleaseAsset(name, release.assets, {
         platform: this.platform,
         arch: this.arch,
@@ -317,12 +319,16 @@ export class ToolInstallerService {
           lastError = error
           await cleanupBrokenInstallArtifacts(archive, extractDir)
           signal?.throwIfAborted()
+          if (error instanceof ReleaseHttpError && ![408, 425, 429, 500, 502, 503, 504].includes(error.status)) {
+            throw new Error(`FFmpeg 发布文件下载失败（${new URL(asset.browser_download_url).host}）：${error.message}`, { cause: error })
+          }
           if (attempt < attempts) {
-            await emitProgress(onProgress, `工具链：${name} 安装包异常，已清理并准备重下：${errorMessage(error)}`)
+            await emitProgress(onProgress, `工具链：${name} 下载或安装失败（${new URL(asset.browser_download_url).host}），已清理并准备重试 ${attempt + 1}/${attempts}：${releaseFailure(error)}`)
+            await sleep(500 * attempt, undefined, { signal })
           }
         }
       }
-      throw new Error(`${lastError ? errorMessage(lastError) : `${tool.command} install failed`}；已自动重试 ${attempts} 次`)
+      throw new Error(`FFmpeg 发布文件下载或安装失败（${new URL(asset.browser_download_url).host}，已尝试 ${attempts} 次）：${releaseFailure(lastError)}`, { cause: lastError })
     } catch (error) {
       signal?.throwIfAborted()
       // Only retain the exact healthy payload checked before attempting update.
@@ -334,31 +340,38 @@ export class ToolInstallerService {
     }
   }
 
-  async fetchLatestRelease(repo: string, api = "https://api.github.com", tag: string | null = null, signal?: AbortSignal) {
+  async fetchLatestRelease(repo: string, api = "https://api.github.com", tag: string | null = null, signal?: AbortSignal, onTaskProgress = this.onTaskProgress) {
     const base = String(api || "https://api.github.com").replace(/\/+$/, "")
-    const response = await this.fetch(`${base}/repos/${repo}/releases/${tag ? `tags/${encodeURIComponent(tag)}` : "latest"}`, {
-      signal: deadline(30000, signal),
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "Lotus-Yunzai",
-      },
-    })
-    if (!response.ok) throw new Error(`GitHub release request failed: HTTP ${response.status}`)
-    const release: unknown = await response.json()
-    const assets: unknown[] = isRecord(release) && Array.isArray(release.assets) ? release.assets : []
-    return { assets: assets.filter(isReleaseAsset) }
+    const url = `${base}/repos/${repo}/releases/${tag ? `tags/${encodeURIComponent(tag)}` : "latest"}`
+    return retryReleaseRequest(async () => {
+      const response = await this.fetch(url, {
+        signal: deadline(30000, signal),
+        headers: { Accept: "application/vnd.github+json", "User-Agent": "Lotus-Yunzai" },
+      })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new ReleaseHttpError(response.status)
+      }
+      const release: unknown = await response.json()
+      const assets: unknown[] = isRecord(release) && Array.isArray(release.assets) ? release.assets : []
+      return { assets: assets.filter(isReleaseAsset) }
+    }, { label: `查询 FFmpeg 发布版本 ${repo}`, url, signal, onTaskProgress })
   }
 
   async downloadAsset(url: string, target: string, { timeoutMs = 300000, signal, onTaskProgress }: ProcessOptions = {}) {
     signal?.throwIfAborted()
     const temp = `${target}.part-${process.pid}-${Date.now()}`
+    emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download-request", message: `正在连接 FFmpeg 发布文件（${new URL(url).host}）` })
     const response = await this.fetch(url, {
       signal: deadline(timeoutMs, signal),
       headers: {
         "User-Agent": "Lotus-Yunzai",
       },
     })
-    if (!response.ok) throw new Error(`download failed: HTTP ${response.status}`)
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined)
+      throw new ReleaseHttpError(response.status)
+    }
     const total = responseBytes(response)
     let completed = 0
     const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download", message: "正在下载 FFmpeg", completed, total, unit: "bytes" })

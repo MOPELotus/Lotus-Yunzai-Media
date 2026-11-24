@@ -29,9 +29,10 @@ test("FFmpeg 流式下载报告真实字节，未知长度不编造总量，观�
         return Promise.reject(new Error("rejected observer"))
       } })
       expect(await readFile(file)).toEqual(Buffer.from(bytes))
-      expect(events[0]?.completed).toBe(0)
+      const transfers = events.filter(event => event.stage === "ffmpeg-download")
+      expect(transfers[0]?.completed).toBe(0)
       expect(events.at(-1)).toMatchObject({ stage: "ffmpeg-download", completed: bytes.length, unit: "bytes" })
-      expect(events.every(event => event.total === (known ? bytes.length : undefined))).toBe(true)
+      expect(transfers.every(event => event.total === (known ? bytes.length : undefined))).toBe(true)
     }
     expect(responseBytes(new Response("fixture", { headers: { "content-length": "3", "content-encoding": "gzip" } }))).toBeUndefined()
   } finally { await rm(root, { recursive: true, force: true }) }

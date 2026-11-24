@@ -1,3 +1,4 @@
+import { ReleaseHttpError, retryReleaseRequest, temporaryReleaseFailure, releaseFailure } from "../release-network.ts"
 import { emitTaskProgress, responseBytes, type TaskProgressHandler } from "../progress.ts"
 import fs from "node:fs/promises"
 import { createWriteStream, createReadStream } from "node:fs"
@@ -287,19 +288,30 @@ export class TuneWeaveService {
     return status
   }
 
-  async publicDownload(url: string, timeoutMs = 60000, signal?: AbortSignal) {
+  async publicDownload(url: string, timeoutMs = 60000, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler, attempts = 3) {
     signal?.throwIfAborted()
-    const deadline = AbortSignal.timeout(timeoutMs)
+    const label = url === TUNEWEAVE_MANIFEST_URL ? "查询 TuneWeave 发布版本"
+      : url.endsWith(".sha256") ? "获取 TuneWeave 校验文件" : "获取 TuneWeave 发布文件"
     try {
-      return await this.fetch(url, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline })
-    } catch {
+      return await retryReleaseRequest(async () => {
+        const deadline = AbortSignal.timeout(timeoutMs)
+        const response = await this.fetch(url, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline })
+        if (!response.ok) { await response.body?.cancel().catch(() => undefined); throw new ReleaseHttpError(response.status) }
+        return response
+      }, { label, url, signal, onTaskProgress, attempts })
+    } catch (error) {
       signal?.throwIfAborted()
-      // Public release files only. curl honors deployment proxy settings on
-      // Node versions where fetch does not; account requests never use this.
-      if (!Bun.which("curl")) throw new Error("TuneWeave 官方发布文件下载失败，且未找到 curl，无法使用备用下载方式。请检查网络或安装 curl 后重试。")
-      const { stdout } = await runFile("curl", ["--fail", "--location", "--silent", "--show-error", "--retry", "3", "--retry-all-errors", "--connect-timeout", "15", "--max-time", String(Math.ceil(timeoutMs / 1000)), url], {
+      if (!temporaryReleaseFailure(error)) throw error
+      // Public release files only. Respect deployment proxy settings in both transports.
+      if (!Bun.which("curl")) throw error
+      const host = new URL(url).host
+      emitTaskProgress(onTaskProgress, { stage: "tuneweave-download-fallback", message: `${label}（${host}）网络重试未恢复，正在尝试 curl 备用下载` })
+      const { stdout } = await runFile("curl", ["--fail", "--location", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", String(Math.ceil(timeoutMs / 1000)), url], {
         encoding: "buffer", maxBuffer: 128 * 1024 * 1024, windowsHide: true, signal,
-      }).catch(() => { throw new Error("TuneWeave 官方发布文件下载失败，请检查网络/代理；网络受限时需要可用的 curl。") })
+      }).catch((fallback: unknown) => {
+        signal?.throwIfAborted()
+        throw new Error(`${label}失败（${host}）：${releaseFailure(error)}；curl 备用下载也未成功，请检查网络/代理。`, { cause: fallback })
+      })
       return new Response(stdout)
     }
   }
@@ -341,7 +353,7 @@ export class TuneWeaveService {
         await this.requireStoppedRecord()
       }
       try {
-        const manifest = await this.releaseManifest(signal)
+        const manifest = await this.releaseManifest(signal, onTaskProgress)
         if (status.reachable) {
           const comparison = compareTuneWeaveVersions(status.version, manifest.version)
           const intact = comparison > 0 || comparison === 0 && await this.verifyInstalled(manifest, signal, onTaskProgress)
@@ -389,8 +401,8 @@ export class TuneWeaveService {
     })
   }
 
-  async releaseManifest(signal?: AbortSignal) {
-    const response = await this.publicDownload(TUNEWEAVE_MANIFEST_URL, undefined, signal)
+  async releaseManifest(signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
+    const response = await this.publicDownload(TUNEWEAVE_MANIFEST_URL, undefined, signal, onTaskProgress)
     if (!response.ok) throw new Error(`TuneWeave 版本清单下载失败：HTTP ${response.status}`)
     const manifest: TuneWeaveManifest = await response.json()
     requireCompatibleManifest(manifest)
@@ -398,9 +410,9 @@ export class TuneWeaveService {
     return manifest
   }
 
-  async releaseChecksum(manifest: TuneWeaveManifest, signal?: AbortSignal) {
+  async releaseChecksum(manifest: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
-    const response = await this.publicDownload(artifact.verification.checksum_url, undefined, signal)
+    const response = await this.publicDownload(artifact.verification.checksum_url, undefined, signal, onTaskProgress)
     if (!response.ok) throw new Error("TuneWeave 校验文件下载失败")
     const checksum = (await response.text()).trim().split(/\s+/)[0]?.toLowerCase() || ""
     if (!/^[a-f0-9]{64}$/.test(checksum)) throw new Error("TuneWeave 校验文件无效")
@@ -409,7 +421,7 @@ export class TuneWeaveService {
 
   async verifyInstalled(manifest: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
     try { await fs.access(this.executable) } catch (error) { if (errorCode(error) === "ENOENT") return false; throw error }
-    const expected = await this.releaseChecksum(manifest, signal), hash = crypto.createHash("sha256")
+    const expected = await this.releaseChecksum(manifest, signal, onTaskProgress), hash = crypto.createHash("sha256")
     const total = (await fs.stat(this.executable)).size
     let completed = 0
     const report = () => emitTaskProgress(onTaskProgress, { stage: "tuneweave-verify", message: "正在校验 TuneWeave 本地文件", completed, total, unit: "bytes" })
@@ -420,16 +432,26 @@ export class TuneWeaveService {
 
   async downloadRelease(manifest?: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler): Promise<TuneWeaveRelease> {
     signal?.throwIfAborted()
+    manifest ||= await this.releaseManifest(signal, onTaskProgress)
+    requireCompatibleManifest(manifest)
+    const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
+    const selected = manifest
+    return retryReleaseRequest(() => this.downloadReleaseOnce(selected, signal, onTaskProgress), {
+      label: "下载并校验 TuneWeave 发布文件", url: artifact.download_url, signal, onTaskProgress,
+    })
+  }
+
+  private async downloadReleaseOnce(manifest: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler): Promise<TuneWeaveRelease> {
+    signal?.throwIfAborted()
     emitTaskProgress(onTaskProgress, { stage: "tuneweave-release", message: "正在获取 TuneWeave 发布文件与校验信息" })
-    if (manifest) requireCompatibleManifest(manifest)
-    else manifest = await this.releaseManifest(signal)
+    requireCompatibleManifest(manifest)
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
     await fs.mkdir(path.dirname(this.executable), { recursive: true })
     const file = `${this.executable}.download-${crypto.randomUUID()}`
     try {
       const [download, checksumResponse] = await Promise.all([
-        this.publicDownload(artifact.download_url, 180000, signal),
-        this.publicDownload(artifact.verification.checksum_url, undefined, signal),
+        this.publicDownload(artifact.download_url, 180000, signal, onTaskProgress, 1),
+        this.publicDownload(artifact.verification.checksum_url, undefined, signal, onTaskProgress, 1),
       ])
       if (!download.ok || !checksumResponse.ok || !download.body) throw new Error("TuneWeave 下载失败")
       const checksum = (await checksumResponse.text()).trim().split(/\s+/)[0]?.toLowerCase() || ""

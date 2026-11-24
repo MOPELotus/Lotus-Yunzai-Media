@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDouyinCommands } from "../services/douyin/command.ts"
-import { requestText } from "../services/douyin/http.ts"
+import { DouyinError, requestText } from "../services/douyin/http.ts"
 import { extractDouyinTarget, resolveDouyinShare, targetFromUrl } from "../services/douyin/links.ts"
 import { normalizeDouyinWork } from "../services/douyin/model.ts"
 import { DouyinService } from "../services/douyin/service.ts"
@@ -189,4 +189,97 @@ test("撤销一个抖音消息等待时保留同时使用匿名会话的另一�
   visitor.resolve("fixture")
   await expect(current).resolves.toMatchObject({ id:other })
   expect(asked).toEqual([other])
+})
+
+test("刷新确认不可见、变更或时长超限时停止旧图组，清理此前已下载的文件", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-changed-work-"))
+  const parts = [1, 2, 3].map(index => ({ uri: "public/photo-" + index, url_list: [cover + "?part=" + index] }))
+  const work = normalizeDouyinWork({ aweme_id: id, desc: "普通图组", images: parts })
+  const scenarios = [
+    { code: "unavailable", failure: new DouyinError("unavailable", "该作品已不可见") },
+    { code: "media_changed", fresh: normalizeDouyinWork({ aweme_id: other, images: parts }) },
+    { code: "media_changed", fresh: normalizeDouyinWork({ aweme_id: id, images: parts.slice(0, 2) }) },
+    { code: "media_changed", fresh: normalizeDouyinWork({ aweme_id: id, images: [parts[1], parts[0], parts[2]] }) },
+    { code: "duration_limit", fresh: normalizeDouyinWork({ aweme_id: id, images: parts, duration: 60_000 }) },
+  ]
+  try {
+    for (const scenario of scenarios) {
+      const requested = []
+      const service = new DouyinService({ tasksDir: directory, async fetch(url) {
+        const part = new URL(url).searchParams.get("part")
+        requested.push(part)
+        return part === "1" ? new Response(png) : new Response(null, { status: 403 })
+      } })
+      service.getInfo = async (url, { deadline }) => {
+        expect(url).toBe(work.url)
+        expect(deadline).toBeGreaterThan(Date.now())
+        requested.push("刷新")
+        if (scenario.failure) throw scenario.failure
+        return scenario.fresh
+      }
+      await expect(service.download(work, { multi_page_policy: "all", duration_limit_seconds: 30 }))
+        .rejects.toMatchObject({ code: scenario.code })
+      expect(requested).toEqual(["1", "2", "刷新"])
+      expect(await readdir(directory)).toEqual([])
+    }
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("混合图组的首项、逐项和打包顺序固定，动片下载失败可保留同项静态图", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-still-fallback-"))
+  const moving = "https://fixture.douyincdn.com/motion.mp4"
+  const work = normalizeDouyinWork({ aweme_id: id, desc: "混合图组", images: [
+    { clip_type: 4, url_list: [cover + "?part=1"], video: { play_addr_h264: { url_list: [moving] } } },
+    { url_list: [cover + "?part=2"] },
+    { url_list: [cover + "?part=3"] },
+  ] })
+  let requests = [], packed = []
+  const service = new DouyinService({ tasksDir: directory, async fetch(url) {
+    requests.push(url)
+    return url === moving ? new Response(null, { status: 404 }) : new Response(png)
+  }, async pack(files, output) {
+    packed = files.map(file => file.split("/").at(-1))
+    await Bun.write(output, "fixture archive")
+  } })
+  service.getInfo = async () => { requests.push("刷新"); return work }
+  try {
+    for (const mode of ["first", "all", "zip"]) {
+      requests = []; packed = []
+      const result = await service.download(work, { multi_page_policy: mode })
+      try {
+        expect(result).toMatchObject({ ok: true, partial: true, failedItems: [{ index: 1, kind: "video" }] })
+        expect(result.warnings).toContain("第 1 项视频未取得，已保留静态图")
+        expect(result.artifacts.map(({ kind, index }) => [kind, index]))
+          .toEqual(mode === "first" ? [["image", 1]] : [["image", 1], ["image", 2], ["image", 3]])
+        expect(requests).toEqual([moving, "刷新", moving, cover + "?part=1",
+          ...(mode === "first" ? [] : [cover + "?part=2", cover + "?part=3"])])
+        if (mode === "zip") {
+          expect(packed).toEqual(["001-image.png", "002-image.png", "003-image.png", "下载缺项.txt"])
+          expect(result.fileNames[result.files[0]]).toBe("混合图组-" + id + ".zip")
+        } else expect(packed).toEqual([])
+      } finally { await service.releaseTask(result) }
+    }
+    expect(await readdir(directory)).toEqual([])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("同作品、同媒体编号可一次刷新过期地址，保持原图项顺序", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-refresh-link-"))
+  const work = prefix => normalizeDouyinWork({ aweme_id: id, images: [1, 2].map(index => ({
+    uri: "public/photo-" + index, url_list: [cover + "?" + prefix + index],
+  })) })
+  const requests = []
+  const service = new DouyinService({ tasksDir: directory, async fetch(url) {
+    const link = new URL(url)
+    requests.push(link.search)
+    return link.search.startsWith("?old") ? new Response(null, { status: 403 }) : new Response(png)
+  } })
+  service.getInfo = async () => { requests.push("刷新"); return work("new") }
+  try {
+    const result = await service.download(work("old"), { multi_page_policy: "all" })
+    expect(result).toMatchObject({ ok: true, partial: false, artifacts: [{ index: 1, kind: "image" }, { index: 2, kind: "image" }] })
+    expect(requests).toEqual(["?old1", "刷新", "?new1", "?old2", "?new2"])
+    await service.releaseTask(result)
+    expect(await readdir(directory)).toEqual([])
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })

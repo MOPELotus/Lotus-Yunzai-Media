@@ -21,6 +21,7 @@ interface MediaItem {
   type: "image" | "video" | "live_photo"
   urls: string[]
   sources: MediaSource[]
+  assetId?: string
   width?: number
   height?: number
   caption?: string
@@ -201,13 +202,15 @@ export function videoSources(video: WireVideo = {}): MediaSource[] {
 
 export function selectVideoSources(sources: MediaSource[], config: { quality?: string; video_size_limit_mb?: number } = {}) {
   const sizes: Record<string, number> = { "4k": 2160, "2160p": 2160, "2k": 1440, "1440p": 1440, "1080p": 1080, "720p": 720, "540p": 540, "360p": 360 }
-  const preferred = config.quality || "adapt"
+  const preferred = (config.quality || "adapt").toLowerCase()
+  const rank = (quality?: string) => sizes[quality?.toLowerCase() ?? ""] || 0
   const candidates = sources.filter(source => !source.format || source.format.toLowerCase() === "mp4")
-  const ordered = [...candidates].sort((a, b) => (sizes[b.quality ?? ""] || 0) - (sizes[a.quality ?? ""] || 0)
+  const ordered = [...candidates].sort((a, b) => rank(b.quality) - rank(a.quality)
     || Number(b.codec === "h264") - Number(a.codec === "h264") || (b.bitrate || 0) - (a.bitrate || 0))
   if (preferred !== "adapt") {
-    const exact = ordered.filter(source => source.quality === preferred)
-    return [...exact, ...ordered.filter(source => source.quality !== preferred)]
+    const target = rank(preferred)
+    const exact = (source: MediaSource) => target ? rank(source.quality) === target : source.quality?.toLowerCase() === preferred
+    return [...ordered.filter(exact), ...ordered.filter(source => !exact(source))]
   }
   const limit = Number(config.video_size_limit_mb || 100) * 1024 * 1024
   const fits = ordered.filter(source => source.sizeBytes && source.sizeBytes <= limit)
@@ -275,7 +278,9 @@ export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expec
     const type = image.clip_type === 4 && motion.length ? "video" : motion.length || image.clip_type === 5 ? "live_photo" : "image"
     if (!urls.length && !motion.length) warnings.push(`第 ${index + 1} 项缺少媒体地址`)
     if ((type === "live_photo" || image.clip_type === 4) && !motion.length) warnings.push(`第 ${index + 1} 项动态资源缺失，保留静态图`)
-    return { index: index + 1, type, urls, sources: motion, width: positive(image.width), height: positive(image.height) }
+    const assetId = typeof image.uri === "string" && /^[a-zA-Z0-9_/.~-]{1,240}$/u.test(image.uri) ? image.uri : undefined
+    return { index: index + 1, type, urls, sources: motion, ...(assetId ? { assetId } : {}),
+      width: positive(image.width), height: positive(image.height) }
   })
   const article = isArticle ? articleBlocks(articleInfo || {}, warnings) : undefined
   const sources = isArticle || images.length ? [] : videoSources(detail.video || {})

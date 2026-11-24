@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { resolveData } from "../../core/path.ts"
 import { createMediaTask, releaseMediaTask, recoverMediaTasks } from "../media/tasks.ts"
-import { packMediaFiles, safeMediaName, mediaLimitFailure } from "../media/files.ts"
+import { packMediaFiles, safeMediaName, mediaFailureMessage, mediaLimitFailure } from "../media/files.ts"
 import { downloadMedia } from "../media/download.ts"
 import { prepareVideo } from "../media/video.ts"
 import { extractDouyinTarget, resolveDouyinShare, resolveDouyinTarget, type DouyinLiveTarget, type DouyinTarget } from "./links.ts"
@@ -181,6 +181,22 @@ export class DouyinService {
       if (remaining <= 0) throw new Error("作品下载超时")
       return remaining
     }
+    const refreshWork = async () => {
+      remainingTime()
+      const fresh = await this.getInfo(info.url, { deadline, signal })
+      const imageGroup = (work: DouyinWork) => work.type === "gallery" || work.type === "live_photo"
+      if (fresh.id !== info.id || fresh.media.length !== info.media.length ||
+          (fresh.type !== info.type && !(imageGroup(fresh) && imageGroup(info))) ||
+          fresh.media.some(({ assetId, index }, position) => {
+            const original = info.media[position]
+            return index !== original?.index || Boolean(assetId && original.assetId && assetId !== original.assetId)
+          })) {
+        throw new DouyinError("media_changed", "抖音作品的媒体分项已变化，请重新发送作品链接。")
+      }
+      const limit = mediaLimitFailure(fresh, download)
+      if (limit) throw new DouyinError(limit.reason, mediaFailureMessage(limit))
+      return fresh
+    }
     const downloadItem = async (candidates: DownloadCandidate[], base: string, kind: MediaKind) => {
       let lastError
       for (const candidate of candidates) {
@@ -238,21 +254,28 @@ export class DouyinService {
           try {
             let result
             try { result = await downloadItem(candidates, `${prefix}-${suffix}`, kind) } catch (firstError) {
-              if (!refreshed) { remainingTime(); refreshed = this.getInfo(info.url, { deadline, signal }) }
-              const fresh = await refreshed
+              const fresh = await (refreshed ??= refreshWork())
               signal?.throwIfAborted()
               const replacement = fresh.media.find(entry => entry.index === item.index)
               if (!replacement) throw firstError
               result = await downloadItem(kind === "image" ? [{ urls: replacement.urls }] : selectVideoSources(replacement.sources, download), `${prefix}-${suffix}`, kind)
             }
             files.push(result.file); artifacts.push({ ...result, index: item.index })
+            return true
           } catch (error) {
             signal?.throwIfAborted()
-            failedItems.push({ index: item.index, kind, message: (error as Error).message })
+            if (error instanceof DouyinError && ["unavailable", "duration_limit", "media_changed"].includes(error.code)) throw error
+            failedItems.push({ index: item.index, kind, message: error instanceof Error ? error.message : "未取得可用媒体" })
+            return false
           }
         }
         if (item.type === "image" || item.type === "live_photo") await processPart("image", [{ urls: item.urls }], "image")
-        if (["video", "live_photo"].includes(item.type)) await processPart("video", selectVideoSources(item.sources, download), "video")
+        if (item.type === "video" || item.type === "live_photo") {
+          const obtained = await processPart("video", selectVideoSources(item.sources, download), "video")
+          if (!obtained && item.type === "video" && item.urls.length && await processPart("image", [{ urls: item.urls }], "image")) {
+            warnings.push(`第 ${item.index} 项视频未取得，已保留静态图`)
+          }
+        }
       }
       if (!files.length) throw new Error(failedItems[0]?.message || "没有取得可发送的作品内容")
       if (failedItems.length) warnings.push(`部分媒体未取得：${failedItems.map(item => `第${item.index}项${item.kind === "video" ? "视频" : "图片"}`).join("、")}`)

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { fetchWebDetail } from "../services/douyin/api.ts"
-import { normalizeDouyinWork } from "../services/douyin/model.ts"
+import { normalizeDouyinWork, selectVideoSources } from "../services/douyin/model.ts"
 import { detailFromRouter } from "../services/douyin/ssr.ts"
 import { DouyinService } from "../services/douyin/service.ts"
 
@@ -73,4 +73,40 @@ test("抖音文章保留实际可读正文及图片，空文章不会生成只�
     .toThrow("缺少可用的文章正文")
   expect(normalizeDouyinWork({ aweme_id: id, article_info: [], video: { play_addr: { url_list: [clip] } } }).type)
     .toBe("video")
+})
+
+test("显式清晰度把 2k 与 1440p、4k 与 2160p 视为同档，并保留同档编码优先级", () => {
+  const source = (quality, codec, format = "mp4") => ({ urls: [clip + "?tag=" + quality], quality, codec, format })
+  const hdr = source("2160p", "h265"), four = source("4k", "h264")
+  const two = source("2k", "h265"), hd = source("1440p", "h264"), excluded = source("1440p", "h264", "webm")
+  const sources = [hdr, four, two, hd, excluded]
+  expect(selectVideoSources(sources, { quality: "2k" })).toEqual([hd, two, four, hdr])
+  expect(selectVideoSources(sources, { quality: "1440p" })).toEqual([hd, two, four, hdr])
+  expect(selectVideoSources(sources, { quality: "2160p" })).toEqual([four, hdr, hd, two])
+})
+
+test("普通作品详情故障时保留同一公开分享页预览，双源失败有明确回执", async () => {
+  const attempted = []
+  let hasPublicPage = true
+  const service = new DouyinService({ visitor: { get: async () => "" }, sign: () => "fixture",
+    async fetch(input) {
+      const { pathname } = new URL(input)
+      attempted.push(pathname)
+      if (pathname === "/aweme/v1/web/aweme/detail/") return new Response(null, { status: 503 })
+      expect(pathname).toBe("/share/video/" + id + "/")
+      if (!hasPublicPage) return new Response("<html>empty</html>")
+      return new Response(`<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+        entry: { itemId: id, videoInfoRes: { item_list: [{ aweme_id: id, desc: "同作品公开预览", images: [{ url_list: [image] }] }] } },
+      } })}</script>`)
+    },
+  })
+  const check = () => service.getInfo({ id })
+  await expect(check()).resolves.toMatchObject({
+    id, source: "ssr", title: "同作品公开预览", warnings: expect.arrayContaining([expect.stringContaining("分享页面")]),
+  })
+  hasPublicPage = false
+  await expect(check()).rejects.toMatchObject({ code: "parse_failed" })
+  expect(attempted).toEqual(Array.from({ length: 2 }, () => [
+    "/aweme/v1/web/aweme/detail/", "/aweme/v1/web/aweme/detail/", "/share/video/" + id + "/",
+  ]).flat())
 })

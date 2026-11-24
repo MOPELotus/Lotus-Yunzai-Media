@@ -191,7 +191,7 @@ function sourceFromAddress(address: WireAddress | undefined, entry: WireVariant 
 
 export function videoSources(video: WireVideo = {}): MediaSource[] {
   const variants = Array.isArray(video.bit_rate) ? video.bit_rate : []
-  const sources = variants.filter(isObject).map(entry => sourceFromAddress(entry.play_addr, entry)).filter((source): source is MediaSource => Boolean(source))
+  const sources = variants.filter((entry): entry is WireVariant => isObject(entry)).map(entry => sourceFromAddress(entry.play_addr, entry)).filter((source): source is MediaSource => Boolean(source))
   for (const [key, h264] of [["play_addr_h264", true], ["play_addr", false], ["download_addr", false]] as const) {
     const source = sourceFromAddress(video[key], { h264 })
     if (source && !sources.some(item => item.urls.join("\n") === source.urls.join("\n"))) sources.push(source)

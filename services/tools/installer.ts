@@ -3,6 +3,7 @@ import fsSync from "node:fs"
 import path from "node:path"
 import { createHash, randomUUID } from "node:crypto"
 import { spawn } from "node:child_process"
+import { emitTaskProgress, responseBytes, type TaskProgressHandler } from "../progress.ts"
 import { Readable } from "node:stream"
 import type { ReadableStream } from "node:stream/web"
 import { pipeline } from "node:stream/promises"
@@ -31,6 +32,7 @@ export interface ToolsConfig {
 interface ProgressOptions {
   signal?: AbortSignal
   onProgress?: ProgressHandler
+  onTaskProgress?: TaskProgressHandler
 }
 
 interface EnsureOptions extends ProgressOptions {
@@ -45,6 +47,7 @@ interface InstallerOptions extends EnsureOptions {
 }
 
 interface ProcessOptions {
+  onTaskProgress?: TaskProgressHandler
   signal?: AbortSignal
   timeoutMs?: number
   cwd?: string
@@ -106,6 +109,7 @@ export class ToolInstallerService {
   readonly spawn: typeof spawn
   readonly platform: string
   readonly arch: string
+  readonly onTaskProgress?: TaskProgressHandler
   readonly onProgress?: ProgressHandler
 
   constructor(options: InstallerOptions = {}) {
@@ -114,6 +118,7 @@ export class ToolInstallerService {
     this.spawn = options.spawn || spawn
     this.platform = options.platform || process.platform
     this.arch = options.arch || process.arch
+    this.onTaskProgress = options.onTaskProgress
     this.onProgress = options.onProgress
   }
 
@@ -126,13 +131,17 @@ export class ToolInstallerService {
   async ensureAll(options: EnsureOptions = {}) {
     const { signal } = options
     signal?.throwIfAborted()
-    const onProgress = options.onProgress || this.onProgress
+    const onTaskProgress = options.onTaskProgress || this.onTaskProgress
+    const onProgress: ProgressHandler = message => {
+      emitTaskProgress(onTaskProgress, { stage: "ffmpeg", message })
+      return (options.onProgress || this.onProgress)?.(message)
+    }
     const config = normalizeToolsConfig(options.config || await this.getConfig())
 
     const items: ToolResult[] = []
     for (const name of TOOL_NAMES) {
       await emitProgress(onProgress, `工具链：检查 ${name}`)
-      items.push(await this.ensureTool(name, config, { onProgress, signal }).catch(async (error: unknown): Promise<ToolResult> => {
+      items.push(await this.ensureTool(name, config, { onProgress: options.onProgress || this.onProgress, onTaskProgress, signal }).catch(async (error: unknown): Promise<ToolResult> => {
         signal?.throwIfAborted()
         const reason = errorMessage(error)
         await emitProgress(onProgress, `工具链：${name} 失败：${reason}`)
@@ -167,7 +176,11 @@ export class ToolInstallerService {
   async installTool(name: ToolName, normalized: ReturnType<typeof normalizeToolsConfig>, options: ProgressOptions = {}): Promise<ToolSuccess> {
     const { signal } = options
     signal?.throwIfAborted()
-    const onProgress = options.onProgress || this.onProgress
+    const onTaskProgress = options.onTaskProgress || this.onTaskProgress
+    const onProgress: ProgressHandler = message => {
+      emitTaskProgress(onTaskProgress, { stage: "ffmpeg", message })
+      return (options.onProgress || this.onProgress)?.(message)
+    }
     const tool = normalized[name]
     if (!tool) throw new Error(`unknown tool: ${name}`)
 
@@ -206,7 +219,7 @@ export class ToolInstallerService {
       if (error instanceof SyntaxError) receiptInvalid = true
       else if (!isMissingFile(error)) throw error
     }
-    const localFiles = health?.ok ? await fingerprintPayload(binDir, this.platform, signal) : null
+    const localFiles = health?.ok ? await fingerprintPayload(binDir, this.platform, signal, onTaskProgress) : null
     const localVerified = health?.ok && !receiptInvalid && (!receipt || receipt.repo === tool.repo && JSON.stringify(localFiles) === JSON.stringify(receipt.files))
     try {
       signal?.throwIfAborted()
@@ -221,7 +234,7 @@ export class ToolInstallerService {
       })
       if (!asset) throw new Error(`no release asset matched ${name} ${this.platform}/${this.arch}`)
       if (health?.ok && receipt?.repo === tool.repo && receipt.assetId === asset.id && receipt.updatedAt === asset.updated_at && receipt.digest === asset.digest) {
-        const files = await fingerprintPayload(binDir, this.platform, signal)
+        const files = await fingerprintPayload(binDir, this.platform, signal, onTaskProgress)
         if (JSON.stringify(files) === JSON.stringify(receipt.files)) return { name, ok: true, status: "ready", path: existing, asset: asset.name }
       }
 
@@ -241,10 +254,11 @@ export class ToolInstallerService {
           await fs.rm(archive, { force: true }).catch(() => null)
 
           await emitProgress(onProgress, `工具链：下载 ${asset.name}${attempt > 1 ? `（重试 ${attempt}/${attempts}）` : ""}`)
-          await this.downloadAsset(asset.browser_download_url, archive, { timeoutMs: normalized.timeout_ms, signal })
+          await this.downloadAsset(asset.browser_download_url, archive, { timeoutMs: normalized.timeout_ms, signal, onTaskProgress })
           if (!asset.digest || !/^sha256:[a-f0-9]{64}$/i.test(asset.digest)) throw new Error("发布包缺少 SHA-256，保留原工具")
-          if (await sha256File(archive, signal) !== asset.digest.slice(7).toLowerCase()) throw new Error("FFmpeg 发布包 SHA-256 不匹配")
+          if (await sha256File(archive, signal, onTaskProgress) !== asset.digest.slice(7).toLowerCase()) throw new Error("FFmpeg 发布包 SHA-256 不匹配")
           await emitProgress(onProgress, `工具链：准备 ${asset.name}`)
+          emitTaskProgress(onTaskProgress, { stage: "ffmpeg-extract", message: "正在解包 FFmpeg" })
           await extractArchive(this.spawn, archive, extractDir, { timeoutMs: normalized.timeout_ms, signal })
 
           const executable = await findExtractedExecutable(extractDir, tool.command, this.platform)
@@ -254,10 +268,11 @@ export class ToolInstallerService {
 
           // Finish publishing the checked pair and receipt as one operation once replacement starts.
           signal?.throwIfAborted()
+          emitTaskProgress(onTaskProgress, { stage: "ffmpeg-install", message: "正在安装并校验 FFmpeg 与 ffprobe" })
           const target = await copyToolPayload(name, executable, binDir, tool.command, this.platform)
           const receiptTemp = `${receiptFile}.${randomUUID()}.tmp`
           try {
-            await fs.writeFile(receiptTemp, JSON.stringify({ repo: tool.repo, assetId: asset.id, updatedAt: asset.updated_at, digest: asset.digest, files: await fingerprintPayload(binDir, this.platform) }), { flag: "wx" })
+            await fs.writeFile(receiptTemp, JSON.stringify({ repo: tool.repo, assetId: asset.id, updatedAt: asset.updated_at, digest: asset.digest, files: await fingerprintPayload(binDir, this.platform, undefined, onTaskProgress) }), { flag: "wx" })
             await fs.rename(receiptTemp, receiptFile)
           } finally { await fs.rm(receiptTemp, { force: true }) }
           await emitProgress(onProgress, `工具链：${name} 安装完成`)
@@ -285,7 +300,7 @@ export class ToolInstallerService {
       signal?.throwIfAborted()
       // Only retain the exact healthy payload checked before attempting update.
       // Missing files, receipt mismatches and a failed rollback remain errors.
-      if (localVerified && JSON.stringify(await fingerprintPayload(binDir, this.platform)) === JSON.stringify(localFiles)) {
+      if (localVerified && JSON.stringify(await fingerprintPayload(binDir, this.platform, undefined, onTaskProgress)) === JSON.stringify(localFiles)) {
         return { name, ok: true, status: "ready", path: existing, updateDeferred: true, reason: "现有 FFmpeg 已通过执行与文件检查，更新暂未完成，稍后重试。" }
       }
       throw error
@@ -307,7 +322,7 @@ export class ToolInstallerService {
     return { assets: assets.filter(isReleaseAsset) }
   }
 
-  async downloadAsset(url: string, target: string, { timeoutMs = 300000, signal }: ProcessOptions = {}) {
+  async downloadAsset(url: string, target: string, { timeoutMs = 300000, signal, onTaskProgress }: ProcessOptions = {}) {
     signal?.throwIfAborted()
     const temp = `${target}.part-${process.pid}-${Date.now()}`
     const response = await this.fetch(url, {
@@ -317,13 +332,22 @@ export class ToolInstallerService {
       },
     })
     if (!response.ok) throw new Error(`download failed: HTTP ${response.status}`)
+    const total = responseBytes(response)
+    let completed = 0
+    const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download", message: "正在下载 FFmpeg", completed, total, unit: "bytes" })
+    report()
     await fs.mkdir(path.dirname(target), { recursive: true })
     try {
       if (response.body && typeof response.body.getReader === "function") {
         // Bun and Node declare the same web stream with different convenience methods.
-        await pipeline(Readable.fromWeb(response.body as unknown as ReadableStream<Uint8Array>), fsSync.createWriteStream(temp), { signal })
+        const source = Readable.fromWeb(response.body as unknown as ReadableStream<Uint8Array>)
+        source.on("data", (chunk: Buffer) => { completed += chunk.length; report() })
+        await pipeline(source, fsSync.createWriteStream(temp), { signal })
       } else {
-        await fs.writeFile(temp, Buffer.from(await response.arrayBuffer()))
+        const bytes = Buffer.from(await response.arrayBuffer())
+        await fs.writeFile(temp, bytes)
+        completed = bytes.length
+        report()
       }
       signal?.throwIfAborted()
       await fs.rm(target, { force: true }).catch(() => null)
@@ -565,15 +589,18 @@ async function copyToolPayload(name: ToolName, executable: string, binDir: strin
   return target
 }
 
-async function sha256File(file: string, signal?: AbortSignal) {
-  const hash = createHash("sha256")
-  for await (const chunk of fsSync.createReadStream(file, { signal })) hash.update(chunk)
+async function sha256File(file: string, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
+  const hash = createHash("sha256"), total = (await fs.stat(file)).size
+  let completed = 0
+  const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-verify", message: `正在校验 ${path.basename(file)}`, completed, total, unit: "bytes" })
+  report()
+  for await (const chunk of fsSync.createReadStream(file, { signal })) { hash.update(chunk); completed += chunk.length; report() }
   return hash.digest("hex")
 }
 
-async function fingerprintPayload(binDir: string, platform: string, signal?: AbortSignal): Promise<PayloadFingerprint> {
+async function fingerprintPayload(binDir: string, platform: string, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler): Promise<PayloadFingerprint> {
   const entries = (await fs.readdir(binDir, { withFileTypes: true })).filter(entry => entry.isFile() && shouldCopyFfmpegPayloadFile(entry.name, platform)).sort((a, b) => a.name.localeCompare(b.name))
-  return Object.fromEntries(await Promise.all(entries.map(async entry => [entry.name, await sha256File(path.join(binDir, entry.name), signal)])))
+  return Object.fromEntries(await Promise.all(entries.map(async entry => [entry.name, await sha256File(path.join(binDir, entry.name), signal, onTaskProgress)])))
 }
 
 async function ensureExecutablePermissions(name: ToolName, executable: string, binDir: string, platform: string = process.platform) {

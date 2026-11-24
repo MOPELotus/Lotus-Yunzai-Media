@@ -1,3 +1,4 @@
+import { emitTaskProgress, responseBytes, type TaskProgressHandler } from "../progress.ts"
 import fs from "node:fs/promises"
 import { createWriteStream, createReadStream } from "node:fs"
 import path from "node:path"
@@ -161,6 +162,7 @@ interface ProcessState {
 type Notify = (text: string) => void | Promise<void>
 
 interface UpdateOptions {
+  onTaskProgress?: TaskProgressHandler
   signal?: AbortSignal
   notify?: Notify
   status?: TuneWeaveStatus
@@ -318,10 +320,15 @@ export class TuneWeaveService {
     return url
   }
 
-  async initialize({ onProgress = async () => {}, platform = "bilibili", signal }: {
-    onProgress?: Notify; platform?: TuneWeavePlatform; signal?: AbortSignal
+  async initialize({ onProgress: notify, onTaskProgress, platform = "bilibili", signal }: {
+    onProgress?: Notify; onTaskProgress?: TaskProgressHandler; platform?: TuneWeavePlatform; signal?: AbortSignal
   } = {}) {
+    const onProgress = async (message: string) => {
+      emitTaskProgress(onTaskProgress, { stage: "tuneweave", message })
+      try { await notify?.(message) } catch {}
+    }
     return this.lifecycle(async () => {
+      emitTaskProgress(onTaskProgress, { stage: "tuneweave-check", message: "正在检查 TuneWeave 服务及发布版本" })
       signal?.throwIfAborted()
       const status = await this.status(platform, signal, "error")
       try { this.localUrl() } catch {
@@ -336,15 +343,15 @@ export class TuneWeaveService {
         const manifest = await this.releaseManifest(signal)
         if (status.reachable) {
           const comparison = compareTuneWeaveVersions(status.version, manifest.version)
-          const intact = comparison > 0 || comparison === 0 && await this.verifyInstalled(manifest, signal)
-          if (comparison < 0 || !intact) return await this.updateInstalled({ notify: onProgress, status, manifest, platform, signal, repair: !intact && comparison === 0 })
+          const intact = comparison > 0 || comparison === 0 && await this.verifyInstalled(manifest, signal, onTaskProgress)
+          if (comparison < 0 || !intact) return await this.updateInstalled({ notify: onProgress, onTaskProgress, status, manifest, platform, signal, repair: !intact && comparison === 0 })
           if (!status.ok) throw new Error(status.message)
           return { ...status, already: true }
         }
         this.localUrl()
-        if (!await this.verifyInstalled(manifest, signal)) {
+        if (!await this.verifyInstalled(manifest, signal, onTaskProgress)) {
           await onProgress("正在下载 TuneWeave 官方发布文件并校验 SHA-256。")
-          const release = await this.downloadRelease(manifest, signal)
+          const release = await this.downloadRelease(manifest, signal, onTaskProgress)
           let backup: string | undefined, replaced = false
           const previous = `${this.executable}.previous-${crypto.randomUUID()}`
           try {
@@ -352,7 +359,7 @@ export class TuneWeaveService {
             try { await fs.rename(this.executable, previous); backup = previous } catch (error) { if (errorCode(error) !== "ENOENT") throw error }
             await fs.rename(release.file, this.executable)
             replaced = true
-            const ready = await this.startInstalled(release.version, platform, signal)
+            const ready = await this.startInstalled(release.version, platform, signal, onTaskProgress)
             if (backup) await fs.rm(backup, { force: true })
             return { ...ready, installed: true }
           } catch (error) {
@@ -365,8 +372,8 @@ export class TuneWeaveService {
         }
         await onProgress("正在启动本机 TuneWeave 服务。")
         await this.requireStoppedEndpoint(platform, signal)
-        const ready = await this.startInstalled(undefined, platform, signal)
-        if (compareTuneWeaveVersions(ready.version, manifest.version) < 0) return await this.updateInstalled({ notify: onProgress, status: ready, manifest, platform, signal })
+        const ready = await this.startInstalled(undefined, platform, signal, onTaskProgress)
+        if (compareTuneWeaveVersions(ready.version, manifest.version) < 0) return await this.updateInstalled({ notify: onProgress, onTaskProgress, status: ready, manifest, platform, signal })
         return { ...ready, installed: false }
       } catch (error) {
         // Update/verification availability is separate from service readiness.
@@ -399,15 +406,20 @@ export class TuneWeaveService {
     return checksum
   }
 
-  async verifyInstalled(manifest: TuneWeaveManifest, signal?: AbortSignal) {
+  async verifyInstalled(manifest: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
     try { await fs.access(this.executable) } catch (error) { if (errorCode(error) === "ENOENT") return false; throw error }
     const expected = await this.releaseChecksum(manifest, signal), hash = crypto.createHash("sha256")
-    for await (const chunk of createReadStream(this.executable, { signal })) hash.update(chunk)
+    const total = (await fs.stat(this.executable)).size
+    let completed = 0
+    const report = () => emitTaskProgress(onTaskProgress, { stage: "tuneweave-verify", message: "正在校验 TuneWeave 本地文件", completed, total, unit: "bytes" })
+    report()
+    for await (const chunk of createReadStream(this.executable, { signal })) { hash.update(chunk); completed += chunk.length; report() }
     return hash.digest("hex") === expected
   }
 
-  async downloadRelease(manifest?: TuneWeaveManifest, signal?: AbortSignal): Promise<TuneWeaveRelease> {
+  async downloadRelease(manifest?: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler): Promise<TuneWeaveRelease> {
     signal?.throwIfAborted()
+    emitTaskProgress(onTaskProgress, { stage: "tuneweave-release", message: "正在获取 TuneWeave 发布文件与校验信息" })
     if (manifest) requireCompatibleManifest(manifest)
     else manifest = await this.releaseManifest(signal)
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
@@ -424,8 +436,13 @@ export class TuneWeaveService {
       const hash = crypto.createHash("sha256")
       // Bun's Web Stream declaration adds helpers that Node's runtime bridge does not use.
       const stream = Readable.fromWeb(download.body as unknown as Parameters<typeof Readable.fromWeb>[0])
-      stream.on("data", chunk => hash.update(chunk))
+      const total = responseBytes(download)
+      let completed = 0
+      const report = () => emitTaskProgress(onTaskProgress, { stage: "tuneweave-download", message: "正在下载并计算 TuneWeave SHA-256", completed, total, unit: "bytes" })
+      report()
+      stream.on("data", (chunk: Buffer) => { hash.update(chunk); completed += chunk.length; report() })
       await pipeline(stream, createWriteStream(file, { mode: 0o700, flags: "wx" }), { signal })
+      emitTaskProgress(onTaskProgress, { stage: "tuneweave-verify", message: "正在核对 TuneWeave SHA-256" })
       if (hash.digest("hex") !== checksum) throw new Error("TuneWeave SHA-256 校验不匹配")
       await fs.chmod(file, 0o700)
       return { file, version: manifest.version }
@@ -448,8 +465,9 @@ export class TuneWeaveService {
     signal?.throwIfAborted()
   }
 
-  async startInstalled(expectedVersion: string | undefined, platform: TuneWeavePlatform = "bilibili", signal?: AbortSignal) {
+  async startInstalled(expectedVersion: string | undefined, platform: TuneWeavePlatform = "bilibili", signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
     signal?.throwIfAborted()
+    emitTaskProgress(onTaskProgress, { stage: "tuneweave-start", message: "正在启动本机 TuneWeave 并等待健康检查" })
     const url = this.localUrl()
     await this.requireStoppedRecord()
     await fs.mkdir(path.join(this.root, "accounts"), { recursive: true, mode: 0o700 })
@@ -469,6 +487,7 @@ export class TuneWeaveService {
     await fs.writeFile(path.join(this.root, "process.json"), JSON.stringify({ pid, api_url: this.config.api_url, identity: await processIdentity(pid, this.platform).catch(() => null) }), { mode: 0o600 })
     try {
       for (let i = 0; i < 30; i++) {
+        emitTaskProgress(onTaskProgress, { stage: "tuneweave-health", message: "正在等待 TuneWeave 健康与能力检查", completed: i + 1, unit: "次" })
         await sleep(1000, undefined, { signal })
         if (child.exitCode !== null || child.signalCode !== null) break
         const ready = await this.status(platform, signal, "error")
@@ -527,11 +546,11 @@ export class TuneWeaveService {
     await fs.rm(path.join(this.root, "process.json"), { force: true })
   }
 
-  async updateIfRequired({ notify = async () => {} }: { notify?: Notify } = {}) {
-    return this.lifecycle(() => this.updateInstalled({ notify }))
+  async updateIfRequired({ notify = async () => {}, onTaskProgress }: { notify?: Notify; onTaskProgress?: TaskProgressHandler } = {}) {
+    return this.lifecycle(() => this.updateInstalled({ notify, onTaskProgress }))
   }
 
-  async updateInstalled({ notify, status, manifest, repair = false, platform = "bilibili", signal }: UpdateOptions = {}) {
+  async updateInstalled({ notify, onTaskProgress, status, manifest, repair = false, platform = "bilibili", signal }: UpdateOptions = {}) {
     signal?.throwIfAborted()
     status ||= await this.status(platform, signal, "error")
     if (!status.reachable) return { ...status, skipped: true, reason: status.state === "stopped" ? "not_running" : "status_unknown" }
@@ -540,6 +559,7 @@ export class TuneWeaveService {
     const state = await this.managedProcess()
     if (!state.alive) throw new Error("TuneWeave 托管进程未运行，取消自动替换")
     const send = async (message: string) => {
+      emitTaskProgress(onTaskProgress, { stage: "tuneweave-update", message })
       try { await notify?.(message) } catch (error) {
         const logger = (globalThis as typeof globalThis & { logger?: { warn?: (text: string) => void } }).logger
         logger?.warn?.(`[media] TuneWeave 更新通知失败：${errorMessage(error)}`)
@@ -548,16 +568,17 @@ export class TuneWeaveService {
     await send(`TuneWeave 当前 ${status.version}，正在${repair ? "修复" : "更新至"} ${targetVersion}；下载校验后自动重启服务。`)
     let release: TuneWeaveRelease | undefined, backup: string | null | undefined, replaced = false, stopped = false
     try {
-      release = await this.downloadRelease(manifest, signal)
+      release = await this.downloadRelease(manifest, signal, onTaskProgress)
       if ((await this.managedProcess()).pid !== state.pid) throw new Error("下载期间 TuneWeave 进程已变化，取消更新")
       signal?.throwIfAborted()
+      emitTaskProgress(onTaskProgress, { stage: "tuneweave-restart", message: "已完成下载校验，正在替换并重启 TuneWeave" })
       try { await this.stopManaged(state.pid); stopped = true }
       catch (error) { stopped = !await processAlive(state.pid); throw error }
       backup = `${this.executable}.previous-${crypto.randomUUID()}`
       try { await fs.rename(this.executable, backup) } catch (error) { if (errorCode(error) === "ENOENT") backup = null; else throw error }
       try { await fs.rename(release.file, this.executable); replaced = true }
       catch (error) { if (backup) await fs.rename(backup, this.executable); backup = null; throw error }
-      const ready = await this.startInstalled(release.version, platform, signal)
+      const ready = await this.startInstalled(release.version, platform, signal, onTaskProgress)
       if (backup) await fs.rm(backup, { force: true }); backup = null
       await send(`TuneWeave 已从 ${status.version} 更新至 ${ready.version}，服务已自动重启并通过健康与能力检查。`)
       return { ...ready, updated: true, previousVersion: status.version }

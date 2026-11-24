@@ -1,3 +1,4 @@
+import { runInitializationStage } from "../../../../lib/initialization-progress.ts"
 import { setTimeout as delay } from "node:timers/promises"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { ToolInstallerService, type ToolsConfig } from "../tools/installer.ts"
@@ -51,7 +52,7 @@ function isLocal(tune: Pick<TuneWeaveService, "localUrl">) {
 export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices, {
   load = loadGlobalConfig,
   createTune = config => new TuneWeaveService({ config }),
-  prepareTools = (config, active) => new ToolInstallerService({ config }).ensureAll({ signal: active }),
+  prepareTools = (config, active) => runInitializationStage("检查与准备 FFmpeg", onTaskProgress => new ToolInstallerService({ config }).ensureAll({ signal: active, onTaskProgress }), { label: "媒体维护", signal: active }),
   wait = (ms, active) => delay(ms, undefined, { signal: active, ref: false }),
 }: StartupHooks = {}) {
   if (!mediaRuntime) return
@@ -80,7 +81,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
     active.throwIfAborted()
     if (local) {
       try {
-        const item = await tune.initialize({ platform: "netease", signal: active })
+        const item = await runInitializationStage("检查与准备 TuneWeave", onTaskProgress => tune.initialize({ platform: "netease", signal: active, onTaskProgress }), { label: "媒体维护", signal: active })
         items.push({ name: "TuneWeave", ok: item.ok,
           changed: "updated" in item && item.updated === true || "installed" in item && item.installed === true,
           updateDeferred: "updateDeferred" in item && item.updateDeferred === true })
@@ -100,7 +101,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
       const tune = createTune(config.tuneweave)
       const local = isLocal(tune)
       if (local) {
-        try { await tune.resume(active) } catch {
+        try { await runInitializationStage("恢复本机 TuneWeave", () => tune.resume(active), { label: "媒体维护", signal: active }) } catch {
           active.throwIfAborted()
           console.warn("[media] 本机 TuneWeave 未恢复，将继续开机环境维护。")
           await notify("本机 TuneWeave 恢复失败，将继续开机环境维护。")

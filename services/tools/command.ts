@@ -1,3 +1,4 @@
+import { runInitializationStage } from "../../../../lib/initialization-progress.ts"
 import type { MessageFallback } from "../../../../lib/commands.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
@@ -15,13 +16,13 @@ type Progress = (message: string) => Promise<void>
 const mediaPreparation = {
   loadConfig: loadGlobalConfig,
   async prepareCaptcha(signal?: AbortSignal) {
-    const { prepareCaptchaModels } = await import("@lotus-yunzai/captcha")
-    await prepareCaptchaModels({ signal })
+    const { initializeCaptchaModels } = await import("../../../../lib/captcha/initialize.ts")
+    await initializeCaptchaModels(new URL("../../../../", import.meta.url), signal ?? new AbortController().signal)
   },
   prepareTools: (config: Config["tools"], onProgress: Progress, signal?: AbortSignal) =>
-    new ToolInstallerService({ config }).ensureAll({ signal, onProgress }),
+    runInitializationStage("检查与准备 FFmpeg", onTaskProgress => new ToolInstallerService({ config }).ensureAll({ signal, onProgress, onTaskProgress }), { label: "媒体初始化", signal }),
   prepareTuneWeave: (config: Config["tuneweave"], onProgress: Progress, signal?: AbortSignal) =>
-    new TuneWeaveService({ config }).initialize({ signal, onProgress }),
+    runInitializationStage("检查与准备 TuneWeave", onTaskProgress => new TuneWeaveService({ config }).initialize({ signal, onProgress, onTaskProgress }), { label: "媒体初始化", signal }),
   render: renderStatusCard,
 }
 

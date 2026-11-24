@@ -125,7 +125,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       if (result.warnings.length) await reply("[media] " + [...new Set(result.warnings)].join("；"))
       for (const file of result.files) {
         if (active.aborted) return
-        await sendMediaFile({ ...context, reply }, file, { ...download, signal: active })
+        await sendMediaFile({ ...context, reply }, file, { ...download, file_name: result.fileNames?.[file], signal: active })
       }
     } catch (error) {
       if (active.aborted) return

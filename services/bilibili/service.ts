@@ -566,15 +566,17 @@ export class BilibiliService {
       await emitBiliEvent(hooks, { type: "download-start", message: `开始下载 ${plan.info.bvid}，分P策略：${plan.policy}。` })
       let files = await this.downloadWithTuneWeave(plan, download, task.dir, hooks)
       hooks.signal?.throwIfAborted()
+      let archiveName: string | undefined
       if (download.multi_page_policy === "zip" && files.length > 1) {
-        const target = path.join(task.dir, `${safeFileName(plan.info.title || plan.info.bvid)}-${plan.info.bvid}.zip`)
+        archiveName = `${safeFileName(plan.info.title || plan.info.bvid)}-${plan.info.bvid}.zip`
+        const target = path.join(task.dir, "archive.zip")
         await packMediaFiles(files, target, { timeoutMs: download.timeout_ms, spawnImpl: this.spawn, cwd: task.dir, signal: hooks.signal })
         hooks.signal?.throwIfAborted()
         files = [target]
       }
       const fileNames = Object.fromEntries(files.map((file, index) => {
         const ext = path.extname(file)
-        if (ext === ".zip") return [file, path.basename(file)]
+        if (ext === ".zip") return [file, archiveName ?? path.basename(file)]
         const pageNumber = Number(path.basename(file).match(/-P(\d+)-/)?.[1]) || plan.pages[index]?.page || index + 1
         const page = plan.pages.find(item => Number(item.page) === pageNumber)
         const title = files.length > 1 ? page?.part || plan.info.title : plan.info.title || plan.info.bvid

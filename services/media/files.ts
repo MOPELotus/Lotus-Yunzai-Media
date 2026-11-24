@@ -213,7 +213,12 @@ interface MediaFailure {
 }
 
 export function mediaFailureMessage(result: MediaFailure = {}) {
-  if (result.reason === "duration_limit") return `视频时长超过 ${Math.round(Number(result.limitSeconds) / 60)} 分钟限制。`
+  if (result.reason === "duration_limit") {
+    const seconds = result.limitSeconds
+    if (seconds === undefined) return "视频时长超过限制。"
+    const limit = seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`
+    return `视频时长超过 ${limit}限制。`
+  }
   if (result.reason === "estimated_size_limit") return `视频预估大小 ${result.estimatedSizeMb} MB 超过 ${result.limitMb} MB 限制。`
   return result.reason || "下载失败"
 }

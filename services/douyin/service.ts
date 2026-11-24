@@ -257,15 +257,17 @@ export class DouyinService {
       if (!files.length) throw new Error(failedItems[0]?.message || "没有取得可发送的作品内容")
       if (failedItems.length) warnings.push(`部分媒体未取得：${failedItems.map(item => `第${item.index}项${item.kind === "video" ? "视频" : "图片"}`).join("、")}`)
       let output = files
+      const fileNames: Record<string, string> = {}
       if (download.multi_page_policy === "zip" && files.length > 1) {
         if (failedItems.length) await fs.writeFile(path.join(task.dir, "下载缺项.txt"), failedItems.map(item => `第${item.index}项 ${item.kind}：${item.message}`).join("\n"), "utf8")
         const packFiles = failedItems.length ? [...files, path.join(task.dir, "下载缺项.txt")] : files
-        const target = path.join(task.dir, `${safeMediaName(info.title)}-${info.id}.zip`)
+        const target = path.join(task.dir, "archive.zip")
         await this.pack(packFiles, target, { cwd: task.dir, timeoutMs: remainingTime(), signal })
         output = [target]
+        fileNames[target] = `${safeMediaName(info.title)}-${info.id}.zip`
       }
       signal?.throwIfAborted()
-      return { ok: true, info, taskDir: task.dir, taskId: task.id, files: output, artifacts, warnings, partial: failedItems.length > 0, failedItems }
+      return { ok: true, info, taskDir: task.dir, taskId: task.id, files: output, fileNames, artifacts, warnings, partial: failedItems.length > 0, failedItems }
     } catch (error) {
       await this.releaseTask({ taskDir: task.dir }).catch(cleanupError => (globalThis as typeof globalThis & { logger?: { warn?: (message: string) => void } }).logger?.warn?.(`[media] 抖音任务清理失败： ${cleanupError.message}`))
       throw error

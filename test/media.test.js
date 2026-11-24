@@ -11,7 +11,7 @@ import { normalizeDouyinWork } from "../services/douyin/model.ts"
 import { createDouyinCommands } from "../services/douyin/command.ts"
 import { DouyinService } from "../services/douyin/service.ts"
 import { fetchCdn } from "../services/media/cdn.ts"
-import { mediaDeliveryTooLarge, mediaDeliveryUnknown, sendMediaFile } from "../services/media/files.ts"
+import { mediaDeliveryTooLarge, mediaDeliveryUnknown, mediaFailureMessage, mediaLimitFailure, sendMediaFile } from "../services/media/files.ts"
 import { articlePages, buildMediaMessageText, isMediaCommandText } from "../services/media/message.ts"
 import { CommandRegistry } from "../../../lib/commands.ts"
 
@@ -290,6 +290,52 @@ test("抖音文章维持正文、图片和后文顺序，统计缺失时维持�
     .toEqual(["正文", "https://p3.douyinpic.com/a.png", "后文"])
   expect(work.stat.like).toBe(0)
   expect(work.stat.reply).toBeUndefined()
+})
+
+test("时长与估算大小提示沿用实际配置值", () => {
+  expect(mediaFailureMessage(mediaLimitFailure({duration:30}, {duration_limit_seconds:29}))).toBe("视频时长超过 29 秒限制。")
+  expect(mediaFailureMessage(mediaLimitFailure({duration:61}, {duration_limit_seconds:60}))).toBe("视频时长超过 1 分钟限制。")
+  expect(mediaLimitFailure({duration:29}, {duration_limit_seconds:29})).toBeNull()
+  expect(mediaLimitFailure({}, {duration_limit_seconds:29})).toBeNull()
+  expect(mediaLimitFailure({duration:30}, {duration_limit_seconds:0})).toBeNull()
+  expect(mediaFailureMessage({reason:"estimated_size_limit",estimatedSizeMb:109.5,limitMb:100})).toBe("视频预估大小 109.5 MB 超过 100 MB 限制。")
+  expect(mediaFailureMessage()).toBe("下载失败")
+})
+
+test.skipIf(process.platform !== "linux" || !Bun.which("zip"))("分 P 和图集归档保留点开头的原名并使用可交付的内部文件", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-media-archive-display-"))
+  directories.push(directory)
+  const title = ".测试 100%"
+  const bvid = "BV1xx411c7mD"
+  const bilibili = new BilibiliService({ tasksDir: join(directory, "bilibili") })
+  bilibili.buildDownloadPlan = async () => ({ ok: true, info: { bvid, title }, policy: "zip", pages: [] })
+  bilibili.downloadWithTuneWeave = async (_plan, _config, task) => {
+    const files = [join(task, "p1.mp4"), join(task, "p2.mp4")]
+    await Promise.all(files.map(file => writeFile(file, "sample")))
+    return files
+  }
+  const douyin = new DouyinService({ tasksDir: join(directory, "douyin"),
+    async fetch() { return new Response(Uint8Array.of(137,80,78,71,13,10,26,10)) },
+  })
+  const douyinId = "12345678"
+  const work = normalizeDouyinWork({ aweme_id: douyinId, desc: title, images: [
+    { url_list: ["https://fixture.douyincdn.com/one"] },
+    { url_list: ["https://fixture.douyincdn.com/two"] },
+  ] })
+  const pairs = [
+    [bilibili, await bilibili.download(bvid, { multi_page_policy: "zip" }), bvid],
+    [douyin, await douyin.download(work, { multi_page_policy: "zip" }), douyinId],
+  ]
+  for (const [service, result, id] of pairs) {
+    try {
+      const file = join(result.taskDir, "archive.zip")
+      expect(result.files).toEqual([file])
+      expect(result.fileNames[file]).toBe(`${title}-${id}.zip`)
+      expect((await readFile(file)).subarray(0, 4).toString("hex")).toBe("504b0304")
+    } finally {
+      await service.releaseTask(result)
+    }
+  }
 })
 
 test("发送保留显示文件名并按视频阈值改用上传，未确认时不重发", async () => {

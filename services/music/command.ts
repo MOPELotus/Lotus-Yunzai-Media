@@ -213,7 +213,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
 
   function selectionAt(key: string) {
     const selection = selections.get(key)
-    if (selection && selection.expires <= Date.now()) {
+    if (selection && !selection.busy && selection.expires <= Date.now()) {
       forget(key)
       return
     }
@@ -268,7 +268,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
   const timer = setInterval(() => {
     const now = Date.now()
     for (const [key, session] of sessions) if (session.expires <= now) drop(key, session)
-    for (const [key, selection] of selections) if (selection.expires <= now) forget(key)
+    for (const [key, selection] of selections) if (!selection.busy && selection.expires <= now) forget(key)
   }, 30_000).unref()
   const cancelRecovery = mediaRuntime?.whenReady(() => {
     if (moduleSignal.aborted) return
@@ -303,9 +303,10 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     return moduleSignal.aborted ? false : context.reply(...args)
   }
 
-  async function imageReply(context: Context, image: Uint8Array | undefined, fallback: string, options?: ReplyOptions) {
+  async function imageReply(context: Context, image: Uint8Array | undefined, fallback: string, options?: ReplyOptions, active = moduleSignal) {
+    if (active.aborted) return
     if (!image || !await reply(context, { type: "image", file: image }, false, options)) {
-      await reply(context, fallback, false, options)
+      if (!active.aborted) await reply(context, fallback, false, options)
     }
   }
 
@@ -343,10 +344,11 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     const share = musicShare(track, media.stream)
     if (share && context.sendMusicCard) {
       await verify?.()
+      active.throwIfAborted()
       const result = await context.sendMusicCard(share.data)
       if (result === "confirmed") return
       if (result === "unknown") {
-        await reply(context, "音乐卡片送达未确认，继续发送完整音频。")
+        if (!active.aborted) await reply(context, "音乐卡片送达未确认，继续发送完整音频。")
         return
       }
     }
@@ -359,19 +361,39 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     }).catch(() => undefined)
     active.throwIfAborted()
     await verify?.()
+    active.throwIfAborted()
     if (program && image && await reply(context, { type: "image", file: image })) {
       active.throwIfAborted()
       await reply(context, program)
     }
     else if (program) await reply(context, fallback)
-    else await imageReply(context, image, fallback)
+    else await imageReply(context, image, fallback, undefined, active)
   }
 
   async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream, active = moduleSignal) {
     active.throwIfAborted()
     await reply(context, `正在获取《${track.name}》完整音源…`)
+    active.throwIfAborted()
     const media = stream ? await api.prepareStream(track, stream, { signal: active }) : await api.prepare(track, { signal: active })
     await sendPreparedTrack(context, api, track, media, active)
+  }
+
+  function playbackSignal(context: Context, selection?: ReissueSelection) {
+    const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
+    return AbortSignal.any([moduleSignal, ...(connection ? [connection] : []), ...(selection ? [selection.controller.signal] : [])])
+  }
+
+  async function playSelection(context: Context, key: string, source: PublicSelection, timeoutMs: number,
+    play: (active: AbortSignal) => Promise<void>) {
+    const selection = remember(key, source, timeoutMs)
+    const active = playbackSignal(context, selection)
+    selection.busy = true
+    try { await play(active) }
+    catch (error) { if (!active.aborted) throw error }
+    finally {
+      selection.busy = false
+      selection.expires = Date.now() + timeoutMs
+    }
   }
 
   async function sendPreparedTrack(context: Context, api: MusicService, track: MusicTrack, media: Prepared, active: AbortSignal,
@@ -553,6 +575,12 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (sessions.get(key) !== session || active.aborted) return
       const previous = session.multiple ? session.tracks ?? [] : []
       let tracks = [...requestedCloud.map(item => item.track), ...search?.tracks ?? []]
+      if (!session.multiple && session.page > 1 && !tracks.length && !episodes.length) {
+        await reply(context, session.tracks?.length || session.episodes?.length
+          ? "没有更多结果，仍可选择本页的编号。" : "没有更多结果。")
+        session.page--
+        return
+      }
       if (session.multiple) {
         const known = new Set(previous.map(track => track.ref))
         session.exhausted = tracks.length === 0
@@ -607,7 +635,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         if (requestedCloud.length && session.cloud) await cloud.assertVisible(context, api, session.cloud.binding)
         const options = menuReplyOptions(key, session)
         await imageReply(context, image && image.length <= limitBytes ? image : undefined, [message, ...results.map(row =>
-          row.number + ". " + [row.name, row.artist, row.source, row.length].filter(Boolean).join(" · "))].join("\n"), options)
+          row.number + ". " + [row.name, row.artist, row.source, row.length].filter(Boolean).join(" · "))].join("\n"), options, active)
       }
     } finally {
       session.loading = false
@@ -755,16 +783,21 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           if (session.collection && (session.collection !== "favorites" || session.page === 0)) return "当前列表没有下一页。"
           if (session.multiple && session.exhausted) return "没有更多歌曲，仍可选择之前的编号。"
           retireMenu(session)
+          const previous = { tracks: session.tracks, episodes: session.episodes, exhausted: session.exhausted, expires: session.expires }
           session.page++
           try { await showResults(context, key, session) }
-          catch (error) { session.page--; throw error }
+          catch (error) {
+            Object.assign(session, previous)
+            session.page--
+            throw error
+          }
           return []
         }
         const index = Number(message.replace(/^#听/u, "")) - 1
         const trackCount = session.tracks?.length ?? 0
         const track = session.tracks?.[index]
         const episode = session.episodes?.[index - trackCount]
-        if (session.multiple && !trackCount) return "当前没有可选择的歌曲。"
+        if (!trackCount && !session.episodes?.length) return session.multiple ? "当前没有可选择的歌曲。" : "当前没有可选择的结果。"
         if (!track && !episode) return `请输入 1–${trackCount + (session.episodes?.length ?? 0)} 的序号。`
         if (session.collection && track && session.binding && friend) {
           drop(key, session)
@@ -794,9 +827,10 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         }
         sessions.delete(key)
         if (episode) {
-          remember(key, { episode }, session.timeoutMs)
-          const { track, stream } = await session.api.playEpisode(episode, moduleSignal)
-          await playMedia(context, session.api, track, stream)
+          await playSelection(context, key, { episode }, session.timeoutMs, async active => {
+            const { track, stream } = await session.api.playEpisode(episode, active)
+            await playMedia(context, session.api, track, stream, active)
+          })
           return []
         }
         if (!track) return
@@ -806,12 +840,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           await cloud.play(context, session.api, session.cloud.binding, cloudTrack)
           return []
         }
-        const selection = remember(key, { track }, session.timeoutMs)
-        const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
-        const active = track.platform === "bilibili"
-          ? AbortSignal.any([moduleSignal, selection.controller.signal, ...(connection ? [connection] : [])]) : moduleSignal
-        try { await playMedia(context, session.api, track, undefined, active) }
-        catch (error) { if (!active.aborted) throw error }
+        await playSelection(context, key, { track }, session.timeoutMs,
+          active => playMedia(context, session.api, track, undefined, active))
       } else {
         if (!credentialScope(context)) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
         const index = Number(message) - 1
@@ -882,31 +912,29 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         if (!share || context.isDelegated) return
         return handleMusicShare(context, share, true)
       }
+      const active = playbackSignal(context)
       try {
         const { api, defaultPlatform, timeoutMs } = await openMusic()
         await recovery
-        moduleSignal.throwIfAborted()
+        active.throwIfAborted()
         const platform = legacy?.platform ?? defaultPlatform
         if (mode === "2") {
           if (platform !== "netease") return "当前默认音乐平台未接入播客播放。"
-          const episode = await api.firstEpisode(keyword, moduleSignal)
+          const episode = await api.firstEpisode(keyword, active)
           if (!episode) return "未找到相关网易云播客。"
           const source = episodeSelectionFromTrack(episode.track)
-          if (source) remember(key, { episode: source }, timeoutMs)
-          await playMedia(context, api, episode.track, episode.stream)
+          if (source) await playSelection(context, key, { episode: source }, timeoutMs,
+            playing => playMedia(context, api, episode.track, episode.stream, playing))
+          else await playMedia(context, api, episode.track, episode.stream, active)
         } else {
           const variant = platform === "netease" ? "cloud" : undefined
-          const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
-          const active = platform === "bilibili" && connection ? AbortSignal.any([moduleSignal, connection]) : moduleSignal
           const { tracks: [track] } = await api.search(platform, keyword, 1, { limit: 1, variant, signal: active })
           if (!track) return "未找到相关歌曲。"
-          const selection = remember(key, { track }, timeoutMs)
-          const playing = platform === "bilibili" ? AbortSignal.any([active, selection.controller.signal]) : active
-          try { await playMedia(context, api, track, undefined, playing) }
-          catch (error) { if (!playing.aborted) throw error }
+          await playSelection(context, key, { track }, timeoutMs,
+            playing => playMedia(context, api, track, undefined, playing))
         }
       } catch (error) {
-        if (!moduleSignal.aborted) return "[media] 播放：" + errorText(error)
+        if (!active.aborted) return "[media] 播放：" + errorText(error)
       }
       return []
     }

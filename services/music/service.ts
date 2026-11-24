@@ -275,7 +275,13 @@ export class MusicService {
     // Search can succeed with a stale login, so account selection alone cannot
     // confirm that the music provider still considers the account signed in.
     const accountStatus = alias || credential ? accountSelected ? "selected" : "unverified" : "unconfigured"
-    return { tracks: items.filter(i => i.type === "track").map(i => i.data), accountStatus }
+    if (!Array.isArray(items)) throw new Error("音乐平台返回的搜索结果结构无效。")
+    const tracks = items.flatMap(item => {
+      const match = item?.type === "track" && item.data
+      return match && match.platform === platform && typeof match.ref === "string" && match.ref.startsWith(platform + ":") &&
+        match.ref.length > platform.length + 1 && typeof match.name === "string" && match.name.trim() ? [match] : []
+    })
+    return { tracks, accountStatus }
   }
   async searchEpisodes(keyword: string, { limit = this.config.search_limit, offset, signal }: {
     limit?: number; offset?: number; signal?: AbortSignal
@@ -395,6 +401,7 @@ export class MusicService {
     const stream = await this.usePublicAccount(track.platform, exact ? { [track.platform]: account } : accounts, signal, current =>
       this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, current, undefined, signal))
     if (!stream?.url || stream.trial) throw new Error("没有可用的完整音源，建议主人扫码登录音乐平台")
+    if (stream.origin_track != null && stream.origin_track !== track.ref) throw new Error("平台返回的完整音源属于其他歌曲。")
     if (exact && (stream.resolved_platform !== track.platform || stream.origin_track !== track.ref || stream.resolved_track !== track.ref)) {
       throw new Error("平台返回的完整音源与链接中的歌曲不一致。")
     }

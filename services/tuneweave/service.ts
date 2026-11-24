@@ -269,7 +269,7 @@ export class TuneWeaveService {
       if (!Array.isArray(capabilities)) throw new Error("TuneWeave 返回了无效的能力清单。")
       const ready = Array.isArray(registered) && expected.capabilities.every(capability => registered.includes(capability))
       return { ok: ready, reachable: true, version: health.version, requiredVersion: TUNEWEAVE_REQUIRED_VERSION, requiresUpdate, apiUrl: this.config.api_url, capabilities,
-        message: requiresUpdate ? `低于插件最低要求 ${TUNEWEAVE_REQUIRED_VERSION}，等待开机延迟更新或发送 #初始化环境。` : ready ? expected.ready : "当前版本缺少所需能力，请升级 TuneWeave。" }
+        message: requiresUpdate ? `低于插件最低要求 ${TUNEWEAVE_REQUIRED_VERSION}，请运行 bun run bootstrap 或发送 #初始化环境。` : ready ? expected.ready : "当前版本缺少所需能力，请升级 TuneWeave。" }
     } catch (error) {
       signal?.throwIfAborted()
       const stopped = !healthResponded && errorCode(error) === "tuneweave_unavailable" &&
@@ -283,7 +283,7 @@ export class TuneWeaveService {
   async requireReady(platform: TuneWeavePlatform, signal?: AbortSignal) {
     const status = await this.status(platform, signal)
     if (!status.ok) throw new Error(status.message)
-    if (compareTuneWeaveVersions(status.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw new Error(`TuneWeave ${status.version} 低于要求 ${TUNEWEAVE_REQUIRED_VERSION}，请等待开机延迟更新或发送 #初始化环境`)
+    if (compareTuneWeaveVersions(status.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw new Error(`TuneWeave ${status.version} 低于要求 ${TUNEWEAVE_REQUIRED_VERSION}，请运行 bun run bootstrap 或发送 #初始化环境`)
     return status
   }
 

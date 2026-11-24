@@ -82,7 +82,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
     if (local) {
       try {
         const item = await runInitializationStage("检查已有 TuneWeave", () => tune.status("netease", active, "error"), { label: "媒体维护", signal: active })
-        items.push({ name: "TuneWeave", ok: item.ok,
+        items.push({ name: "TuneWeave", ok: item.ok && !item.requiresUpdate,
           changed: false, updateDeferred: false })
       } catch {
         items.push({ name: "TuneWeave", ok: false })
@@ -102,8 +102,8 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
       if (local) {
         try { await runInitializationStage("恢复本机 TuneWeave", () => tune.resume(active), { label: "媒体维护", signal: active }) } catch {
           active.throwIfAborted()
-          console.warn("[media] 本机 TuneWeave 未恢复，将继续开机环境维护。")
-          await notify("本机 TuneWeave 恢复失败，将继续开机环境维护。")
+          console.warn("[media] TuneWeave 启动失败，继续检查服务状态。")
+          await notify("TuneWeave 启动失败，请检查服务状态。")
         }
       }
 
@@ -114,15 +114,15 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
         if (attempt === 1) firstRound.resolve(failed.length ? "failed" : "ready")
         const changed = items.filter(item => item.changed).map(item => item.name)
         const deferred = items.filter(item => item.updateDeferred).map(item => item.name)
-        if (failed.length) await notify("媒体开机环境尚未就绪：" + failed.join("、") + "。请运行 bun run bootstrap 补齐。")
-        else if (changed.length) await notify("媒体开机环境更新完成：" + changed.join("、") + "，已通过就绪检查。")
+        if (failed.length) await notify("媒体工具检查失败：" + failed.join("、") + "。请运行 bun run bootstrap 补齐。")
+        else if (changed.length) await notify("媒体工具更新完成：" + changed.join("、") + "，已通过就绪检查。")
         if (deferred.length) console.warn("[media] 现有环境可用，更新暂未完成：" + deferred.join("、"))
         if (!failed.length && !deferred.length) return
       }
     })().catch(() => {
       if (!active.aborted) {
         firstRound.resolve("failed")
-        console.warn("[media] 开机环境维护未完成，请检查媒体配置或发送 #初始化环境。")
+        console.warn("[media] 媒体工具检查失败，请检查配置或运行 bun run bootstrap。")
       }
     })
   })

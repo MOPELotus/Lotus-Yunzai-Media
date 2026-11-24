@@ -98,7 +98,7 @@ test("接管后只检查已有FFmpeg，缺失时提示初始化且不请求任�
     await maintenance.dispose()
     expect(waits).toEqual([2300, 300000, 300000])
     expect(calls).toEqual([])
-    expect(notices.every(item => item.includes("尚未就绪：ffmpeg"))).toBe(true)
+    expect(notices.every(item => item.includes("检查失败：ffmpeg"))).toBe(true)
     expect(await readdir(dir)).toEqual([])
   } finally {
     await maintenance.dispose()
@@ -333,4 +333,26 @@ test("端口停止后先核进程记录，下载期间第三方抢占端口会�
     occupied?.stop(true)
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test("本地服务版本过低只提示初始化，不在开机检查时升级", async () => {
+  let activate
+  const notices = []
+  const disconnect = new AbortController()
+  const maintenance = startMediaMaintenance({ mediaRuntime: {
+    disconnect: disconnect.signal,
+    whenReady(start) { activate = start; return () => {} },
+    async notifyMasters(message) { notices.push(message) },
+  } }, {
+    async load() { return {} },
+    createTune: () => ({ localUrl: () => new URL("http://127.0.0.1"), async resume() {},
+      async status() { return { ok: true, requiresUpdate: true } } }),
+    async prepareTools() { return { ok: true, items: [] } },
+    async wait(ms, signal) { if (ms) await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true })) },
+  })
+  activate()
+  expect(await maintenance.waitForFirstRound(disconnect.signal)).toBe("failed")
+  for (let i = 0; i < 10 && !notices.length; i++) await Bun.sleep(1)
+  expect(notices.join("\n")).toContain("TuneWeave。请运行 bun run bootstrap")
+  await maintenance.dispose()
 })

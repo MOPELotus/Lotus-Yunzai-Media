@@ -368,7 +368,7 @@ test.each(["成功", "健康但暂缓", "维护异常", "等待取消", "期间�
       createTune: () => ({
         localUrl: () => new URL("http://127.0.0.1"),
         resume: async () => ({ skipped: true }),
-        async initialize() {
+        async status() {
           calls.push("维护检查")
           firstAttempt.resolve()
           await allowMaintenance.promise
@@ -379,7 +379,7 @@ test.each(["成功", "健康但暂缓", "维护异常", "等待取消", "期间�
       prepareTools: async () => ({ ok: true, items: [{ ok: true, name: "ffmpeg", status: "ready" }] }),
       async wait(ms, signal) {
         waits.push(ms)
-        if (ms === 180000) return
+        if (ms === 0) return
         signal.throwIfAborted()
         await new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))
       },
@@ -413,7 +413,7 @@ test.each(["成功", "健康但暂缓", "维护异常", "等待取消", "期间�
         await disposeSchedule()
         expect(await observed.promise).toBe("cancelled")
         expect(calls).toEqual(["维护检查"])
-        expect(waits).toEqual([180000])
+        expect(waits).toEqual([0])
         allowMaintenance.resolve()
         return
       }
@@ -427,7 +427,7 @@ test.each(["成功", "健康但暂缓", "维护异常", "等待取消", "期间�
       if (scenario === "成功" || scenario === "健康但暂缓") {
         await caughtUp.promise
         expect(calls).toEqual(["维护检查", "任务前健康检查", "启动补跑"])
-        expect(waits).toEqual(scenario === "健康但暂缓" ? [180000, 300000] : [180000])
+        expect(waits).toEqual([0])
       } else {
         await Bun.sleep(1)
         expect(calls).toEqual(scenario === "期间常规定时完成" ? ["维护检查", "自动任务"] : ["维护检查"])

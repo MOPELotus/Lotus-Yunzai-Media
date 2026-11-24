@@ -25,7 +25,7 @@ interface MaintenanceItem {
   updateDeferred?: boolean
 }
 
-type StartupTune = Pick<TuneWeaveService, "localUrl" | "resume" | "initialize">
+type StartupTune = Pick<TuneWeaveService, "localUrl" | "resume" | "status">
 
 interface StartupHooks {
   load?: () => Promise<StartupConfig>
@@ -36,7 +36,7 @@ interface StartupHooks {
 
 export type FirstMaintenanceResult = "ready" | "failed" | "cancelled"
 
-const initialDelay = 180_000
+const initialDelay = 0
 const retryDelay = 300_000
 const maxAttempts = 3
 
@@ -52,7 +52,7 @@ function isLocal(tune: Pick<TuneWeaveService, "localUrl">) {
 export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices, {
   load = loadGlobalConfig,
   createTune = config => new TuneWeaveService({ config }),
-  prepareTools = (config, active) => runInitializationStage("检查与准备 FFmpeg", onTaskProgress => new ToolInstallerService({ config }).ensureAll({ signal: active, onTaskProgress }), { label: "媒体维护", signal: active }),
+  prepareTools = (config, active) => runInitializationStage("检查已有 FFmpeg", onTaskProgress => new ToolInstallerService({ config }).checkAll({ signal: active, onTaskProgress }), { label: "媒体维护", signal: active }),
   wait = (ms, active) => delay(ms, undefined, { signal: active, ref: false }),
 }: StartupHooks = {}) {
   if (!mediaRuntime) return
@@ -81,10 +81,9 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
     active.throwIfAborted()
     if (local) {
       try {
-        const item = await runInitializationStage("检查与准备 TuneWeave", onTaskProgress => tune.initialize({ platform: "netease", signal: active, onTaskProgress }), { label: "媒体维护", signal: active })
+        const item = await runInitializationStage("检查已有 TuneWeave", () => tune.status("netease", active, "error"), { label: "媒体维护", signal: active })
         items.push({ name: "TuneWeave", ok: item.ok,
-          changed: "updated" in item && item.updated === true || "installed" in item && item.installed === true,
-          updateDeferred: "updateDeferred" in item && item.updateDeferred === true })
+          changed: false, updateDeferred: false })
       } catch {
         items.push({ name: "TuneWeave", ok: false })
       }
@@ -115,7 +114,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
         if (attempt === 1) firstRound.resolve(failed.length ? "failed" : "ready")
         const changed = items.filter(item => item.changed).map(item => item.name)
         const deferred = items.filter(item => item.updateDeferred).map(item => item.name)
-        if (failed.length) await notify("媒体开机环境尚未就绪：" + failed.join("、") + "。可发送 #初始化环境 重试。")
+        if (failed.length) await notify("媒体开机环境尚未就绪：" + failed.join("、") + "。请运行 bun run bootstrap 补齐。")
         else if (changed.length) await notify("媒体开机环境更新完成：" + changed.join("、") + "，已通过就绪检查。")
         if (deferred.length) console.warn("[media] 现有环境可用，更新暂未完成：" + deferred.join("、"))
         if (!failed.length && !deferred.length) return

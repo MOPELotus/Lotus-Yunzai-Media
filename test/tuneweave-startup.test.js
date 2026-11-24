@@ -56,7 +56,7 @@ test("自动恢复跳过自建端点和无原记录安装，且不请求错位�
   } finally { await rm(dir,{recursive:true,force:true}) }
 })
 
-test("接管后才维护，FFmpeg 三轮各尝试三次，外部 TuneWeave 全程零请求", async () => {
+test("接管后只检查已有FFmpeg，缺失时提示初始化且不请求任何发布或下载地址", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lotus-media-startup-retry-"))
   const started = Promise.withResolvers()
   const calls = []
@@ -79,14 +79,14 @@ test("接管后才维护，FFmpeg 三轮各尝试三次，外部 TuneWeave 全�
     },
   } }, {
     async load() {
-      return { tools: { dir, bin_dir: join(dir, "bin") },
+      return { tools: { dir, bin_dir: join(dir, "bin"), ffmpeg: { command: "lotus-fixture-absent-ffmpeg" } },
         tuneweave: { api_url: "https://external.fixture.invalid/subpath", update_delay_ms: "2300" } }
     },
     createTune: config => new TuneWeaveService({ root: dir, config, async fetch() {
       calls.push("external-tuneweave")
       throw new Error("外部 TuneWeave 禁止参与启动维护")
     } }),
-    prepareTools: (config, signal) => tool.ensureAll({ config, signal }),
+    prepareTools: (config, signal) => tool.checkAll({ config, signal }),
     async wait(ms) { waits.push(ms) },
   })
   try {
@@ -97,61 +97,40 @@ test("接管后才维护，FFmpeg 三轮各尝试三次，外部 TuneWeave 全�
     await started.promise
     await maintenance.dispose()
     expect(waits).toEqual([2300, 300000, 300000])
-    expect(calls).toEqual(Array.from({ length: 3 }, () => ["metadata", "asset", "asset", "asset"]).flat())
+    expect(calls).toEqual([])
     expect(notices.every(item => item.includes("尚未就绪：ffmpeg"))).toBe(true)
-    expect(await readdir(join(dir, "downloads"))).toEqual([])
+    expect(await readdir(dir)).toEqual([])
   } finally {
     await maintenance.dispose()
     await rm(dir, { recursive: true, force: true })
   }
 })
 
-test("TuneWeave 联网校验失败但原服务可用时仍重查，确认同一较新服务后停止", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "lotus-media-startup-deferred-"))
-  const endpoint = "http://127.0.0.1:17832"
-  const finished = Promise.withResolvers()
-  const calls = []
-  const waits = []
-  let rounds = 0
+test("已有TuneWeave启动只读本地健康能力接口，不查询发布或下载安装", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lotus-media-startup-readonly-"))
+  const endpoint = "http://127.0.0.1:17832", calls = [], waits = []
   const service = new TuneWeaveService({ config: { api_url: endpoint }, root: dir, async fetch(url, options) {
     calls.push(url)
-    if (url === TUNEWEAVE_MANIFEST_URL) {
-      rounds++
-      if (rounds === 1) return new Response(null, { status: 503 })
-      return Response.json({ version: "1.0.0-beta.3", artifacts: [] })
-    }
+    if (!url.startsWith(endpoint)) throw new Error("启动不应请求发布或下载")
     expect(options.redirect).toBe("error")
-    if (url === endpoint + "/healthz") return Response.json({ ok: true, data: { version: "1.0.0-beta.4" } })
-    expect(url).toBe(endpoint + "/v1/capabilities?platform=netease")
+    if (url.endsWith("/healthz")) return Response.json({ ok: true, data: { version: "1.0.0-beta.4" } })
     return Response.json({ ok: true, data: [{ platform: "netease", registered: true,
       capabilities: ["platform_api", "qr_login", "account_profile", "caller_managed_credentials"] }] })
   }, spawn() { throw new Error("健康服务无需重启") } })
   const maintenance = startMediaMaintenance({ mediaRuntime: {
-    disconnect: new AbortController().signal,
-    whenReady(action) { action(); return () => {} },
-    async notifyMasters(message) {
-      expect(message).toContain("更新完成：ffmpeg")
-      finished.resolve()
-    },
+    disconnect: new AbortController().signal, whenReady(action) { action(); return () => {} },
+    async notifyMasters() { throw new Error("健康检查无需通知更新") },
   } }, {
-    async load() { return {} },
-    createTune: () => service,
-    async prepareTools() {
-      return { ok: true, items: [{ name: "ffmpeg", ok: true, status: rounds ? "installed" : "ready" }] }
-    },
+    async load() { return {} }, createTune: () => service,
+    async prepareTools() { return { ok: true, items: [{ name: "ffmpeg", ok: true, status: "ready" }] } },
     async wait(ms) { waits.push(ms) },
   })
   try {
-    await finished.promise
-    await maintenance.dispose()
-    expect(waits).toEqual([180000, 300000])
-    expect(rounds).toBe(2)
-    expect(calls.filter(url => url.endsWith("/healthz"))).toHaveLength(3)
-    expect(await readdir(dir)).toEqual([])
-  } finally {
-    await maintenance.dispose()
-    await rm(dir, { recursive: true, force: true })
-  }
+    expect(await maintenance.waitForFirstRound(new AbortController().signal)).toBe("ready")
+    expect(waits).toEqual([0])
+    expect(calls).toHaveLength(2)
+    expect(calls.every(url => url.startsWith(endpoint))).toBe(true)
+  } finally { await maintenance.dispose(); await rm(dir, { recursive: true, force: true }) }
 })
 
 test("TuneWeave 更新按兼容契约选择，只有已验历史版本可以缺省", async () => {

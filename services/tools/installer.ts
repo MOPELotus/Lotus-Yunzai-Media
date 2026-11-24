@@ -128,6 +128,33 @@ export class ToolInstallerService {
     return globalConfig.tools || {}
   }
 
+  /** Read-only startup check: no release lookup, installation or update. */
+  async checkAll(options: EnsureOptions = {}) {
+    const config = normalizeToolsConfig(options.config || await this.getConfig())
+    const binDir = resolveMaybeData(config.bin_dir), toolsDir = resolveMaybeData(config.dir)
+    const items: ToolResult[] = []
+    for (const name of TOOL_NAMES) {
+      options.signal?.throwIfAborted()
+      try {
+        const executable = await findCommandExecutable(config[name].command, [binDir], this.platform)
+        const probe = await findCommandExecutable("ffprobe", [binDir], this.platform)
+        if (!executable || !probe) throw new Error("媒体工具尚未初始化，请运行 bun run bootstrap")
+        const real = await fs.realpath(executable)
+        if (path.dirname(real) === path.resolve(binDir)) {
+          const health = await inspectToolInstall(name, executable, binDir, toolsDir, this.platform)
+          if (!health.ok) throw new Error(health.reason)
+        }
+        await runSpawn(this.spawn, executable, ["-version"], { timeoutMs: 15000, signal: options.signal })
+        await runSpawn(this.spawn, probe, ["-version"], { timeoutMs: 15000, signal: options.signal })
+        items.push({ name, ok: true, status: "ready", path: executable, ...(path.dirname(real) !== path.resolve(binDir) && { external: true as const }) })
+      } catch (error) {
+        options.signal?.throwIfAborted()
+        items.push({ name, ok: false, reason: errorMessage(error) })
+      }
+    }
+    return { ok: items.every(item => item.ok), skipped: false, binDir, items }
+  }
+
   async ensureAll(options: EnsureOptions = {}) {
     const { signal } = options
     signal?.throwIfAborted()

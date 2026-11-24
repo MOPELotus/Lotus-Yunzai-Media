@@ -387,7 +387,7 @@ export class MusicService {
   }
   async publicLyrics(track: MusicTrack, signal?: AbortSignal) {
     const data = await this.tuneweave.request<{ track_ref?: unknown; plain?: unknown; translated?: unknown }>(
-      `/v1/tracks/${encodeURIComponent(track.ref)}/lyrics`, { signal, redirect: "error" })
+      `/v1/tracks/${encodeURIComponent(track.ref)}/lyrics?translated=true`, { signal, redirect: "error" })
     if (data?.track_ref !== track.ref) throw new Error("平台返回的歌词与此歌曲不一致。")
     const text = (value: unknown) => typeof value === "string" && value.length <= 32_000 ? value.trim() : ""
     return { original: text(data.plain), translated: text(data.translated) }

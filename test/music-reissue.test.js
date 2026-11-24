@@ -26,10 +26,11 @@ test("同一机器人、协议、会话和用户才能重读选曲歌词或通�
       const [, ref, kind] = /^\/v1\/tracks\/(qq:[0-9]+)\/(lyrics|stream)$/u.exec(path)
       if (kind === "lyrics") {
         expect(new Headers(init.headers).has("Cookie")).toBe(false)
+        expect(new Headers(init.headers).has("X-TuneWeave-Credential")).toBe(false)
         lyricStarted?.resolve()
         if (waitLyric) await waitLyric.promise
         return response({ track_ref: wrongIdentity ? "qq:99" : ref, plain: "[ar:样本]\n[00:00.01]第一行 " + ref + "\n[00:01.23]第二行",
-          translated: "[00:00.01]实验译词" })
+          ...(url.searchParams.get("translated") === "true" && { translated: "[00:00.01]实验译词" }) })
       }
       if (wrongIdentity) return response({ url: "https://y.gtimg.cn/test.wav", resolved_platform: "netease", origin_track: ref, resolved_track: "netease:999" })
       if (sent.length) {

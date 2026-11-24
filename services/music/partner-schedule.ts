@@ -27,7 +27,7 @@ interface ScheduleOptions {
   wait?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
-const defaultSchedule = "0 5 0 * * ? *"
+const defaultSchedule = "0 30 1 * * ? *"
 
 export function partnerCron(value: unknown) {
   if (value == null || value === "") value = defaultSchedule

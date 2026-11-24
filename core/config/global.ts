@@ -1,3 +1,4 @@
+import { hasNeteasePartnerAccount } from "../../../../lib/netease-partner-defaults.ts"
 import { compatibleBilibiliDownload } from "../../../../lib/bilibili-download-compat.ts"
 import { readOptionalConfigFile, readOptionalLocalConfig } from "../../../../lib/config.ts"
 import { legacyLotusDirectories, readLotusGlobalConfig } from "../../../../lib/lotus-global-config.ts"
@@ -32,6 +33,9 @@ export async function loadGlobalConfig(root = deployment) {
       } else global[key] = values[0]
     }
   }
+  const partner = fields(global.netease_partner)
+  const partnerEnabled = typeof partner.enable === "boolean" ? partner.enable
+    : await hasNeteasePartnerAccount(root)
   const permissions = fields(global.permissions)
   const scopes = fields(permissions.scopes)
   const bilibili = fields(global.bilibili)
@@ -42,7 +46,7 @@ export async function loadGlobalConfig(root = deployment) {
     bilibili: bilibili.download ? { ...bilibili, download } : download,
     douyin: { enable: true, request_timeout_ms: 15000, ...fields(global.douyin) },
     music: fields(global.music),
-    netease_partner: fields(global.netease_partner),
+    netease_partner: { ...partner, enable: partnerEnabled } as Fields,
     permissions: {
       ...permissions,
       scopes: {

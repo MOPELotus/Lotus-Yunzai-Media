@@ -243,7 +243,7 @@ test("定时和启动补跑只在宿主激活后执行，关闭、同日已运�
     disconnect:handoff.signal,
     whenReady(action) { ready = action; return () => calls.push("unready") },
     registerTask(cron, action) {
-      expect(cron).toBe("0 5 0 * * *")
+      expect(cron).toBe("0 30 1 * * *")
       cronRun = action
       return () => calls.push("unregister")
     },
@@ -258,7 +258,7 @@ test("定时和启动补跑只在宿主激活后执行，关闭、同日已运�
     async render() { return {text:"通知给主人"} },
   })
   expect(partnerCron("5 0 * * ?")).toBe("0 5 0 * * *")
-  expect(partnerCron("")).toBe("0 5 0 * * *")
+  expect(partnerCron("")).toBe("0 30 1 * * *")
   expect(partnerCron("0 5 0 * * ? *")).toBe("0 5 0 * * *")
   expect(() => partnerCron("0 5 0 * * ? 2026")).toThrow()
   await cronRun()

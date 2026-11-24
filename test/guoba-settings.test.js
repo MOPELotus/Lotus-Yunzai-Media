@@ -48,7 +48,7 @@ test("媒体延用旧安装的独立 TuneWeave 地址和点歌配置，现用主
     expect(await load()).toMatchObject({
       tuneweave: { api_url: "http://127.0.0.1:9781/preferred" },
       music: { default_platform: "qq" },
-      netease_partner: { login_poll_ms: 100 },
+      netease_partner: { login_poll_ms: 100, enable: false },
     })
     await writeFile(join(originalName, "global.yaml"), conflict)
     await expect(load()).rejects.toThrow("旧 TuneWeave 服务地址不一致")

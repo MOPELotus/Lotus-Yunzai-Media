@@ -266,3 +266,92 @@ test("开机维护可取消 FFmpeg 部分传输与 TuneWeave 下载，在取消�
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("状态未知的本机 HTTP 服务和失效探测不会触发安装或改写旧程序", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-tuneweave-unknown-"))
+  const releaseCalls = []
+  let state = "capabilities"
+  const listening = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
+    const path = new URL(request.url).pathname
+    if (state === "invalid-http") return new Response("other local service")
+    if (path === "/healthz") return Response.json({ ok: true, data: {
+      version: state === "version" ? "无法识别的返回内容" : "1.0.0-beta.4",
+    } })
+    return new Response(null, { status: 503 })
+  } })
+  const endpoint = listening.url.origin
+  const service = new TuneWeaveService({
+    root: directory,
+    config: { api_url: endpoint },
+    spawn() { throw new Error("未知状态不可启动子进程") },
+    async fetch(url, init) {
+      if (url.startsWith(endpoint)) {
+        if (state === "timeout") throw new DOMException("timeout", "TimeoutError")
+        return fetch(url, init)
+      }
+      releaseCalls.push(url)
+      return new Response(null, { status: 503 })
+    },
+  })
+  try {
+    await mkdir(join(directory, "bin"))
+    const installed = join(directory, "bin/tuneweave")
+    await writeFile(installed, "原程序")
+    const record = join(directory, "process.json"), saved = JSON.stringify({ pid: 2147483647, api_url: endpoint })
+    await writeFile(record, saved)
+    for (state of ["capabilities", "version", "invalid-http", "timeout"]) {
+      expect(await service.status()).toMatchObject({ reachable: false, state: "unknown" })
+      expect(await service.updateIfRequired()).toMatchObject({ skipped: true, reason: "status_unknown" })
+      await expect(service.initialize()).rejects.toThrow("服务状态暂无法核实")
+      await expect(service.resume()).rejects.toThrow("服务状态暂无法核实")
+      expect(await Bun.file(installed).text()).toBe("原程序")
+      expect(await Bun.file(record).text()).toBe(saved)
+    }
+    expect(releaseCalls).toEqual([])
+  } finally {
+    listening.stop(true)
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("端口停止后先核进程记录，下载期间第三方抢占端口会保留已有文件", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-tuneweave-stopped-"))
+  const free = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("unused") })
+  const port = free.port, endpoint = free.url.origin
+  free.stop(true)
+  let manifestCalls = 0, occupied
+  const service = new TuneWeaveService({
+    root: directory, config: { api_url: endpoint }, spawn() { throw new Error("未证仍停止前不可启动") },
+  })
+  service.releaseManifest = async () => { manifestCalls++; return { version: "1.0.0-beta.4", artifacts: [] } }
+  service.verifyInstalled = async () => false
+  service.downloadRelease = async () => {
+    const file = join(directory, "downloaded")
+    await writeFile(file, "测试程序")
+    occupied = Bun.serve({ port, hostname: "127.0.0.1", fetch: () => new Response("other local service") })
+    return { file, version: "1.0.0-beta.4" }
+  }
+  try {
+    const record = join(directory, "process.json")
+    const wrongEndpoint = JSON.stringify({ pid: 2147483647, api_url: "http://127.0.0.1:1" })
+    await writeFile(record, wrongEndpoint)
+    await mkdir(join(directory, "bin"))
+    await writeFile(service.executable, "原程序")
+    expect(await service.status()).toMatchObject({ reachable: false, state: "stopped" })
+    expect(await service.updateIfRequired()).toMatchObject({ skipped: true, reason: "not_running" })
+    await expect(service.initialize()).rejects.toThrow("进程记录与当前实例不一致")
+    expect(manifestCalls).toBe(0)
+    expect(await Bun.file(record).text()).toBe(wrongEndpoint)
+
+    const saved = JSON.stringify({ pid: 2147483647, api_url: endpoint })
+    await writeFile(record, saved)
+    await expect(service.initialize()).rejects.toThrow("端点状态已变化")
+    expect(manifestCalls).toBe(1)
+    expect(await Bun.file(service.executable).text()).toBe("原程序")
+    expect(await Bun.file(record).text()).toBe(saved)
+    expect(await Bun.file(join(directory, "downloaded")).exists()).toBe(false)
+  } finally {
+    occupied?.stop(true)
+    await rm(directory, { recursive: true, force: true })
+  }
+})

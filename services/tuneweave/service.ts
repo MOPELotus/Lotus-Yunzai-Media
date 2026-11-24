@@ -97,6 +97,7 @@ interface TuneWeaveReachableStatus {
 interface TuneWeaveUnreachableStatus {
   ok: false
   reachable: false
+  state: "stopped" | "unknown"
   version?: never
   requiresUpdate?: never
   apiUrl: string
@@ -172,6 +173,11 @@ function errorCode(error: unknown): string | undefined {
   return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined
 }
 
+function isConnectionRefused(error: unknown): boolean {
+  if (errorCode(error) === "ECONNREFUSED") return true
+  return error instanceof AggregateError && error.errors.length > 0 && error.errors.every(isConnectionRefused)
+}
+
 function errorMessage(error: unknown): string {
   return error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message : "未知错误"
 }
@@ -212,9 +218,9 @@ export class TuneWeaveService {
     const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, {
       ...options, ...(audio && { body: Buffer.from(audio.bytes) }),
     }))
-      .catch(() => {
+      .catch((cause: unknown) => {
         signal?.throwIfAborted()
-        throw Object.assign(new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。"), {
+        throw Object.assign(new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。", { cause }), {
           code: "tuneweave_unavailable",
         })
       })
@@ -250,18 +256,25 @@ export class TuneWeaveService {
   async status(platform: TuneWeavePlatform = "bilibili", signal?: AbortSignal, redirect?: RequestRedirect): Promise<TuneWeaveStatus> {
     const expected = platformStatus[platform]
     if (!Object.hasOwn(platformStatus, platform)) throw new Error("不支持此 TuneWeave 能力检查。")
+    let healthResponded = false
     try {
       const health = await this.request<{ version: string }>("/healthz", { signal, redirect })
+      healthResponded = true
+      const requiresUpdate = compareTuneWeaveVersions(health.version, TUNEWEAVE_REQUIRED_VERSION) < 0
       const capabilities = await this.request<TuneWeaveCapability[]>("/v1/capabilities?" + new URLSearchParams({ platform }), { signal, redirect })
       const registration = Array.isArray(capabilities) ? capabilities.find(item => item.platform === platform && item.registered) : null
       const registered = registration?.capabilities
+      if (!Array.isArray(capabilities)) throw new Error("TuneWeave 返回了无效的能力清单。")
       const ready = Array.isArray(registered) && expected.capabilities.every(capability => registered.includes(capability))
-      const requiresUpdate = compareTuneWeaveVersions(health.version, TUNEWEAVE_REQUIRED_VERSION) < 0
       return { ok: ready, reachable: true, version: health.version, requiredVersion: TUNEWEAVE_REQUIRED_VERSION, requiresUpdate, apiUrl: this.config.api_url, capabilities,
         message: requiresUpdate ? `低于插件最低要求 ${TUNEWEAVE_REQUIRED_VERSION}，等待开机延迟更新或发送 #初始化环境。` : ready ? expected.ready : "当前版本缺少所需能力，请升级 TuneWeave。" }
     } catch (error) {
       signal?.throwIfAborted()
-      return { ok: false, reachable: false, apiUrl: this.config.api_url, message: errorMessage(error) }
+      const stopped = !healthResponded && errorCode(error) === "tuneweave_unavailable" &&
+        error instanceof Error && isConnectionRefused(error.cause)
+      return { ok: false, reachable: false, state: stopped ? "stopped" : "unknown", apiUrl: this.config.api_url,
+        message: stopped ? "TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。"
+          : "TuneWeave 服务状态暂无法核实，请检查健康接口、版本和能力。" }
     }
   }
 
@@ -310,10 +323,14 @@ export class TuneWeaveService {
   } = {}) {
     return this.lifecycle(async () => {
       signal?.throwIfAborted()
-      const status = await this.status(platform, signal, signal ? "error" : undefined)
+      const status = await this.status(platform, signal, "error")
       try { this.localUrl() } catch {
         if (!status.ok || status.requiresUpdate) throw new Error(status.message)
         return { ...status, already: true }
+      }
+      if (!status.reachable) {
+        if (status.state !== "stopped") throw new Error(status.message)
+        await this.requireStoppedRecord()
       }
       try {
         const manifest = await this.releaseManifest(signal)
@@ -328,12 +345,13 @@ export class TuneWeaveService {
         if (!await this.verifyInstalled(manifest, signal)) {
           await onProgress("正在下载 TuneWeave 官方发布文件并校验 SHA-256。")
           const release = await this.downloadRelease(manifest, signal)
-          let backup = null
+          let backup: string | undefined, replaced = false
           const previous = `${this.executable}.previous-${crypto.randomUUID()}`
           try {
-            signal?.throwIfAborted()
+            await this.requireStoppedEndpoint(platform, signal)
             try { await fs.rename(this.executable, previous); backup = previous } catch (error) { if (errorCode(error) !== "ENOENT") throw error }
             await fs.rename(release.file, this.executable)
+            replaced = true
             const ready = await this.startInstalled(release.version, platform, signal)
             if (backup) await fs.rm(backup, { force: true })
             return { ...ready, installed: true }
@@ -341,11 +359,12 @@ export class TuneWeaveService {
             if (backup) {
               await fs.rename(backup, this.executable)
               try { await this.startInstalled(undefined, platform) } catch {}
-            }
+            } else if (replaced) await fs.rm(this.executable, { force: true })
             throw error
           } finally { await fs.rm(release.file, { force: true }) }
         }
         await onProgress("正在启动本机 TuneWeave 服务。")
+        await this.requireStoppedEndpoint(platform, signal)
         const ready = await this.startInstalled(undefined, platform, signal)
         if (compareTuneWeaveVersions(ready.version, manifest.version) < 0) return await this.updateInstalled({ notify: onProgress, status: ready, manifest, platform, signal })
         return { ...ready, installed: false }
@@ -353,7 +372,7 @@ export class TuneWeaveService {
         // Update/verification availability is separate from service readiness.
         // Never accept an unhealthy service or one below the required version.
         signal?.throwIfAborted()
-        const current = await this.status(platform, signal, signal ? "error" : undefined)
+        const current = await this.status(platform, signal, "error")
         if (!current.ok || compareTuneWeaveVersions(current.version, TUNEWEAVE_REQUIRED_VERSION) < 0) throw error
         const message = error instanceof TuneWeaveCompatibilityError ? error.message + "，已保留现有服务。"
           : "现有 TuneWeave 服务可用，联网更新或校验暂未完成，稍后重试。"
@@ -413,12 +432,26 @@ export class TuneWeaveService {
     } catch (error) { await fs.rm(file, { force: true }); throw error }
   }
 
+  private async requireStoppedRecord() {
+    const file = await fs.lstat(path.join(this.root, "process.json")).catch((error: unknown) => {
+      if (errorCode(error) !== "ENOENT") throw error
+    })
+    if (!file) return
+    if (!file.isFile()) throw new Error("TuneWeave 进程记录须为本机文件。")
+    if ((await this.managedProcess()).alive) throw new Error("TuneWeave 托管进程仍在运行，保留当前进程记录，请先确认健康状态")
+  }
+
+  private async requireStoppedEndpoint(platform: TuneWeavePlatform, signal?: AbortSignal) {
+    const current = await this.status(platform, signal, "error")
+    if (current.reachable || current.state !== "stopped") throw new Error("TuneWeave 端点状态已变化，保留现有服务和文件。")
+    await this.requireStoppedRecord()
+    signal?.throwIfAborted()
+  }
+
   async startInstalled(expectedVersion: string | undefined, platform: TuneWeavePlatform = "bilibili", signal?: AbortSignal) {
     signal?.throwIfAborted()
     const url = this.localUrl()
-    let recorded = false
-    try { await fs.access(path.join(this.root, "process.json")); recorded = true } catch (error) { if (errorCode(error) !== "ENOENT") throw error }
-    if (recorded && (await this.managedProcess()).alive) throw new Error("TuneWeave 托管进程仍在运行，保留当前进程记录，请先确认健康状态")
+    await this.requireStoppedRecord()
     await fs.mkdir(path.join(this.root, "accounts"), { recursive: true, mode: 0o700 })
     const log = await fs.open(path.join(this.root, "server.log"), "a", 0o600)
     let child: ChildProcess
@@ -458,8 +491,15 @@ export class TuneWeaveService {
   async managedProcess() {
     this.localUrl()
     let state: ProcessState
-    try { state = JSON.parse(await fs.readFile(path.join(this.root, "process.json"), "utf8")) } catch { throw new Error("没有本插件的 TuneWeave 进程记录，请由部署方升级服务") }
-    if (!Number.isInteger(state.pid) || state.pid <= 0 || new URL(state.api_url).href !== new URL(this.config.api_url).href) throw new Error("TuneWeave 进程记录与当前实例不一致")
+    const record = path.join(this.root, "process.json")
+    const info = await fs.lstat(record).catch((error: unknown) => {
+      if (errorCode(error) !== "ENOENT") throw error
+    })
+    if (!info) throw new Error("没有本插件的 TuneWeave 进程记录，请由部署方升级服务")
+    if (!info.isFile()) throw new Error("TuneWeave 进程记录须为本机文件。")
+    try { state = JSON.parse(await fs.readFile(record, "utf8")) } catch { throw new Error("TuneWeave 进程记录无效，请由部署方检查服务") }
+    if (!state || !Number.isInteger(state.pid) || state.pid <= 0 || typeof state.api_url !== "string" ||
+        new URL(state.api_url).href !== new URL(this.config.api_url).href) throw new Error("TuneWeave 进程记录与当前实例不一致")
     if (!await processAlive(state.pid)) return { ...state, alive: false }
     const actual = await processIdentity(state.pid, this.platform), executable = await fs.realpath(this.executable).catch(error => {
       if (errorCode(error) === "ENOENT" && state.identity?.executable === path.resolve(this.executable)) return state.identity.executable
@@ -493,8 +533,8 @@ export class TuneWeaveService {
 
   async updateInstalled({ notify, status, manifest, repair = false, platform = "bilibili", signal }: UpdateOptions = {}) {
     signal?.throwIfAborted()
-    status ||= await this.status(platform, signal, signal ? "error" : undefined)
-    if (!status.reachable) return { ...status, skipped: true, reason: "not_running" }
+    status ||= await this.status(platform, signal, "error")
+    if (!status.reachable) return { ...status, skipped: true, reason: status.state === "stopped" ? "not_running" : "status_unknown" }
     const targetVersion = manifest?.version || TUNEWEAVE_REQUIRED_VERSION
     if (!repair && compareTuneWeaveVersions(status.version, targetVersion) >= 0) return { ...status, skipped: true, reason: "up_to_date" }
     const state = await this.managedProcess()
@@ -562,6 +602,7 @@ export class TuneWeaveService {
       await this.managedProcess()
       const status = await this.status("bilibili", signal, "error")
       if (status.reachable) return status
+      if (status.state !== "stopped") throw new Error(status.message)
       return this.startInstalled(undefined, "bilibili", signal)
     })
   }

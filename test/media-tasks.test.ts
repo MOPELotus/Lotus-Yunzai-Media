@@ -35,14 +35,19 @@ test("同类同名媒体任务各占一份目录，释放失败一侧不会删�
   }
 })
 
-test("只能释放本机具有有效旧版标记的直接任务目录", async () => {
+test("只能主动释放本次进程创建且身份标记相符的任务", async () => {
   const root = await mkdtemp(join(tmpdir(), "lotus-media-owners-"))
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" })
+  const started = once(child, "spawn"), exited = once(child, "exit")
   try {
-    const owner = { version: 1, pid: process.pid, host: hostname() }
+    await started
+    const owner = { version: 1, id: "legacy", pid: process.pid, host: hostname() }
     for (const [name, marker] of [
       ["保留目录", JSON.stringify(owner)],
       ["task-malformed", "旧文件中的一行说明"],
       ["task-foreign", JSON.stringify({ ...owner, host: "另一台主机" })],
+      ["task-other-process", JSON.stringify({ ...owner, pid: child.pid })],
+      ["task-same-pid", JSON.stringify(owner)],
     ] as const) {
       const dir = join(root, name)
       await mkdir(dir)
@@ -51,12 +56,17 @@ test("只能释放本机具有有效旧版标记的直接任务目录", async ()
       await expect(releaseMediaTask(root, dir)).rejects.toThrow()
       expect(await readFile(join(dir, "original.mp4"), "utf8")).toBe("keep")
     }
-    const old = join(root, "task-legacy")
-    await mkdir(old)
-    await writeFile(join(old, taskMarker), JSON.stringify(owner))
-    await releaseMediaTask(root, old)
-    expect(await readdir(root)).not.toContain("task-legacy")
+    const current = await createMediaTask(root)
+    const markerPath = join(current.dir, taskMarker)
+    const raw = await readFile(markerPath, "utf8")
+    await writeFile(markerPath, JSON.stringify({ ...JSON.parse(raw), id: "obsolete" }))
+    await expect(releaseMediaTask(root, current.dir)).rejects.toThrow()
+    await writeFile(markerPath, raw)
+    await releaseMediaTask(root, current.dir)
+    expect(await readdir(root)).not.toContain(current.id)
   } finally {
+    child.kill()
+    await exited
     await rm(root, { recursive: true, force: true })
   }
 })

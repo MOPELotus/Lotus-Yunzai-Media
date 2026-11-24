@@ -123,7 +123,7 @@ test("三个整体初始化入口同时准备验证码模型，沿用权限和�
       async prepareCaptcha(signal) { expect(signal).toBe(controller.signal); downloads++ },
       render: async () => { throw new Error("fixture no image") },
     })
-    expect(await command.fallback(name, context(() => true, { canManagePackages: false }))).toContain("只有机器人主人")
+    expect(await command.fallback(name, context(() => true, { canManagePackages: undefined }))).toContain("只有机器人主人")
     expect(downloads).toBe(0)
     const reply = await command.fallback(name, context(message => { received.push(message); return true }))
     expect(reply).toContain("媒体环境 · 检查完成")

@@ -21,7 +21,7 @@ test("FFmpeg 流式下载报告真实字节，未知长度不编造总量，观�
   try {
     for (const known of [true, false]) {
       const events: TaskProgress[] = []
-      const installer = new ToolInstallerService({ fetch: (() => Promise.resolve(response(bytes, known))) as typeof fetch })
+      const installer = new ToolInstallerService({ fetch: (() => Promise.resolve(response(bytes, known))) as unknown as typeof fetch })
       const file = join(root, String(known))
       await installer.downloadAsset("https://fixture.invalid", file, { onTaskProgress(event) {
         events.push(event)
@@ -45,7 +45,7 @@ test("TuneWeave 下载进度与 SHA-256 核对有序，错误校验不得留下�
     verification: { algorithm: "sha256", checksum_url: url + ".sha256" } }] }
   let checksum = createHash("sha256").update(bytes).digest("hex")
   const service = new TuneWeaveService({ root, platform: "linux", arch: "x64", fetch: (async (url: string | URL | Request) =>
-    String(url).endsWith(".sha256") ? new Response(checksum) : response(bytes, true)) as typeof fetch })
+    String(url).endsWith(".sha256") ? new Response(checksum) : response(bytes, true)) as unknown as typeof fetch })
   try {
     const events: TaskProgress[] = []
     const release = await service.downloadRelease(manifest, undefined, event => events.push(event))

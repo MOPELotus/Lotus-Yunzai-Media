@@ -63,7 +63,8 @@ type EvaluationPayload = {
   source: "mp-music-partner"
   extraResource?: "true"
 }
-type ReviewRecord = { mode: string } & ({ sources: string[]; contextWarnings: string[] } | { error: string })
+type ReviewRecord = { mode: string } & ({ sources: string[]; contextWarnings: string[] } |
+  { error: string; reason: "unverified" | "length" })
 type Evaluation = {
   workId: string
   name: string
@@ -364,13 +365,16 @@ export class NeteasePartnerTask {
               } catch {
                 signal?.throwIfAborted()
                 const error = "乐评未核实，本首仅提交评分。"
-                reviewRecord = { mode:review.mode, error }
+                reviewRecord = { mode:review.mode, error, reason:"unverified" }
                 summary.details.push(error)
               }
             } else if (!review.mode || review.mode === "fixed") {
               if (!available.length) available = [...pool]
               const picked = available.splice(Math.floor(Math.random() * available.length), 1)[0] || ""
               if (picked.length <= max) comment = picked
+              else reviewRecord = { mode:"fixed", reason:"length", error:"固定乐评超过字数设置，未发布评论。" }
+            } else {
+              reviewRecord = { mode:review.mode, reason:"unverified", error:"无法识别乐评模式，本首仅提交评分。" }
             }
           }
           const payload: EvaluationPayload = { taskId:daily.data?.id, workId:rawId, score, tags:`${score}-A-1`, customTags:"[]", comment, syncYunCircle:"true",

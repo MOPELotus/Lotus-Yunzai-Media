@@ -393,3 +393,44 @@ test.each(["成功", "健康但暂缓", "维护异常", "等待取消", "期间�
     }
   }
 )
+
+test("固定乐评每轮抽完整个去重语料，超长条目逐曲标记为只评分", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lotus-partner-review-length-"))
+  const published = []
+  const long = "🎵".repeat(11)
+  try {
+    const task = new NeteasePartnerTask({
+      stateFile:join(dir,"state.yaml"), logDir:dir,
+      accounts:{ loadAccounts:async()=>[{ uid:"42", tuneweave_account:"fixture" }], saveAccount() { throw new Error("no relink") } },
+      scorer:()=>4, sleep:async()=>{}, now:()=>new Date(2026,10,24,12),
+      tuneweave:{
+        requireReady:async()=>{},
+        async request(route, options) {
+          if (route.startsWith("/v1/account?")) return { authenticated:true, user_id:"42" }
+          const { uri, data } = options.body
+          if (uri.endsWith("/daily/task/get")) return { code:200, data:{ works:
+            [1, 2, 3, 4].map(id=>({ id, name:`样本曲目 ${id}` })),
+          } }
+          if (uri.endsWith("/extra/wait/evaluate/work/list")) return { code:200, data:[] }
+          expect(uri.endsWith("/work/evaluate")).toBe(true)
+          published.push(data)
+          return { code:200 }
+        },
+      },
+    })
+    const report = await task.execute({ comments:["甲", " 甲 ", "", "乙", long], review:{ max_chars:20 } })
+    expect(published.map(item=>item.workId)).toEqual([1, 2, 3, 4])
+    expect(new Set(published.slice(0,3).map(item=>item.comment))).toEqual(new Set(["甲","乙",""]))
+    expect(published.every(item=>item.syncComment === (item.comment ? "true" : "false"))).toBe(true)
+    const skipped = published.filter(item=>!item.comment).map(item=>String(item.workId))
+    const reason = "固定乐评超过字数设置"
+    for (const record of report.accounts[0].evaluations) {
+      if (skipped.includes(record.workId) && record.status === "success") {
+        expect(record).toMatchObject({ commentPosted:false, review:{ mode:"fixed", reason:"length" } })
+      }
+    }
+    const lines = partnerLogNodes(await readPartnerLog(dir)).map(item=>item.text)
+    expect(lines.filter(line=>line.includes(reason))).toHaveLength(skipped.length)
+    expect(JSON.stringify(report)).not.toContain(long)
+  } finally { await rm(dir,{ recursive:true, force:true }) }
+})

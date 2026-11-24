@@ -91,6 +91,52 @@ test("合伙人先核验旧账号，沿用任务顺序、账号偏好和未确�
   } finally { server.stop(true); await rm(dir,{recursive:true,force:true}) }
 })
 
+test("合伙人当日上限回包仍能核对完整评分和乐评，回执不标已发表", async () => {
+  const payloads = []
+  const stateTransitions = []
+  const workId = "extra-work"
+  const scores = [4, 2, 3, 5]
+  const task = new NeteasePartnerTask({
+    tuneweave:{
+      async requireReady(platform) { expect(platform).toBe("netease") },
+      async request(path, options) {
+        if (path.startsWith("/v1/account?")) return { authenticated:true, user_id:"1042" }
+        expect(path).toBe("/v1/extensions/netease/api")
+        expect(options.body.account).toBe("fixture-alias")
+        const { uri, data } = options.body
+        if (uri.endsWith("/daily/task/get")) {
+          return { code:200, data:{ id:42, works:[{ work:{ id:"completed-work" }, completed:true }] } }
+        }
+        if (uri.endsWith("/extra/wait/evaluate/work/list")) {
+          return { code:200, data:[{ id:workId, name:"隔离作品", supportExtraEvaTypes:["编曲","歌词","演唱"] }] }
+        }
+        expect(uri.endsWith("/work/evaluate")).toBe(true)
+        payloads.push(data)
+        throw Object.assign(new Error("模拟上游今日已达上限"), { upstreamCode:405 })
+      },
+    },
+    scorer:() => scores.shift(),
+    sleep:async () => {},
+  })
+  const report = await task.evaluateAccount({ uid:"1042", tuneweave_account:"fixture-alias", comment:true },
+    { comments:["这是隔离测试中的乐评正文。"] }, new Map(), async (receipt, status) => {
+      stateTransitions.push([receipt, status])
+    })
+  expect(payloads).toHaveLength(2)
+  expect(payloads[1]).toEqual(payloads[0])
+  expect(payloads[0]).toMatchObject({ taskId:42, workId, score:4, extraResource:"true",
+    comment:"这是隔离测试中的乐评正文。", syncComment:"true" })
+  expect(JSON.parse(payloads[0].extraScore)).toEqual({ 编曲:2, 歌词:3, 演唱:5 })
+  expect(report.evaluations.filter(item => item.workId === workId).map(item => [item.status, item.commentPosted]))
+    .toEqual([["failed",false],["failed",false]])
+  expect(report.details).toContain("网易云今日没有更多可评定歌曲（405）。")
+  expect(stateTransitions).toEqual([
+    ["1042:completed-work","confirmed"],
+    ["1042:" + workId,"pending"], ["1042:" + workId,undefined],
+    ["1042:" + workId,"pending"], ["1042:" + workId,undefined],
+  ])
+})
+
 test("空合伙人档案保存说明，未连接平台", async () => {
   const dir = await mkdtemp(join(tmpdir(),"lotus-partner-empty-"))
   try {

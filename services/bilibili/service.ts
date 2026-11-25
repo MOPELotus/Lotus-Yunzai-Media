@@ -6,6 +6,7 @@ import path from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import QRCode from "qrcode"
 import YAML from "yaml"
+import { withoutReadRetries, withReadRetries } from "@lotus-yunzai/http"
 import { resolveData, rootPath } from "../../core/path.ts"
 import { formatLocalIso } from "../../core/time.ts"
 import { TuneWeaveService, type TuneWeaveConfig } from "../tuneweave/service.ts"
@@ -339,7 +340,8 @@ export class BilibiliService {
     const signal = active ? AbortSignal.any([active, timeout]) : timeout
     for (let hops = 0; hops <= 5; hops++) {
       if (!BILI_SHORT_HOSTS.has(url.hostname)) return url
-      const response = await this.fetch(url, { method: "HEAD", redirect: "manual", credentials: "omit", headers: COMMON_HEADERS, signal })
+      const request = withReadRetries((target, init) => withoutReadRetries(() => this.fetch(target, init)))
+      const response = await request(url, { method: "HEAD", redirect: "manual", credentials: "omit", headers: COMMON_HEADERS, signal })
       if (response.status < 300 || response.status >= 400) break
       const location = response.headers.get("location")
       const next = location && parseBiliUrl(new URL(location, url))
@@ -738,7 +740,11 @@ export class BilibiliService {
     if (typeof this.fetch !== "function") throw new Error("fetch is unavailable")
     const timeout = AbortSignal.timeout(15000)
     const signal = active ? AbortSignal.any([active, timeout]) : timeout
-    const response = await this.fetch(url, { headers: COMMON_HEADERS, redirect: "error", credentials: "omit", signal })
+    const request = withReadRetries((target, init) => withoutReadRetries(() => this.fetch(target.href, init)), {
+      canRetry: (target, method) => method === "GET" && target.origin === "https://api.live.bilibili.com" &&
+        target.pathname === "/room/v1/Room/get_info",
+    })
+    const response = await request(new URL(url), { headers: COMMON_HEADERS, redirect: "error", credentials: "omit", signal })
     signal.throwIfAborted()
     if (!response.ok) {
       await response.body?.cancel()

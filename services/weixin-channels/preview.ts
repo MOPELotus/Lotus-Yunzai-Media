@@ -1,3 +1,5 @@
+import { withoutReadRetries, withReadRetries } from "@lotus-yunzai/http"
+import { readPublicResponse } from "../public-read.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { loadPublicShareConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
@@ -62,12 +64,15 @@ async function readPreview(id: string, url: string, active: AbortSignal, fetch: 
   const signal = AbortSignal.any([active, AbortSignal.timeout(8_000)])
   const options = { credentials: "omit", redirect: "manual", signal } as const
   // The public short link must resolve to the official preview page for this exact ID.
-  const redirect = await fetch(url, options)
+  const redirect = await readPublicResponse(fetch, url, options)
   await redirect.body?.cancel()
   const target = URL.parse(redirect.headers.get("location") ?? "")
   if (![301, 302, 303, 307, 308].includes(redirect.status) || target?.origin !== origin || shareId(target.href) !== id) return
 
-  const response = await fetch(endpoint, {
+  const read = withReadRetries((target, init) => withoutReadRetries(() => fetch(target.href, init)), {
+    canRetry: (target, method) => method === "POST" && target.href === endpoint,
+  })
+  const response = await read(new URL(endpoint), {
     ...options, method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Referer: page + "?id=" + id },
     body: JSON.stringify({ baseReq: { generalToken: "" }, shortUri: id }),
   })

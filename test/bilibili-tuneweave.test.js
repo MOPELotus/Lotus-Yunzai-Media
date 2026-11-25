@@ -178,8 +178,8 @@ test("普通解析关闭时直链直播仍只输出房间和独立播放器，�
     expect(signals).toEqual([])
     expect(await invoke(room)).toEqual([])
     expect(replies[0]).toMatchObject({ type: "image" })
-    expect(replies.slice(1)).toEqual(["[media] B站解析完成。",
-      "[media] 独立播放器：https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=42"])
+    expect(replies.slice(1)).toEqual(["B站解析完成。",
+      "独立播放器：https://www.bilibili.com/blackboard/live/live-activity-player.html?cid=42"])
     expect(signals[0].aborted).toBe(false)
     abort = true
     const previous = replies.length

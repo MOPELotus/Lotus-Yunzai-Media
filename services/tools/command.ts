@@ -38,17 +38,17 @@ export function createMediaEnvironment({ signal }: { readonly signal?: AbortSign
   const fallback: MessageFallback = async (message, context) => {
     if (!matches(message) || signal?.aborted) return
     if (context.isDelegated || context.canManagePackages !== true) {
-      return "[media] 只有机器人主人可以初始化媒体环境。"
+      return "只有机器人主人可以初始化媒体环境。"
     }
     const config = await preparation.loadConfig()
     // The host capability confirms the current owner on either protocol.
     if (!new PermissionService({ permissions: config.permissions }).explain({ ...context, isMaster: true }, "tools.install").ok) {
-      return "[media] 当前会话没有初始化工具链的权限。"
+      return "当前会话没有初始化工具链的权限。"
     }
     if (signal?.aborted) return []
     const progress: Progress = async (text) => {
       if (signal?.aborted) return
-      try { await context.reply(`[media] ${text}`) } catch { /* A progress reply is best effort. */ }
+      try { await context.reply(`${text}`) } catch { /* A progress reply is best effort. */ }
     }
     await progress("正在检查媒体环境，补齐缺失组件并检查更新。")
     if (signal?.aborted) return []

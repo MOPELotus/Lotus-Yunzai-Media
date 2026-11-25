@@ -485,7 +485,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       return await musicSharePreview(context, active, { title, author, url: selected.url }, platform, hint)
     } catch (error) {
       if (!active.aborted && (play || !(error instanceof MusicFeatureDisabled))) {
-        return play ? "[media] 播放：" + errorText(error) : "暂时无法读取音乐链接，请在原平台打开。\n" + target.url
+        return play ? "播放：" + errorText(error) : "暂时无法读取音乐链接，请在原平台打开。\n" + target.url
       }
     }
   }
@@ -543,7 +543,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       finally { await api.cleanup(media) }
       return []
     } catch (error) {
-      if (!active.aborted) return "[media] " + request.mode + "：" + errorText(error)
+      if (!active.aborted) return request.mode + "：" + errorText(error)
     } finally {
       selected.busy = false
     }
@@ -868,7 +868,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         }
       }
     } catch (error) {
-      if (!moduleSignal.aborted) return "[media] 音乐：" + errorText(error)
+      if (!moduleSignal.aborted) return "音乐：" + errorText(error)
     }
     return []
   }
@@ -941,7 +941,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
             playing => playMedia(context, api, track, undefined, playing))
         }
       } catch (error) {
-        if (!active.aborted) return "[media] 播放：" + errorText(error)
+        if (!active.aborted) return "播放：" + errorText(error)
       }
       return []
     }
@@ -978,7 +978,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           throw error
         }
       } catch (error) {
-        if (pendingSearches.get(key) === request) return "[media] 点歌：" + errorText(error)
+        if (pendingSearches.get(key) === request) return "点歌：" + errorText(error)
       } finally {
         if (pendingSearches.get(key) === request) pendingSearches.delete(key)
       }
@@ -994,7 +994,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         replace(key, { stage: "platform", api, platforms, force, expires: Date.now() + timeoutMs })
         return "请选择扫码平台：\n" + platforms.map((item, index) => `${index + 1}. ${item.name}`).join("\n") +
           "\n输入数字继续，#取消 退出。网易云与合伙人、云盘共用登录。"
-      } catch (error) { return "[media] 音乐：" + errorText(error) }
+      } catch (error) { return "音乐：" + errorText(error) }
     }
 
     const config = await loadGlobalConfig()
@@ -1009,14 +1009,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         await scan(context, key, { api, platform: "netease", partner: true,
           timeoutMs: loginTime(partner.login_timeout_ms, musicLoginTimeout("netease")),
           pollMs: loginTime(partner.login_poll_ms, 3000) })
-      } catch (error) { return "[media] 音乐：合伙人登录失败：" + errorText(error) }
+      } catch (error) { return "音乐：合伙人登录失败：" + errorText(error) }
       return []
     }
     if (selected === "partnerLog") {
       if (!credentialScope(context) || !owner) return "请由机器人主人在私聊查看合伙人日志。"
       let report
       try { report = await readPartnerLog() }
-      catch { return "[media] 无法读取合伙人日志。" }
+      catch { return "无法读取合伙人日志。" }
       if (report) return { type: "forward", nodes: partnerLogNodes(report) }
       const image = await renderStatusCard({ title: "合伙人日志", subtitle: "最近日志", badge: "空",
         message: `生成时间：${formatLocalDateTime()}`, items: [{ label: "暂无日志", value: "成功 0 · 失败 0" }],
@@ -1044,14 +1044,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (!owner) return "只有机器人主人可以初始化 TuneWeave。"
       try {
         const result = await new TuneWeaveService({ config: config.tuneweave }).initialize({
-          platform: "netease", onProgress: async (text: string) => { await reply(context, "[media] " + text) },
+          platform: "netease", onProgress: async (text: string) => { await reply(context, text) },
         })
-        return "[media] TuneWeave 初始化完成 · " + result.version + " · " + apiOrigin(result.apiUrl)
-      } catch (error) { return "[media] TuneWeave 初始化失败：" + errorText(error) }
+        return "TuneWeave 初始化完成 · " + result.version + " · " + apiOrigin(result.apiUrl)
+      } catch (error) { return "TuneWeave 初始化失败：" + errorText(error) }
     }
     if (!owner) return "只有机器人主人可以查看 TuneWeave 状态。"
     const status = await new TuneWeaveService({ config: config.tuneweave }).status("netease", moduleSignal)
-    return "[media] TuneWeave " + (status.requiresUpdate ? "待更新" : status.ok ? "就绪" : "未就绪") +
+    return "TuneWeave " + (status.requiresUpdate ? "待更新" : status.ok ? "就绪" : "未就绪") +
       " · " + (status.version || "未知版本") + "\n" + apiOrigin(status.apiUrl) + "\n" + status.message
   }
 

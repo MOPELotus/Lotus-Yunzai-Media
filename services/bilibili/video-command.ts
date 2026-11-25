@@ -300,7 +300,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       const bytes = await readOriginal(url, limit, active, transport)
       if (bytes && await reply(context, { type: "image", file: bytes })) sent++
     }
-    return sent ? [] : "[media] 没有可以发送的 B 站原图。"
+    return sent ? [] : "没有可以发送的 B 站原图。"
   }
 
   async function reportError(context: MessageFallbackContext, title: string, cause: unknown) {
@@ -319,7 +319,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         { label: "建议", value: diskFull ? "请联系机器人主人清理磁盘空间后重试。" : "检查链接是否有效，或稍后重试。" },
       ],
     }, { saveId: `media-bilibili-error-${context.user_id || "user"}` }).catch(() => undefined)
-    await imageReply(context, image, `[media] ${fallback}`)
+    await imageReply(context, image, `${fallback}`)
   }
 
   function currentSession(key: string) {
@@ -330,14 +330,14 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
 
   async function showSearch(context: MessageFallbackContext, service: BilibiliService, key: string,
     keyword: string, page: number, tuku: boolean) {
-    if (running.has(key)) return "[media] 当前 B 站搜索正在进行。"
+    if (running.has(key)) return "当前 B 站搜索正在进行。"
     running.add(key)
     try {
       if (tuku) await reply(context, "好的，正在搜索")
       if (signal?.aborted) return []
       const results = await service.search(keyword, { page, signal: commentSignal(context), ...(tuku && { limit: tukuPageSize }) })
       if (signal?.aborted) return []
-      if (page > 1 && !results.length) return "[media] 已经没有下一页了。"
+      if (page > 1 && !results.length) return "已经没有下一页了。"
       const message = results.length
         ? tuku ? `第 ${page} 页 · 两分钟内可翻页，或发送 #看B站视频 1 选择结果。` : "两分钟内发送 #看1 这类序号继续解析。"
         : "没有搜索到相关视频。"
@@ -353,7 +353,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         badge: tuku ? `第 ${page} 页 · ${results.length} 条` : String(results.length),
         message, userId: context.user_id, items,
       }, { saveId: `media-bilibili-search-${context.user_id || "user"}` })
-      await imageReply(context, image, "[media] B站搜索完成。")
+      await imageReply(context, image, "B站搜索完成。")
     } catch (error) {
       await reportError(context, "B站搜索", error)
     } finally {
@@ -378,11 +378,11 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     const preview = info.type === "video" ? { target: info.url, discussion } : undefined
     const receipt = preview && previewReceipt(context, preview)
     if (!image && info.type === "video") await reply(context, formatBilibiliPreviewText(info), undefined, receipt)
-    else await imageReply(context, image || undefined, "[media] B站解析完成。", receipt)
+    else await imageReply(context, image || undefined, "B站解析完成。", receipt)
     if (signal?.aborted) return
     if (discussion && preview) await showDiscussion(context, preview, "B 站评论")
     if (info.type === "live" && info.playerUrl) {
-      await reply(context, "[media] 独立播放器：" + info.playerUrl)
+      await reply(context, "独立播放器：" + info.playerUrl)
     } else if (info.type === "video" && info.url && download) {
       await runDownload(context, service, info.url, "B站解析下载")
     }
@@ -450,20 +450,20 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (action.kind === "write-comment") return writeComment(context, action.text)
     const key = sessionKey(context)
     const session = currentSession(key)
-    if (action.kind === "page" && !session?.tuku) return "[media] 请先发送 #点B站视频 关键词。"
+    if (action.kind === "page" && !session?.tuku) return "请先发送 #点B站视频 关键词。"
     if (action.kind === "pick" && !session) {
-      return action.tuku ? "[media] 搜索结果已过期，请发送 #点B站视频 关键词。" : undefined
+      return action.tuku ? "搜索结果已过期，请发送 #点B站视频 关键词。" : undefined
     }
-    if (action.kind === "download" && !action.target) return "[media] 请输入要下载的 B站链接、BV号或 av号。"
+    if (action.kind === "download" && !action.target) return "请输入要下载的 B站链接、BV号或 av号。"
     const config = await loadGlobalConfig()
     const service = new BilibiliService({ fetch, tuneweaveConfig: config.tuneweave, searchLimit: (config.bilibili as BiliConfig).search_limit })
     switch (action.kind) {
       case "search":
-        if (!action.keyword) return "[media] 请输入搜索关键词。"
+        if (!action.keyword) return "请输入搜索关键词。"
         return showSearch(context, service, key, action.keyword, 1, action.tuku)
       case "page":
         if (!session) return
-        if (!action.next && session.page === 1) return "[media] 当前已经是第一页。"
+        if (!action.next && session.page === 1) return "当前已经是第一页。"
         return showSearch(context, service, key, session.keyword, session.page + (action.next ? 1 : -1), true)
       case "download":
         await runDownload(context, service, action.target, "B站下载")
@@ -474,11 +474,11 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     try {
       if (action.kind === "pick") {
         const item = session!.results[action.index - 1]
-        if (!item) return session!.results.length ? `[media] 请输入 1-${session!.results.length} 之间的序号。` : "[media] 当前页没有可选的视频。"
+        if (!item) return session!.results.length ? `请输入 1-${session!.results.length} 之间的序号。` : "当前页没有可选的视频。"
         if (action.tuku) await reply(context, "正在解析中，请稍等片刻")
         target = item.url
       } else if (action.kind === "watch") {
-        if (!action.keyword) return "[media] 请输入关键词。"
+        if (!action.keyword) return "请输入关键词。"
         const [first] = await service.search(action.keyword, { limit: 1, signal: commentSignal(context) })
         if (!first) throw new Error("未搜索到相关视频")
         target = first.url
@@ -511,7 +511,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
             const provider = createBiliProvider({ fetch })
             const post = await provider.fetchPost(id, active)
             if (active?.aborted) return
-            if (!post) return "[media] 这条 B 站动态不可用。"
+            if (!post) return "这条 B 站动态不可用。"
             if (action.kind === "quote" && action.action === "images") {
               return sendOriginals(context, [...post.images, ...(post.forwarded?.images ?? [])], service.fetch, active)
             }

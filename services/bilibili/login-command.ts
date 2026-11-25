@@ -17,7 +17,7 @@ async function loginError(context: MessageFallbackContext, message: string) {
     title: "B站登录", subtitle: "Lotus-Yunzai · B 站", badge: "失败", message, userId: context.user_id,
     items: [{ label: "建议", value: "检查链接是否有效，或稍后重试。" }],
   }, { saveId: `media-bilibili-error-${context.user_id || "user"}` }).catch(() => undefined)
-  return png ? { type: "image" as const, file: png } : "[media] " + message
+  return png ? { type: "image" as const, file: png } : message
 }
 
 export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal }) {
@@ -84,7 +84,7 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
         ],
       }, { saveId: `media-bilibili-login-ok-${context.user_id || "master"}` }).catch(() => undefined)
       active.throwIfAborted()
-      return report ? { type: "image", file: report } : "[media] B站登录完成。"
+      return report ? { type: "image", file: report } : "B站登录完成。"
     } catch (error) {
       if (active.aborted) return []
       return loginError(context, error instanceof Error ? error.message : "B 站登录未完成，请稍后重试。")

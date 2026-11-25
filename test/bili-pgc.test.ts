@@ -242,7 +242,7 @@ test("B 站短链只展开一次再分流番剧、普通视频、分 P、直播�
     }
     await dispatch(groupEvent(shortLive))
     expect(calls.splice(0)).toEqual(["HEAD " + shortLive, "live 800"])
-    expect(await dispatch(groupEvent(shortDynamic))).toBe("[media] 这条 B 站动态不可用。")
+    expect(await dispatch(groupEvent(shortDynamic))).toBe("这条 B 站动态不可用。")
     expect(calls.splice(0)).toEqual(["HEAD " + shortDynamic, "dynamic 12345"])
     await dispatch(groupEvent(unsafe))
     expect(calls.splice(0)).toEqual(["HEAD " + unsafe])

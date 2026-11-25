@@ -164,7 +164,7 @@ test("抖音未知交付明确提示核对，清理任务且不续发其余文�
       async reply(value) { replies.push(value); return true } })
     expect(await commands.fallback("#抖音下载 " + archive, event)).toEqual([])
     expect(sends).toEqual(["001-image.png"])
-    expect(replies).toEqual(["[media] 媒体发送结果未确认，请在会话中核对。"])
+    expect(replies).toEqual(["媒体发送结果未确认，请在会话中核对。"])
     expect(await readdir(directory)).toEqual([])
   } finally { await commands.dispose(); await rm(directory, { recursive:true, force:true }) }
 })

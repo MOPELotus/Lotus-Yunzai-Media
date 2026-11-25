@@ -92,9 +92,9 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       }
       const allowed = new PermissionService({ permissions: config.permissions }).explain(context, "douyin.download").ok
       const download = normalizeDouyinDownloadConfig(config.douyin)
-      const denied = "[media] 你没有使用抖音下载的权限。"
+      const denied = "你没有使用抖音下载的权限。"
       if (!showInfo && (!allowed || !download.enable)) {
-        await reply(allowed ? "[media] 抖音下载未启用。" : denied)
+        await reply(allowed ? "抖音下载未启用。" : denied)
         return
       }
       const info = await service.getInfo(share.target, { signal: active })
@@ -102,7 +102,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       if (showInfo) {
         await replyImage(reply, active, maxBytes, renderScale => render("douyin-info", {
           ...info, avatar: info.author?.avatar, userId: context.user_id,
-        }, { saveId, renderScale }), `[media] ${info.title}\n作者：${info.owner || "未知"}\n${info.url}`)
+        }, { saveId, renderScale }), `${info.title}\n作者：${info.owner || "未知"}\n${info.url}`)
         for (const [index, page] of articlePages(info.article).entries()) {
           if (active.aborted) return
           await replyImage(reply, active, maxBytes, renderScale => render("article", {
@@ -122,7 +122,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       })
       if (active.aborted) return
       if (!result.ok || !("files" in result)) throw new Error(mediaFailureMessage("reason" in result ? result : undefined))
-      if (result.warnings.length) await reply("[media] " + [...new Set(result.warnings)].join("；"))
+      if (result.warnings.length) await reply([...new Set(result.warnings)].join("；"))
       for (const file of result.files) {
         if (active.aborted) return
         await sendMediaFile({ ...context, reply }, file, { ...download, file_name: result.fileNames?.[file], signal: active })
@@ -135,7 +135,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       await replyImage(reply, active, maxBytes, renderScale => renderStatusCard({
         title: "抖音解析", subtitle: "Lotus-Yunzai · 抖音", badge: code === mediaDeliveryUnknown ? "未确认" : "失败",
         message, userId: context.user_id,
-      }, { saveId: saveId + "-error", renderScale }), "[media] " + message)
+      }, { saveId: saveId + "-error", renderScale }), message)
     } finally {
       if (result && "taskDir" in result) await service.releaseTask(result).catch(error => {
         console.warn("[media] 抖音任务清理失败：" + error.message)
@@ -154,8 +154,8 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
 
     const config = await loadConfig()
     if (active.aborted) return
-    if (!config.douyin.enable) return explicit ? "[media] 抖音解析已关闭。" : undefined
-    if (!target) return "[media] 请输入要下载的抖音分享链接。"
+    if (!config.douyin.enable) return explicit ? "抖音解析已关闭。" : undefined
+    if (!target) return "请输入要下载的抖音分享链接。"
     const service = makeService(config.douyin.request_timeout_ms)
     const job = handleWork(service, target, config, context, !explicit, active)
     work.add(job)

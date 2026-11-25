@@ -29,7 +29,7 @@ test("三个环境入口先发准备消息，实时报告 FFmpeg 与 TuneWeave�
     async prepareTools(settings, progress, signal) {
       expect(settings).toBe(config.tools)
       expect(signal).toBe(controller.signal)
-      expect(received).toEqual(["[media] 正在检查媒体环境，补齐缺失组件并检查更新。"])
+      expect(received).toEqual(["正在检查媒体环境，补齐缺失组件并检查更新。"])
       await progress("工具链：正在下载 FFmpeg")
       downloading.resolve()
       await release.promise
@@ -38,13 +38,13 @@ test("三个环境入口先发准备消息，实时报告 FFmpeg 与 TuneWeave�
     async prepareTuneWeave(settings, progress, signal) {
       expect(settings).toBe(config.tuneweave)
       expect(signal).toBe(controller.signal)
-      expect(received.slice(-2)).toEqual(["[media] FFmpeg：已安装", "[media] 正在检查 TuneWeave 服务。"])
+      expect(received.slice(-2)).toEqual(["FFmpeg：已安装", "正在检查 TuneWeave 服务。"])
       await progress("正在启动本机 TuneWeave 服务。")
       return { ok: true, reachable: true, version: "1.2.3", requiredVersion: "1.0.0", requiresUpdate: false,
         apiUrl: "https://fixture.invalid", message: "检查完成", capabilities: [], already: true }
     },
     async render(card) {
-      expect(received.at(-1)).toBe("[media] TuneWeave：1.2.3")
+      expect(received.at(-1)).toBe("TuneWeave：1.2.3")
       expect(card).toEqual({ title: "媒体环境", subtitle: "检查完成", items: [
         { label: "FFmpeg", value: "已安装" }, { label: "TuneWeave", value: "1.2.3" },
       ] })
@@ -54,7 +54,7 @@ test("三个环境入口先发准备消息，实时报告 FFmpeg 与 TuneWeave�
   expect(commands.every(command.matches)).toBe(true)
   const request = command.fallback(commands[1]!, context(message => { received.push(message); return true }))
   await downloading.promise
-  expect(received).toEqual(["[media] 正在检查媒体环境，补齐缺失组件并检查更新。", "[media] 工具链：正在下载 FFmpeg"])
+  expect(received).toEqual(["正在检查媒体环境，补齐缺失组件并检查更新。", "工具链：正在下载 FFmpeg"])
   release.resolve()
   expect(await request).toEqual([])
   expect(received.at(-1)).toEqual({ type: "image", file: png })
@@ -87,8 +87,8 @@ test("权限拦在回执和工具动作前，进度发送失败不终止检查�
   expect(await command.fallback(commands[2]!, context(reply))).toBe("媒体环境 · 存在失败\nFFmpeg：失败：校验失败\nTuneWeave：失败：服务暂不可用")
   expect(steps).toBe(2)
   expect(received).toEqual([
-    "[media] 正在检查媒体环境，补齐缺失组件并检查更新。", "[media] 工具链：检查 FFmpeg",
-    "[media] FFmpeg：失败：校验失败", "[media] 正在检查 TuneWeave 服务。", "[media] TuneWeave：失败：服务暂不可用",
+    "正在检查媒体环境，补齐缺失组件并检查更新。", "工具链：检查 FFmpeg",
+    "FFmpeg：失败：校验失败", "正在检查 TuneWeave 服务。", "TuneWeave：失败：服务暂不可用",
   ])
 })
 
@@ -107,7 +107,7 @@ test("宿主停止时结束当前准备，不启动下一个工具或发送最�
     async render() { throw new Error("unexpected card") },
   })
   expect(await command.fallback(commands[0]!, context(message => { replies.push(message); return true }))).toEqual([])
-  expect(replies).toEqual(["[media] 正在检查媒体环境，补齐缺失组件并检查更新。"])
+  expect(replies).toEqual(["正在检查媒体环境，补齐缺失组件并检查更新。"])
 })
 
 test("三个整体初始化入口同时准备验证码模型，沿用权限和取消信号", async () => {
@@ -128,7 +128,7 @@ test("三个整体初始化入口同时准备验证码模型，沿用权限和�
     const reply = await command.fallback(name, context(message => { received.push(message); return true }))
     expect(reply).toContain("媒体环境 · 检查完成")
     expect(downloads).toBe(1)
-    expect(received).toContain("[media] 验证码模型：已准备完成。")
+    expect(received).toContain("验证码模型：已准备完成。")
   }
 })
 

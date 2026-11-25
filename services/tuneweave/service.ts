@@ -1,3 +1,4 @@
+import { withoutReadRetries, withReadRetries } from "@lotus-yunzai/http"
 import { ReleaseHttpError, retryReleaseRequest, temporaryReleaseFailure, releaseFailure } from "../release-network.ts"
 import { emitTaskProgress, responseBytes, type TaskProgressHandler } from "../progress.ts"
 import fs from "node:fs/promises"
@@ -218,9 +219,10 @@ export class TuneWeaveService {
       ...(redirect && { redirect }),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     }
-    const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : this.fetch(target, {
-      ...options, ...(audio && { body: Buffer.from(audio.bytes) }),
-    }))
+    const response = await (credentials.length ? requestCredentialJson(target, { ...options, credentials }) : withReadRetries((url, init) => withoutReadRetries(() => this.fetch(url.href, init)), {
+      canRetry: (url, verb) => verb === "GET" && body === undefined && !audio &&
+        ["/healthz", "/v1/capabilities", "/v1/search"].includes(url.pathname),
+    })(new URL(target), { ...options, ...(audio && { body: Buffer.from(audio.bytes) }) }))
       .catch((cause: unknown) => {
         signal?.throwIfAborted()
         throw Object.assign(new Error("TuneWeave 无法连接，请先发送 #初始化环境 或检查服务状态。", { cause }), {

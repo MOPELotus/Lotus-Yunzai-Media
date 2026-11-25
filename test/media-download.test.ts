@@ -24,7 +24,7 @@ test("全量下载拒绝带合法媒体头的部分响应、假长度、超限�
       ["<html>没有源文件</html>", 200, {}, "不是预期媒体", 1024],
     ] as const) {
       const response = new Response(body, { status, headers })
-      await expect(downloadMedia(cdn, target, { fetch: async () => response, kind: "video", maxBytes })).rejects.toThrow(message)
+      await expect(downloadMedia(cdn, target, { fetch: async () => response.clone(), kind: "video", maxBytes })).rejects.toThrow(message)
       expect(await readFile(file, "utf8")).toBe("previous")
       expect(await readdir(root)).toEqual(["source.mp4"])
     }

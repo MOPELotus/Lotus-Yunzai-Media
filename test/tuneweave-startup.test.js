@@ -291,7 +291,7 @@ test("状态未知的本机 HTTP 服务和失效探测不会触发安装或改�
     listening.stop(true)
     await rm(directory, { recursive: true, force: true })
   }
-})
+}, 20000)
 
 test("端口停止后先核进程记录，下载期间第三方抢占端口会保留已有文件", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lotus-tuneweave-stopped-"))

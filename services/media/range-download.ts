@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import type { FileHandle } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
+import { withoutReadRetries, withReadRetries } from "@lotus-yunzai/http"
+import { retryStreamRead } from "./stream-retry.ts"
 
 import type { MediaFetch } from "./cdn.ts"
 import { discardBody, readStream, writeChunk } from "./transfer.ts"
@@ -31,53 +33,68 @@ function changesResource(headers: Headers, previous: ReturnType<typeof resourceV
 // A mirror is always restarted from byte zero; ranges from different CDN objects
 // never share a destination. No files are published before complete validation.
 export async function downloadRanges(urls: string | readonly (string | undefined)[] | undefined, target: string, options: RangeOptions = {}) {
-  const { fetch: request = globalThis.fetch, headers = {}, timeoutMs = 600000, maxBytes = 0, concurrency = 4, signal } = options
+  const { fetch: fetchImpl = globalThis.fetch, headers = {}, timeoutMs = 600000, maxBytes = 0, concurrency = 4, signal } = options
+  const request: MediaFetch = (url, init) => withoutReadRetries(() => fetchImpl(url, init))
+  const probeRequest = withReadRetries((url, init) => request(url.href, {
+    headers: Object.fromEntries(new Headers(init.headers)), signal: init.signal ?? undefined,
+  }))
   const timeout = AbortSignal.timeout(timeoutMs), parentSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
   let lastError
   for (const url of new Set((typeof urls === "string" ? [urls] : urls ?? []).filter((item): item is string => Boolean(item)))) {
     if (parentSignal.aborted) throw new Error("下载已取消或超时")
     const temp = `${target}.${randomUUID()}.part`, controller = new AbortController(), transferSignal = AbortSignal.any([parentSignal, controller.signal])
     let handle: FileHandle | undefined
-    const full = async (response: Response, probedLength?: number, validators?: ReturnType<typeof resourceValidators>) => {
-      if (response.status !== 200 || !response.body || response.headers.has("content-range")) {
-        discardBody(response)
-        throw new Error(`完整下载响应无效 HTTP ${response.status}`)
-      }
-      const contentLength = response.headers.get("content-length")
-      const declared = contentLength === null ? undefined : Number(contentLength)
-      if (changesResource(response.headers, validators)) {
-        discardBody(response)
-        throw new Error("下载期间源文件发生变化")
-      }
-      if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 1 ||
-          (probedLength !== undefined && probedLength !== declared))) {
-        discardBody(response)
-        throw new Error("下载文件体积与探测不一致")
-      }
-      const expected = probedLength ?? declared
-      if (maxBytes && expected !== undefined && expected > maxBytes) {
-        discardBody(response)
-        throw new Error("下载文件超出大小限制")
-      }
-      const opened = handle = await fs.open(temp, "wx")
-      let received = 0
-      for await (const chunk of readStream(response.body, transferSignal)) {
-        const next = received + chunk.length
-        if (maxBytes && next > maxBytes) throw new Error("下载文件超出大小限制")
-        if (expected !== undefined && next > expected) throw new Error("下载文件体积与探测不一致")
-        await writeChunk(opened, chunk, received)
-        received = next
-      }
-      if (!received || expected !== undefined && received !== expected) throw new Error("下载文件不完整")
-      await opened.close()
-      handle = undefined
-      return received
+    const full = async (initial: Response | (() => Promise<Response>), probedLength?: number, validators?: ReturnType<typeof resourceValidators>) => {
+      let first = typeof initial === "function" ? undefined : initial
+      return retryStreamRead(async checkResponse => {
+        try {
+          const response = first ?? await (typeof initial === "function" ? initial() : request(url, { headers: { "Accept-Encoding": "identity", ...headers }, signal: transferSignal }))
+          first = undefined
+          checkResponse(response)
+          if (response.status !== 200 || !response.body || response.headers.has("content-range")) {
+            discardBody(response)
+            throw new Error(`完整下载响应无效 HTTP ${response.status}`)
+          }
+          const contentLength = response.headers.get("content-length")
+          const declared = contentLength === null ? undefined : Number(contentLength)
+          if (changesResource(response.headers, validators)) {
+            discardBody(response)
+            throw new Error("下载期间源文件发生变化")
+          }
+          if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 1 ||
+              (probedLength !== undefined && probedLength !== declared))) {
+            discardBody(response)
+            throw new Error("下载文件体积与探测不一致")
+          }
+          const expected = probedLength ?? declared
+          if (maxBytes && expected !== undefined && expected > maxBytes) {
+            discardBody(response)
+            throw new Error("下载文件超出大小限制")
+          }
+          const opened = handle = await fs.open(temp, "wx")
+          let received = 0
+          for await (const chunk of readStream(response.body, transferSignal)) {
+            const next = received + chunk.length
+            if (maxBytes && next > maxBytes) throw new Error("下载文件超出大小限制")
+            if (expected !== undefined && next > expected) throw new Error("下载文件体积与探测不一致")
+            await writeChunk(opened, chunk, received)
+            received = next
+          }
+          if (!received || expected !== undefined && received !== expected) throw Object.assign(new Error("下载文件不完整"), { code: "ERR_STREAM_PREMATURE_CLOSE" })
+          await opened.close()
+          handle = undefined
+          return received
+        } catch (error) {
+          try { await handle?.close(); handle = undefined } finally { await fs.rm(temp, { force: true }) }
+          throw error
+        }
+      }, transferSignal)
     }
     try {
       const parsed = new URL(url)
       if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("下载地址协议无效")
       const base = { "Accept-Encoding": "identity", ...headers }
-      const probe = await request(url, { headers: { ...base, Range: "bytes=0-0" }, signal: transferSignal })
+      const probe = await probeRequest(parsed, { headers: { ...base, Range: "bytes=0-0" }, signal: transferSignal })
       let total: number
       if (probe.status === 200) total = await full(probe)
       else {
@@ -88,7 +105,7 @@ export async function downloadRanges(urls: string | readonly (string | undefined
         if (!Number.isSafeInteger(total) || total <= 0 || maxBytes && total > maxBytes) throw new Error("下载文件体积无效或超出限制")
         const count = Math.max(1, Math.min(16, Math.floor(concurrency), Math.ceil(total / (2 * 1024 * 1024))))
         const validators = resourceValidators(probe.headers)
-        if (count === 1) await full(await request(url, { headers: base, signal: transferSignal }), resourceLength, validators)
+        if (count === 1) await full(() => request(url, { headers: base, signal: transferSignal }), resourceLength, validators)
         else {
           const opened = handle = await fs.open(temp, "wx"); await opened.truncate(total)
           const { etag, modified } = validators
@@ -98,9 +115,11 @@ export async function downloadRanges(urls: string | readonly (string | undefined
             const start = Math.floor(resourceLength * index / count), end = Math.floor(resourceLength * (index + 1) / count) - 1
             let last
             for (let attempt = 0; attempt < 3; attempt++) {
+              let retryAllowed = true
               try {
                 transferSignal.throwIfAborted()
                 const response = await request(url, { headers: { ...base, Range: `bytes=${start}-${end}`, ...ifRange }, signal: transferSignal })
+                retryAllowed = response.status !== 429 && !response.headers.has("Retry-After")
                 const expected = `bytes ${start}-${end}/${resourceLength}`
                 if (!response.body || response.status !== 206 || response.headers.get("content-range") !== expected) {
                   discardBody(response)
@@ -118,7 +137,7 @@ export async function downloadRanges(urls: string | readonly (string | undefined
                 }
                 if (offset !== end + 1) throw new Error("下载分段不完整")
                 return
-              } catch (error) { last = error; if (transferSignal.aborted) break }
+              } catch (error) { last = error; if (transferSignal.aborted || !retryAllowed) break }
             }
             throw last
           })

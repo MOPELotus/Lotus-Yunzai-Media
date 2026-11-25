@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
 import { join } from "node:path"
@@ -16,8 +19,8 @@ const endpoint = "https://api.bilibili.com/pgc/player/web/playurl"
 const oldQualities = [127, 126, 125, 120, 116, 112, 80, 74, 64, 32, 16] as const
 export const biliPgcDefaultDuration = 1800
 export const biliPgcDefaultQuality = 32
-export const biliPgcQualities = [[0, "最高可用 AVC 画质"], [16, "360P"], [32, "480P"], [64, "720P"], [74, "720P 高帧率"], [80, "1080P"],
-  [112, "1080P 高码率"], [116, "1080P 高帧率"], [120, "4K"], [125, "HDR"], [126, "杜比视界"], [127, "8K"]] as const
+export const biliPgcQualities = [[0, $t("services.bilibili.pgc-playback.text_017262f30c")], [16, "360P"], [32, "480P"], [64, "720P"], [74, $t("services.bilibili.pgc-playback.text_bebd810cdd")], [80, "1080P"],
+  [112, $t("services.bilibili.pgc-playback.text_54ed0b548d")], [116, $t("services.bilibili.pgc-playback.text_dfb0bbbc7a")], [120, "4K"], [125, "HDR"], [126, $t("services.bilibili.pgc-playback.text_7963e073e1")], [127, "8K"]] as const
 
 export function playbackQuality(value: unknown, legacy: unknown): number {
   if (biliPgcQualities.some(([id]) => value === id)) return Number(value)
@@ -76,10 +79,10 @@ async function downloadVerifiedTrack(track: PublicTrack, path: string, request: 
   referer: string, signal: AbortSignal) {
   const { sizeBytes } = await downloadRanges(track.urls, path, { timeoutMs: settings.timeout_ms, maxBytes: track.size,
     concurrency: settings.concurrency, fetch: request, headers: { Referer: referer }, signal })
-  if (sizeBytes !== track.size) throw new Error("番剧媒体长度不一致。")
+  if (sizeBytes !== track.size) throw new Error($t("services.bilibili.pgc-playback.text_d49f2b5d20"))
   const md5 = createHash("md5")
   for await (const bytes of createReadStream(path, { signal })) md5.update(bytes)
-  if (md5.digest("hex") !== track.md5) throw new Error("番剧媒体校验值不一致。")
+  if (md5.digest("hex") !== track.md5) throw new Error($t("services.bilibili.pgc-playback.text_64abdfdd0a"))
 }
 
 export function createBiliPgcPlayback({
@@ -98,39 +101,39 @@ export function createBiliPgcPlayback({
     const referer = entry ? `https://www.bilibili.com/bangumi/play/ep${entry.id}` : target.url
     const fail = (message: string) => message + "\n" + referer
     if (!entry || !eligible(data, entry) || (target.kind === "ep" && entry.id !== target.id)) {
-      return fail("该番剧分集未提供可验证的公开下载权限，请在 B 站查看。")
+      return fail($t("services.bilibili.pgc-playback.text_eb00c68dbe"))
     }
-    if (entry.duration > options.duration) return fail("该分集超过当前番剧时长限制。")
+    if (entry.duration > options.duration) return fail($t("services.bilibili.pgc-playback.text_b08ae5b323"))
     const key = `${context.adapter ?? "onebot"}:${context.self_id}:${context.group_id ?? context.user_id}:${entry.id}`
-    if (running.has(key)) return fail("当前会话已有同一分集的播放任务。")
+    if (running.has(key)) return fail($t("services.bilibili.pgc-playback.text_03e12362ce"))
     running.add(key)
     let task: Awaited<ReturnType<typeof createMediaTask>> | undefined
     try {
       const config = await load()
       const permission = new PermissionService({ permissions: config.permissions })
       const subject = context.canManagePackages ? { ...context, isMaster: true } : context
-      if (!permission.explain(subject, "bilibili.download").ok) return fail("当前会话没有 B 站下载权限。")
+      if (!permission.explain(subject, "bilibili.download").ok) return fail($t("services.bilibili.pgc-playback.text_777920556f"))
       const settings = normalizeDownloadConfig(config.bilibili)
-      if (!settings.enable) return fail("B 站下载已关闭。")
-      if (entry.duration > settings.duration_limit_seconds) return fail("该分集超过当前 B 站视频时长限制。")
+      if (!settings.enable) return fail($t("services.bilibili.pgc-playback.text_8268e0a5e9"))
+      if (entry.duration > settings.duration_limit_seconds) return fail($t("services.bilibili.pgc-playback.text_094a5e7354"))
       const url = new URL(endpoint)
       url.search = new URLSearchParams({ ep_id: entry.id, cid: entry.cid, qn: String(options.quality || 127), fnval: "16" }).toString()
       const media = publicBiliPgcTracks(await readJson(fetcher, url, referer, AbortSignal.any([signal, AbortSignal.timeout(8000)])),
         entry, options.quality)
-      if (!media) return fail("B 站未返回当前分集完整、可公开使用的音视频，请打开原链。")
+      if (!media) return fail($t("services.bilibili.pgc-playback.text_0b568ac1a6"))
       if (settings.max_estimated_size_mb > 0 && media.video.size + media.audio.size > settings.max_estimated_size_mb * 1024 * 1024) {
-        return fail("该分集超过当前 B 站下载大小限制。")
+        return fail($t("services.bilibili.pgc-playback.text_0f0bbf263c"))
       }
       const [ffmpeg, ffprobe] = await Promise.all(["ffmpeg", "ffprobe"].map(command => resolveCommandPath(command, settings.tools_path)))
-      if (!ffmpeg || !ffprobe) return fail("本机未找到 FFmpeg 和 FFprobe。")
+      if (!ffmpeg || !ffprobe) return fail($t("services.bilibili.pgc-playback.text_4df7900132"))
       const allowed = new Set([...media.video.urls, ...media.audio.urls])
       const request: MediaFetch = async (url, options) => {
-        if (!allowed.has(url)) throw new Error("该媒体地址不属于当前分集。")
+        if (!allowed.has(url)) throw new Error($t("services.bilibili.pgc-playback.text_a95e1645e4"))
         const reply = await cdnFetch(url, { ...options, credentials: "omit", redirect: "error" })
         if (reply.redirected || (reply.status === 200 && reply.headers.has("content-range")) ||
             (!new Headers(options?.headers).has("range") && (reply.status !== 200 || reply.headers.has("content-range")))) {
           await reply.body?.cancel().catch(() => undefined)
-          throw new Error("分集媒体回包不完整。")
+          throw new Error($t("services.bilibili.pgc-playback.text_dd9a916fc8"))
         }
         return reply
       }
@@ -148,13 +151,13 @@ export function createBiliPgcPlayback({
       const duration = Number(fields(parsed.format).duration)
       if (!streams.some(row => row.codec_type === "video" && row.codec_name === "h264") ||
           !streams.some(row => row.codec_type === "audio" && row.codec_name === "aac") ||
-          !Number.isFinite(duration) || Math.abs(duration - media.duration) > 3) return fail("分集媒体合并后校验失败。")
+          !Number.isFinite(duration) || Math.abs(duration - media.duration) > 3) return fail($t("services.bilibili.pgc-playback.text_1ff77ec87b"))
       await sendMediaFile(context, file, { file_name: safeMediaName(`${data.title} ${entry.title} ep${entry.id}`) + ".mp4",
         video_size_limit_mb: settings.video_size_limit_mb, signal })
       return []
     } catch (error) {
       if (signal.aborted) return
-      return fail(fields(error).code === mediaDeliveryUnknown ? "发送结果未确认，请在会话中检查。" : "B 站番剧完整媒体发送失败，请打开原链。")
+      return fail(fields(error).code === mediaDeliveryUnknown ? $t("services.bilibili.pgc-playback.text_cc7be90b66") : $t("services.bilibili.pgc-playback.text_d828fa3e95"))
     } finally {
       running.delete(key)
       if (task) await releaseMediaTask(task.root, task.dir).catch(() => undefined)

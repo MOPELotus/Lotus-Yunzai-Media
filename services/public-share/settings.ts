@@ -1,10 +1,13 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { lockFile } from "../../../../lib/file-lock.ts"
 import { readMigrationSourceFile } from "../../../../lib/migration-files.ts"
 import { dataPath, rootPath } from "../../core/path.ts"
 
-const oldController = "通用（包含快手等）"
+const oldController = $t("services.public-share.settings.text_b3577b9b74")
 export type PublicShareSettings = { enable: boolean; private: boolean }
 type Platform = "pipixia" | "kuaishou" | "jike" | "xigua"
 
@@ -35,7 +38,7 @@ export function createPublicShareSettings(platform: Platform, label: string, dir
     try {
       const config: unknown = Bun.YAML.parse(await readFile(file, "utf8"))
       if (config == null) return {}
-      if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error(label + "配置须为映射。")
+      if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error(label + $t("services.public-share.settings.text_519304b652"))
       return mapping(config)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
@@ -55,7 +58,7 @@ export function createPublicShareSettings(platform: Platform, label: string, dir
 
   async function save(patch: Partial<PublicShareSettings>) {
     await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-    const lock = await lockFile(file + ".sqlite", label + "配置")
+    const lock = await lockFile(file + ".sqlite", label + $t("services.public-share.settings.text_148d195e21"))
     try {
       const current = await read()
       const staged = file + "." + crypto.randomUUID() + ".tmp"

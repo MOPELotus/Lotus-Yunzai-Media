@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import fs from "node:fs/promises"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
@@ -119,7 +122,7 @@ async function atomicWrite(filename: string, data: string) {
 async function readState(file: string): Promise<PartnerState | undefined> {
   try {
     const state = YAML.parse(await fs.readFile(file, "utf8")) ?? {}
-    if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("合伙人任务状态格式无效")
+    if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error($t("services.music.partner-task.text_c7e78f2a42"))
     return state
   } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error }
 }
@@ -190,7 +193,7 @@ export class NeteasePartnerTask {
     if (current !== undefined) return current
     const previous = (await Promise.all(this.legacyStateFiles.map(readState))).filter((entry): entry is PartnerState => Boolean(entry?.last_run_date))
     const dates = new Set(previous.map(entry => entry.last_run_date))
-    if (dates.size > 1) throw new Error("两处旧合伙人任务记录不一致")
+    if (dates.size > 1) throw new Error($t("services.music.partner-task.text_cabea16db9"))
     const [legacy] = previous
     return legacy ? { last_run_date:legacy.last_run_date, last_run_time:legacy.last_run_time } : {}
   }
@@ -199,11 +202,11 @@ export class NeteasePartnerTask {
     return (await this.state()).last_run_date === formatLocalIso(this.now()).slice(0,10)
   }
 
-  async execute(config: PartnerConfig = {}, trigger = "手动执行",
+  async execute(config: PartnerConfig = {}, trigger = $t("services.music.partner-task.text_f171cbec61"),
     { signal, once = false }: { signal?: AbortSignal; once?: boolean } = {}): Promise<PartnerReport | { skipped: true; reason: "already_run_today" }> {
     if (signal?.aborted) signal.throwIfAborted()
     await fs.mkdir(path.dirname(this.stateFile), { recursive:true, mode:0o700 })
-    const lock = await lockFile(this.stateFile + ".lock", "网易云合伙人任务")
+    const lock = await lockFile(this.stateFile + ".lock", $t("services.music.partner-task.text_e86766cfdd"))
     try {
       signal?.throwIfAborted()
       const time = formatLocalIso(this.now())
@@ -227,7 +230,7 @@ export class NeteasePartnerTask {
       const accounts = await this.accounts.loadAccounts()
       const report: PartnerReport = { trigger, time, accounts:[] }
       if (!accounts.length) report.accounts.push({
-        nickname:"未配置账号", total:0, success:0, skip:0, fail:0, attempts:0, details:["请使用 #合伙人登录。"], evaluations:[],
+        nickname:$t("services.music.partner-task.text_d082e541f0"), total:0, success:0, skip:0, fail:0, attempts:0, details:[$t("services.music.partner-task.text_aa3dca2af5")], evaluations:[],
       })
       for (const account of accounts) {
         signal?.throwIfAborted()
@@ -246,21 +249,21 @@ export class NeteasePartnerTask {
     const uid = String(account?.uid ?? "")
     const alias = account?.tuneweave_account || (account?.cookie ? "default" : "")
     if (!accountId.test(uid) || typeof alias !== "string" || !alias || alias.length > 150) {
-      throw new Error("未配置可核验的账号，请使用 #合伙人登录")
+      throw new Error($t("services.music.partner-task.text_2657d780de"))
     }
     const profile = await this.tuneweave.request<TuneWeaveQrProfile>("/v1/account?" + new URLSearchParams({ platform:"netease", account:alias }), { signal })
     if (profile?.authenticated !== true || String(profile.user_id) !== uid) {
-      throw new Error("TuneWeave 账号与合伙人记录不一致，请重新登录")
+      throw new Error($t("services.music.partner-task.text_58f739b115"))
     }
     if (account.tuneweave_account) return alias
     const updated = await this.accounts.saveAccount({ ...account, uid, tuneweave_account:alias }, { onlyIfLegacy:true, signal })
-    if (updated?.tuneweave_account !== alias) throw new Error("账号关联已更新，请重试")
+    if (updated?.tuneweave_account !== alias) throw new Error($t("services.music.partner-task.text_9a3ddf609f"))
     return alias
   }
 
   async evaluateAccount(account: PartnerAccount, config: PartnerConfig, journal: ReadonlyMap<string, ReceiptStatus>, checkpoint: Checkpoint, signal?: AbortSignal) {
     const uid = String(account?.uid || "")
-    const nickname = typeof account?.nickname === "string" ? account.nickname.slice(0,100).toWellFormed() : "网易云账号"
+    const nickname = typeof account?.nickname === "string" ? account.nickname.slice(0,100).toWellFormed() : $t("services.music.partner-task.text_1e09a2f7d0")
     const summary: AccountSummary = { uid, nickname, total:goal, success:0, skip:0, fail:goal, attempts:0, details:[], evaluations:[], results:[] }
     const completed = new Map<string, Evaluation>(), unknown = new Set<string>()
     const payloads = new Map<string, { payload: EvaluationPayload; review?: ReviewRecord }>()
@@ -271,7 +274,7 @@ export class NeteasePartnerTask {
       const id = receipt.slice(receiptPrefix.length)
       if (workId.test(id)) (status === "confirmed" ? confirmed : pending).add(id)
     }
-    const comments = Array.isArray(config.comments) && config.comments.length ? config.comments : ["打卡支持"]
+    const comments = Array.isArray(config.comments) && config.comments.length ? config.comments : [$t("services.music.partner-task.text_3dd212d563")]
     const pool = [...new Set(comments.filter(value => typeof value === "string").map(value => value.trim()).filter(Boolean))]
     let available = [...pool]
 
@@ -288,7 +291,7 @@ export class NeteasePartnerTask {
         })
         daily = await query<DailyResult>(routes.daily)
         if (daily?.code !== 200) {
-          summary.details.push("每日任务读取失败。")
+          summary.details.push($t("services.music.partner-task.text_cb37d74344"))
           continue
         }
         works = Array.isArray(daily.data?.works) ? [...daily.data.works] : []
@@ -300,14 +303,14 @@ export class NeteasePartnerTask {
           }
         } catch {
           signal?.throwIfAborted()
-          summary.details.push("额外任务读取失败。")
+          summary.details.push($t("services.music.partner-task.text_c0ba82c43b"))
         }
       } catch {
         signal?.throwIfAborted()
-        summary.details.push("无法核实登录账号或连接 TuneWeave，请用 #TuneWeave状态 检查。")
+        summary.details.push($t("services.music.partner-task.text_0f65b242f1"))
         continue
       }
-      if (!works.length) summary.details.push("没有待评作品。")
+      if (!works.length) summary.details.push($t("services.music.partner-task.text_891d344448"))
 
       const candidates = new Map<string, { item: WorkItem; work: Work; rawId: string | number }>()
       for (const item of works) {
@@ -364,7 +367,7 @@ export class NeteasePartnerTask {
                 reviewRecord = { mode:review.mode, sources:result.sources, contextWarnings:context.warnings }
               } catch {
                 signal?.throwIfAborted()
-                const error = "乐评未核实，本首仅提交评分。"
+                const error = $t("services.music.partner-task.text_18beecb6de")
                 reviewRecord = { mode:review.mode, error, reason:"unverified" }
                 summary.details.push(error)
               }
@@ -372,9 +375,9 @@ export class NeteasePartnerTask {
               if (!available.length) available = [...pool]
               const picked = available.splice(Math.floor(Math.random() * available.length), 1)[0] || ""
               if (picked.length <= max) comment = picked
-              else reviewRecord = { mode:"fixed", reason:"length", error:"固定乐评超过字数设置，未发布评论。" }
+              else reviewRecord = { mode:"fixed", reason:"length", error:$t("services.music.partner-task.text_3b25ad5949") }
             } else {
-              reviewRecord = { mode:review.mode, reason:"unverified", error:"无法识别乐评模式，本首仅提交评分。" }
+              reviewRecord = { mode:review.mode, reason:"unverified", error:$t("services.music.partner-task.text_842e701d78") }
             }
           }
           const payload: EvaluationPayload = { taskId:daily.data?.id, workId:rawId, score, tags:`${score}-A-1`, customTags:"[]", comment, syncYunCircle:"true",
@@ -416,7 +419,7 @@ export class NeteasePartnerTask {
         }
         summary.evaluations.push(record)
         if (outcome?.code === 405) {
-          summary.details.push("网易云今日没有更多可评定歌曲（405）。")
+          summary.details.push($t("services.music.partner-task.text_3687bc6ede"))
           break
         }
       }

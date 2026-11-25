@@ -1,9 +1,12 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { CommandReply } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { mcWikiTitle, readMcWikiArticle, type McWikiArticle } from "./article.ts"
 import { renderMcWikiArticle } from "./render.ts"
 
-const missing = "搜索不到此结果，请检查关键词是否准确无误"
+const missing = $t("services.mcwiki.command.text_93c42a1e96")
 
 type Preview = { readonly png: Uint8Array; readonly engine?: Awaited<ReturnType<typeof renderMcWikiArticle>>["engine"] }
 
@@ -16,7 +19,7 @@ interface McWikiCommandOptions {
 export function createMcWikiCommand({ signal, read = readMcWikiArticle, render = renderMcWikiArticle }: McWikiCommandOptions = {}) {
   return async function mcWiki(argument: string): Promise<CommandReply | undefined> {
     const title = mcWikiTitle(argument)
-    if (!title) return "用法：#mcwiki 条目名称"
+    if (!title) return $t("services.mcwiki.command.text_21cc7db973")
     const result = await read(title, { signal })
     if (signal?.aborted) return
     if (result.status === "missing") return missing
@@ -28,17 +31,17 @@ export function createMcWikiCommand({ signal, read = readMcWikiArticle, render =
         card = await render(article)
         if (card?.engine) {
           const engine = card.engine
-          console.info(`[media] Minecraft Wiki 条目预览使用 ${engine.renderer} / ${engine.api ?? "未知后端"} / ${engine.device ?? "未知设备"}`)
+          console.info($t("services.mcwiki.command.text_77d2715f65", { "renderer": engine.renderer, "value2": engine.api ?? $t("services.mcwiki.command.text_9a031440b6"), "value3": engine.device ?? $t("services.mcwiki.command.text_8ca01a9ba4") }))
         }
       } catch {
         // The verified canonical link remains usable when the preview fails.
       }
       if (signal?.aborted) return
       if (card?.png?.byteLength) nodes.push({ type: "image", file: card.png })
-      else nodes.push("条目预览暂时无法生成，请打开原文。")
-      nodes.push(`来源：中文 Minecraft Wiki 贡献者（修订 ${article.revisionId}）\n${article.revisionUrl}\n正文许可：CC BY-NC-SA 3.0，例外见原文。\n${article.license}`)
+      else nodes.push($t("services.mcwiki.command.text_aef89a4260"))
+      nodes.push($t("services.mcwiki.command.text_ff8fa218d9", { "revisionId": article.revisionId, "revisionUrl": article.revisionUrl, "license": article.license }))
     } else {
-      nodes.push("条目预览暂时无法读取，请打开链接。")
+      nodes.push($t("services.mcwiki.command.text_bc66d98a1f"))
     }
     return { type: "forward", nodes }
   }

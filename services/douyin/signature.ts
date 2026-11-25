@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 /// <reference path="./sm-crypto.d.ts" />
 import { randomInt } from "node:crypto"
 import { sm3 as digestSm3 } from "sm-crypto"
@@ -58,7 +61,7 @@ export function sealPlatformBytes(bytes: Uint8Array, key: ArrayLike<number>) {
 
 /** Returns an unescaped signature. Only the HTTP query builder URL-encodes it. */
 export function generateABogus(query: string, { userAgent = WEB_UA, browserInfo = BROWSER_INFO, body = "", now = Date.now(), random = () => randomInt(0x1000000) / 0x1000000 } = {}) {
-  if (!Number.isSafeInteger(now) || now < EPOCH) throw new Error("抖音签名时间必须为有效毫秒时间戳")
+  if (!Number.isSafeInteger(now) || now < EPOCH) throw new Error($t("services.douyin.signature.text_6ba0f176fd"))
   const slots = Buffer.alloc(86)
   const write = (offset: number, value: number, width: number) => slots.writeUIntLE(value, offset, width)
   slots[24] = 41

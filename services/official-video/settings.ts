@@ -1,15 +1,18 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { lockFile } from "../../../../lib/file-lock.ts"
 import { dataPath, rootPath } from "../../core/path.ts"
 
 export const officialVideoGames = {
-  gs: { name: "原神", uid: "75276539", forum: "ys" },
-  sr: { name: "星铁", uid: "288909600", forum: "sr" },
-  zzz: { name: "绝区零", uid: "152039148", forum: "zzz" },
-  bh3: { name: "崩坏3", uid: "73565430", forum: "bh3" },
-  by: { name: "崩坏因缘精灵", uid: "448340772", forum: "by" },
-  xbgd: { name: "星布谷地", uid: "378227988", forum: "xbgd" },
+  gs: { name: $t("services.official-video.settings.text_d1597c51ed"), uid: "75276539", forum: "ys" },
+  sr: { name: $t("services.official-video.settings.text_a2927891f0"), uid: "288909600", forum: "sr" },
+  zzz: { name: $t("services.official-video.settings.text_b1110352c9"), uid: "152039148", forum: "zzz" },
+  bh3: { name: $t("services.official-video.settings.text_6d3d8653d7"), uid: "73565430", forum: "bh3" },
+  by: { name: $t("services.official-video.settings.text_669908adb6"), uid: "448340772", forum: "by" },
+  xbgd: { name: $t("services.official-video.settings.text_6f70b509e8"), uid: "378227988", forum: "xbgd" },
 } as const
 export type OfficialVideoGame = keyof typeof officialVideoGames
 const optionalGames = ["bh3", "by", "xbgd"] as const
@@ -76,7 +79,7 @@ export function createOfficialVideoSettings(directory = dataPath, root = rootPat
 
   async function save(patch: Record<string, boolean | readonly string[]>) {
     await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-    const gate = await lockFile(file + ".sqlite", "官号视频设置")
+    const gate = await lockFile(file + ".sqlite", $t("services.official-video.settings.text_c35bfb374e"))
     try {
       const current = await read(file) ?? {}
       const temporary = file + "." + crypto.randomUUID() + ".tmp"

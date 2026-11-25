@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import fs from "node:fs/promises"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
@@ -55,15 +58,15 @@ export class NeteasePartnerAccounts {
       if (expectedBinding !== undefined && (expectedBinding === null ? Boolean(existing) :
           !existing || existing.qq !== expectedBinding.qq || existing.tuneweave_account !== expectedBinding.tuneweave_account ||
           existing.cookie !== expectedBinding.cookie)) {
-        throw new Error("网易云绑定已变更，请重试。")
+        throw new Error($t("services.music.partner-account.text_8dfb3c880c"))
       }
       if (expectedBinding !== undefined && accounts.some(item => item !== existing && item.tuneweave_account === account.tuneweave_account)) {
-        throw new Error("网易云绑定已变更，请重试。")
+        throw new Error($t("services.music.partner-account.text_8dfb3c880c"))
       }
       if (onlyIfLegacy && existing?.tuneweave_account) return existing
       const normalized = {
         uid,
-        nickname: account.nickname || "网易云账号",
+        nickname: account.nickname || $t("services.music.partner-account.text_1e09a2f7d0"),
         qq: String(account.qq || ""),
         extraCount: Number(account.extraCount ?? existing?.extraCount ?? 9999),
         comment: account.comment === undefined ? existing?.comment !== false : account.comment !== false,

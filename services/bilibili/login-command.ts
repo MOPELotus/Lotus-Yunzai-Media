@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import { lockFile } from "../../../../lib/file-lock.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
@@ -14,8 +17,8 @@ const settings = createSubscriptionConfig(dataPath, lockFile)
 
 async function loginError(context: MessageFallbackContext, message: string) {
   const png = await renderStatusCard({
-    title: "B站登录", subtitle: "Lotus-Yunzai · B 站", badge: "失败", message, userId: context.user_id,
-    items: [{ label: "建议", value: "检查链接是否有效，或稍后重试。" }],
+    title: $t("services.bilibili.login-command.text_9158dcf753"), subtitle: $t("services.bilibili.login-command.text_7f5440b5cf"), badge: $t("services.bilibili.login-command.text_28384d7afd"), message, userId: context.user_id,
+    items: [{ label: $t("services.bilibili.login-command.text_abee497473"), value: $t("services.bilibili.login-command.text_97b575de6d") }],
   }, { saveId: `media-bilibili-error-${context.user_id || "user"}` }).catch(() => undefined)
   return png ? { type: "image" as const, file: png } : message
 }
@@ -28,7 +31,7 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
     const friend = context.privateCredentialSignal
     if (context.isDelegated || context.message_type !== "private" || !friend || context.user_id === undefined ||
         !context.isBotMaster(context.user_id)) {
-      return loginError(context, "请由机器人主人在已连接的好友私聊登录 B 站账号。")
+      return loginError(context, $t("services.bilibili.login-command.text_4f1c3406e6"))
     }
     const active = signal ? AbortSignal.any([signal, friend]) : friend
     let acquired = false
@@ -36,25 +39,25 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
       active.throwIfAborted()
       const config = await loadGlobalConfig()
       if (!new PermissionService({ permissions: config.permissions }).explain({ ...context, isMaster: true }, "bilibili.login").ok) {
-        return loginError(context, "没有 B 站登录权限。")
+        return loginError(context, $t("services.bilibili.login-command.text_6a4abb3e70"))
       }
-      if (signingIn) return "已有 B 站登录正在进行，请稍后重试。"
+      if (signingIn) return $t("services.bilibili.login-command.text_559a364c22")
       signingIn = acquired = true
       const service = new BilibiliService({ tuneweaveConfig: config.tuneweave })
       const shared = biliSharedSession({ createService: async () => service,
         enabled: async () => (await settings.settings("bilibili")).sharedBiliLogin })
       if (message === command && await service.hasReusableLogin(active)) {
-        return "B 站账号已登录，可继续使用。更换账号请发送 #B站换号。"
+        return $t("services.bilibili.login-command.text_102f4a7659")
       }
       const allowsSharing = await shared.available(active)
       active.throwIfAborted()
       const qr = await service.createQrLogin({ signal: active })
       const image = await renderTemplate("qr-login", {
-        title: "B站登录",
-        subtitle: "Lotus-Yunzai · B 站",
+        title: $t("services.bilibili.login-command.text_9158dcf753"),
+        subtitle: $t("services.bilibili.login-command.text_7f5440b5cf"),
         badge: "3 MIN",
-        notice: allowsSharing ? "使用 Bilibili App 扫码确认。登录可同时用于视频和未单独登录的动态订阅。" :
-          "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus-Yunzai 仅保存账号引用。",
+        notice: allowsSharing ? $t("services.bilibili.login-command.text_6d827611e7") :
+          $t("services.bilibili.login-command.text_8fd3c7b241"),
         qrDataUrl: qr.qrDataUrl,
         profileId: "bilibili",
       }, {
@@ -64,30 +67,30 @@ export function createBilibiliLogin({ signal }: { readonly signal?: AbortSignal 
       const link = typeof qr.url === "string" && URL.parse(qr.url)
       const prompt = image ? { type: "image" as const, file: image } :
         link && link.origin === "https://passport.bilibili.com" && !link.username && !link.password && !link.hash
-          ? "二维码图片暂不可用。请在 3 分钟内打开 B 站登录链接。\n" + link.href : undefined
-      if (!prompt) return "二维码图片暂不可用，请稍后重试。"
+          ? $t("services.bilibili.login-command.text_178a17312a") + link.href : undefined
+      if (!prompt) return $t("services.bilibili.login-command.text_c8674a0f5b")
       let delivered = false
       await context.reply(prompt, false, { onDelivered: () => { delivered = true } })
-      if (!delivered) return "B 站登录二维码送达未确认，请重试。"
+      if (!delivered) return $t("services.bilibili.login-command.text_22a38f0a99")
       active.throwIfAborted()
       const result = await service.waitQrLogin({ qrcodeKey: qr.qrcodeKey, signal: active })
       const report = await renderStatusCard({
-        title: "B站登录",
-        subtitle: "Lotus-Yunzai · B 站",
-        badge: "完成",
-        message: allowsSharing ? "B站账号已保存，可用于视频及没有可用独立会话的动态订阅。" :
-          "B站账号引用已保存，后续搜索和解析会自动使用。",
+        title: $t("services.bilibili.login-command.text_9158dcf753"),
+        subtitle: $t("services.bilibili.login-command.text_7f5440b5cf"),
+        badge: $t("services.bilibili.login-command.text_c0b3fbff51"),
+        message: allowsSharing ? $t("services.bilibili.login-command.text_4e2593785b") :
+          $t("services.bilibili.login-command.text_7e1611ac7a"),
         userId: context.user_id,
         items: [
-          { label: "来源", value: result.account.source },
-          { label: "保存时间", value: result.account.saved_at },
+          { label: $t("services.bilibili.login-command.text_a488e93d69"), value: result.account.source },
+          { label: $t("services.bilibili.login-command.text_f0f609f1e2"), value: result.account.saved_at },
         ],
       }, { saveId: `media-bilibili-login-ok-${context.user_id || "master"}` }).catch(() => undefined)
       active.throwIfAborted()
-      return report ? { type: "image", file: report } : "B站登录完成。"
+      return report ? { type: "image", file: report } : $t("services.bilibili.login-command.text_e294f47a39")
     } catch (error) {
       if (active.aborted) return []
-      return loginError(context, error instanceof Error ? error.message : "B 站登录未完成，请稍后重试。")
+      return loginError(context, error instanceof Error ? error.message : $t("services.bilibili.login-command.text_0c4d715a29"))
     } finally {
       if (acquired) signingIn = false
     }

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { isChatFileName, maxChatFileBytes, type ChatFile } from "../../../../lib/chat-files.ts"
 import type { TuneWeaveRequestOptions } from "../tuneweave/service.ts"
 import { findOwnedNeteaseAccount, verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
@@ -32,7 +35,7 @@ export function isCloudMediaUrl(url: URL) {
 
 function checkedTrack(item: CloudTrack) {
   if (!isTrackReference(item?.ref) || item.ref !== item.track?.ref || item.track.platform !== "netease" ||
-      typeof item.track.name !== "string" || !item.track.name.trim()) throw new Error("云盘曲目数据无法核实。")
+      typeof item.track.name !== "string" || !item.track.name.trim()) throw new Error($t("services.music.cloud-service.text_1ae7cf9978"))
   return item
 }
 
@@ -53,7 +56,7 @@ export class NeteaseCloudLibrary {
 
   private async binding(api: MusicService, owner: number, signal: AbortSignal): Promise<Binding> {
     const account = await findOwnedNeteaseAccount(api, owner, signal)
-    if (!account) throw new Error("请先在当前好友私聊使用 #音乐登录 绑定自己的网易云账号。")
+    if (!account) throw new Error($t("services.music.cloud-service.text_973b2d21e5"))
     return { ...account, key: JSON.stringify([api.tuneweave.config.api_url, owner, account.alias, account.uid]) }
   }
 
@@ -64,14 +67,14 @@ export class NeteaseCloudLibrary {
     const result = await api.tuneweave.request<T>(`/v1/${path}?${query}`, { ...options, signal, redirect: "error",
       accountSelection: { platform: "netease", alias: binding.alias } })
     signal.throwIfAborted()
-    if (!result.accountSelected) throw new Error("TuneWeave 未确认选用的网易云账号。")
+    if (!result.accountSelected) throw new Error($t("services.music.cloud-service.text_8201d4a8c3"))
     return result
   }
 
   async verify(api: MusicService, owner: number, signal: AbortSignal) {
     const binding = await this.binding(api, owner, signal)
     await verifyOrRenewNeteaseAccount(api, binding, signal).catch(error => {
-      if (error?.code === "authentication_required") throw new Error("网易云登录已过期，请在当前好友私聊重新扫码。")
+      if (error?.code === "authentication_required") throw new Error($t("services.music.cloud-service.text_176754bafe"))
       throw error
     })
     await this.assertCurrent(api, binding, signal)
@@ -79,7 +82,7 @@ export class NeteaseCloudLibrary {
   }
 
   async assertCurrent(api: MusicService, expected: Binding, signal: AbortSignal) {
-    if ((await this.binding(api, expected.owner, signal)).key !== expected.key) throw new Error("网易云绑定已变更，请重新查询云盘。")
+    if ((await this.binding(api, expected.owner, signal)).key !== expected.key) throw new Error($t("services.music.cloud-service.text_5e5afccf99"))
   }
 
   async list(api: MusicService, binding: Binding, signal: AbortSignal, refresh = false) {
@@ -119,32 +122,32 @@ export class NeteaseCloudLibrary {
         extensions?: { storage_size?: unknown; storage_max_size?: unknown } } | undefined
       const reportedTotal = unsignedCount(meta?.total)
       if (!Array.isArray(data) || data.length > pageSize || meta?.offset !== offset || typeof meta.has_more !== "boolean" ||
-          page > 0 && reportedTotal !== total) throw new Error("云盘分页结果无法核实，请重新刷新。")
+          page > 0 && reportedTotal !== total) throw new Error($t("services.music.cloud-service.text_ade949f7fb"))
       total = reportedTotal
       used ??= unsignedCount(meta.extensions?.storage_size)
       capacity ??= unsignedCount(meta.extensions?.storage_max_size)
       for (const raw of data) {
         const item = checkedTrack(raw)
-        if (tracks.has(item.ref)) throw new Error("云盘曲目在刷新期间发生变化，请重新刷新。")
+        if (tracks.has(item.ref)) throw new Error($t("services.music.cloud-service.text_cf159adb23"))
         tracks.set(item.ref, item)
       }
       if (!meta.has_more) {
-        if (total !== undefined && tracks.size !== total) throw new Error("云盘曲目数在刷新期间发生变化，请重新刷新。")
+        if (total !== undefined && tracks.size !== total) throw new Error($t("services.music.cloud-service.text_82c8ead63b"))
         await verifyNeteaseAccount(api, binding, active)
         await this.assertCurrent(api, binding, active)
         return { tracks: [...tracks.values()], used, capacity, loadedAt: this.now() }
       }
-      if (!data.length || meta.next_offset !== offset + data.length) throw new Error("云盘分页没有前进，请重新刷新。")
+      if (!data.length || meta.next_offset !== offset + data.length) throw new Error($t("services.music.cloud-service.text_36ba14322a"))
       offset = meta.next_offset
     }
-    throw new Error("网易云盘曲目数超出本次刷新上限。")
+    throw new Error($t("services.music.cloud-service.text_6fac8a0222"))
   }
 
   async stream(api: MusicService, binding: Binding, track: CloudTrack, signal: AbortSignal): Promise<MusicStream> {
     const { data } = await this.request<CloudDownload>(api, binding, `account/cloud/tracks/${encodeURIComponent(checkedTrack(track).ref)}/download`, {}, signal)
     const url = typeof data?.url === "string" && URL.parse(data.url)
     if (data?.ref !== track.ref || data.platform !== "netease" || data.available !== true || !url || !isCloudMediaUrl(url)) {
-      throw new Error("当前云盘曲目没有可用的完整音源。")
+      throw new Error($t("services.music.cloud-service.text_2871f02d8e"))
     }
     await verifyNeteaseAccount(api, binding, signal)
     await this.assertCurrent(api, binding, signal)
@@ -153,17 +156,17 @@ export class NeteaseCloudLibrary {
 
   private async trackDetails(api: MusicService, binding: Binding, ref: string, signal: AbortSignal) {
     const { data } = await this.request<CloudTrack[]>(api, binding, "account/cloud/tracks/details", { platform: "netease", refs: ref }, signal)
-    if (!Array.isArray(data) || data.length !== 1 || data[0]?.ref !== ref) throw new Error("当前云盘曲目无法核实，请重新查询。")
+    if (!Array.isArray(data) || data.length !== 1 || data[0]?.ref !== ref) throw new Error($t("services.music.cloud-service.text_df9ebe29e0"))
     return checkedTrack(data[0])
   }
 
   async match(api: MusicService, binding: Binding, source: CloudTrack, targetId: string, signal: AbortSignal) {
     const cloudRef = checkedTrack(source).ref
     const publicRef = "netease:" + targetId
-    if (!isTrackReference(publicRef)) throw new Error("请输入有效的网易云官方歌曲编号。")
+    if (!isTrackReference(publicRef)) throw new Error($t("services.music.cloud-service.text_54be22bb70"))
     const target = await api.publicShare({ platform: "netease", kind: "track", id: targetId,
       url: "https://music.163.com/#/song?id=" + targetId }, signal)
-    if (target.kind !== "track") throw new Error("网易云官方曲目无法核实。")
+    if (target.kind !== "track") throw new Error($t("services.music.cloud-service.text_2f0ffdb2af"))
     const current = await this.trackDetails(api, binding, cloudRef, signal)
     await verifyNeteaseAccount(api, binding, signal)
     await this.assertCurrent(api, binding, signal)
@@ -180,18 +183,18 @@ export class NeteaseCloudLibrary {
       if (updated.matched_track_ref !== publicRef) throw new Error("unconfirmed")
       return { changed: true, name: target.track.name }
     } catch {
-      throw new Error("这次云盘匹配结果未确认。请先用 #云盘更新 核对，避免重复提交。")
+      throw new Error($t("services.music.cloud-service.text_080687be16"))
     } finally { this.clear(binding) }
   }
 
   async upload(api: MusicService, binding: Binding, file: ChatFile, signal: AbortSignal) {
     if (!isChatFileName(file.name) || file.bytes.byteLength < 12 || file.bytes.byteLength > maxChatFileBytes) {
-      throw new Error("请选择不超过 16 MiB 的音频附件。")
+      throw new Error($t("services.music.cloud-service.text_c5fe0c967f"))
     }
     const contentType = audioContentType(file)
-    if (!contentType) throw new Error("请选择内容与扩展名一致的 FLAC、MP3、WAV、OGG 或 M4A 音频。")
+    if (!contentType) throw new Error($t("services.music.cloud-service.text_c398f79799"))
     // Reconfirm the server-side account after loading the attachment and before the one write.
-    if ((await this.verify(api, binding.owner, signal)).key !== binding.key) throw new Error("网易云绑定已变更，请重新上传。")
+    if ((await this.verify(api, binding.owner, signal)).key !== binding.key) throw new Error($t("services.music.cloud-service.text_9bbc23b1ca"))
     const stem = file.name.replace(/\.[^.]+$/u, "")
     const parts = /^(.+?)\s*-\s*(.+)$/u.exec(stem)
     const params = { platform: "netease", filename: file.name }
@@ -201,7 +204,7 @@ export class NeteaseCloudLibrary {
         { method: "POST", audio: { bytes: file.bytes, contentType } })
       if (data?.published !== true || !isTrackReference(data.track_ref)) throw new Error("unconfirmed")
       await this.assertCurrent(api, binding, signal)
-    } catch { throw new Error("这次云盘上传结果未确认。请先用 #云盘更新 核对，避免重复提交。") }
+    } catch { throw new Error($t("services.music.cloud-service.text_a4374a739b")) }
     finally { this.clear(binding) }
   }
 }

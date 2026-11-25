@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -74,7 +77,7 @@ export function parseXiaohongshuPage(html: string, id: string) {
   const owner = text(fields(note.user).nickname, 100)
   const body = text(note.desc, 1200)
   const heading = text(note.title, 200)
-  const title = heading || text(body.split("\n", 1)[0], 140) || "小红书笔记"
+  const title = heading || text(body.split("\n", 1)[0], 140) || $t("services.xiaohongshu.preview.text_e3367ef169")
   const firstImage = Array.isArray(note.imageList) ? fields(note.imageList[0]) : {}
   const cover = coverUrl(firstImage.urlDefault, firstImage.fileId) ?? coverUrl(firstImage.urlPre, firstImage.fileId)
   if (!owner || (!heading && !body && !cover)) return
@@ -120,7 +123,7 @@ export function createXiaohongshuPreview({ signal, fetch = globalThis.fetch, loa
       const active = AbortSignal.any([signal, connection].filter((value): value is AbortSignal => value !== undefined))
       if (active.aborted) return []
       const link = input.url.href
-      const unavailable = "暂无法读取小红书公开笔记。\n" + link
+      const unavailable = $t("services.xiaohongshu.preview.text_69a4c51728") + link
       let enabled = false
       try {
         const config = await loadConfig("xhs")

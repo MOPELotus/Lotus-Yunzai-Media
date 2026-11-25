@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import { publicShareVideoUrl, type MediaFetch } from "../media/cdn.ts"
@@ -85,7 +88,7 @@ function weishi(html: string, target: Target): PublicShare | undefined {
   if (!title && !owner) return
   const duration = record(feed.video).duration
   const video = typeof feed.videoUrl === "string" ? publicShareVideoUrl(feed.videoUrl, "weishi-video") : undefined
-  return { site: "weishi", id: target.id, url: target.url.href, title: title || "微视作品", owner,
+  return { site: "weishi", id: target.id, url: target.url.href, title: title || $t("services.public-share.source.text_e96dc61f95"), owner,
     cover: image(feed.videoCover, "weishi"), images: [], video, createdAt: timestamp(feed.createTime),
     duration: typeof duration === "number" && duration > 0 && duration < 86_400_000 ? duration / 1000 : undefined }
 }
@@ -115,7 +118,7 @@ function zuiyou(html: string, target: Target): PublicShare | undefined {
       }
     } else if (picture && !images.includes(picture)) images.push(picture)
   }
-  return { site: "zuiyou", id: target.id, url: target.url.href, title: title || "最右帖子", owner,
+  return { site: "zuiyou", id: target.id, url: target.url.href, title: title || $t("services.public-share.source.text_7025dd3007"), owner,
     cover: cover ?? images[0], images, video, duration, createdAt: timestamp(post.ct) }
 }
 
@@ -130,7 +133,7 @@ async function htmlOf(response: Response, signal: AbortSignal) {
   for await (const chunk of response.body) {
     signal.throwIfAborted()
     bytes += chunk.byteLength
-    if (bytes > limit) throw new Error("公开分享页超过读取限制。")
+    if (bytes > limit) throw new Error($t("services.public-share.source.text_e682885277"))
     html += decoder.decode(chunk, { stream: true })
   }
   return html + decoder.decode()

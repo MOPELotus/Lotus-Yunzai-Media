@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { TuneWeaveQrProfile } from "../tuneweave/auth.ts"
 import { readMusicAccounts, saveMusicAccount, type MusicAccount } from "./accounts.ts"
 import type { MusicService, MusicStream, MusicTrack } from "./service.ts"
@@ -21,8 +24,8 @@ const refreshing = new Set<string>()
 
 function loginRequired(platform: RefreshPlatform) {
   const message = platform === "kuwo" || platform === "migu"
-    ? "此平台需要绑定账号的主人先在 TuneWeave 登录，并完成公共音乐账号绑定。"
-    : "请由绑定账号的主人在当前好友私聊使用 #音乐登录 重新扫码。"
+    ? $t("services.music.personal.text_43c0bcd919")
+    : $t("services.music.personal.text_7d822d1ef9")
   return Object.assign(new Error(message), { code: "authentication_required", platform })
 }
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
@@ -38,7 +41,7 @@ export async function recommendQqSong(api: MusicService, signal: AbortSignal) {
   if (!card?.id || !card.ref) return
   const track = await api.tuneweave.request<MusicTrack>(`/v1/tracks/${encodeURIComponent(card.ref)}`, { signal, redirect: "error" })
   if (!isQqTrack(track) || (String(track.id) !== card.id && track.extensions?.numeric_id !== card.id)) {
-    throw new Error("QQ 音乐未返回这条推荐对应的歌曲。")
+    throw new Error($t("services.music.personal.text_d1e65d60d2"))
   }
   return track
 }
@@ -49,7 +52,7 @@ function isQqTrack(track: MusicTrack | undefined): track is MusicTrack {
 
 function checkStream(track: MusicTrack, stream: MusicStream) {
   if (!stream?.url || stream.trial || stream.resolved_platform !== track.platform ||
-      stream.origin_track !== track.ref || stream.resolved_track !== track.ref) throw new Error("没有可核实的原平台完整音源。")
+      stream.origin_track !== track.ref || stream.resolved_track !== track.ref) throw new Error($t("services.music.personal.text_46bac6f803"))
   return stream
 }
 
@@ -63,7 +66,7 @@ export async function openPublicQqStream(api: MusicService, track: MusicTrack, s
 
 async function binding(api: MusicService, platform: RefreshPlatform, owner: number, signal: AbortSignal): Promise<Binding> {
   signal.throwIfAborted()
-  const accounts = await readMusicAccounts(api.accountsFile).catch(() => { throw new Error("音乐账号记录无法读取。") })
+  const accounts = await readMusicAccounts(api.accountsFile).catch(() => { throw new Error($t("services.music.personal.text_692889de95")) })
   const saved = accounts[platform]
   const uid = String(saved?.uid ?? "")
   if (!saved?.alias || !/^[A-Za-z0-9_-]{1,128}$/u.test(saved.alias) || !/^[A-Za-z0-9_-]{1,128}$/u.test(uid) ||
@@ -79,7 +82,7 @@ async function assertCurrent(api: MusicService, expected: StoredBinding, signal:
   signal.throwIfAborted()
   if (!actual || actual.alias !== expected.alias || actual.uid !== expected.saved.uid || actual.owner !== expected.saved.owner ||
       actual.credential !== expected.saved.credential) {
-    throw new Error("音乐账号已变更，请重新查询。")
+    throw new Error($t("services.music.personal.text_a5426976e6"))
   }
 }
 
@@ -88,16 +91,16 @@ async function accountRequest<T>(api: MusicService, expected: Binding, route: st
   const response = await api.tuneweave.request<T>(target, { signal, redirect: "error",
     accountSelection: { platform: expected.platform, alias: expected.alias } })
   signal.throwIfAborted()
-  if (!response.accountSelected) throw new Error("TuneWeave 未确认选用的音乐账号。")
+  if (!response.accountSelected) throw new Error($t("services.music.personal.text_332b954191"))
   return response.data
 }
 
 async function verify(api: MusicService, expected: Binding, signal: AbortSignal) {
   const profile = await accountRequest<TuneWeaveQrProfile>(api, expected, `/v1/account?platform=${expected.platform}`, signal)
   if (profile?.platform !== expected.platform || profile.account !== expected.alias ||
-      profile.user_id != null && String(profile.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
+      profile.user_id != null && String(profile.user_id) !== expected.uid) throw new Error($t("services.music.personal.text_8ea41cb434"))
   if (profile.authenticated === false) throw loginRequired(expected.platform)
-  if (profile.authenticated !== true || String(profile.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
+  if (profile.authenticated !== true || String(profile.user_id) !== expected.uid) throw new Error($t("services.music.personal.text_8ea41cb434"))
   await assertCurrent(api, expected, signal)
   return profile
 }
@@ -105,7 +108,7 @@ async function verify(api: MusicService, expected: Binding, signal: AbortSignal)
 async function refreshMusicBinding(api: MusicService, expected: StoredBinding, signal: AbortSignal,
   mode: "both" | "server" = "both") {
   const key = JSON.stringify([api.tuneweave.config.api_url, api.accountsFile, expected.platform])
-  if (refreshing.has(key)) throw new Error("此平台的音乐登录正在续期。")
+  if (refreshing.has(key)) throw new Error($t("services.music.personal.text_09307791c2"))
   refreshing.add(key)
   try { return await renew(api, expected, signal, mode) }
   finally { refreshing.delete(key) }
@@ -124,7 +127,7 @@ export async function refreshOwnMusicAccount(api: MusicService, platform: Refres
   selection?: { alias: string; uid: string; credential?: string }) {
   const current = await binding(api, platform, owner, signal)
   if (selection && (current.alias !== selection.alias || current.uid !== selection.uid ||
-      selection.credential !== undefined && current.saved.credential !== selection.credential)) throw new Error("音乐账号已变更，请重新查询。")
+      selection.credential !== undefined && current.saved.credential !== selection.credential)) throw new Error($t("services.music.personal.text_a5426976e6"))
   return refreshMusicBinding(api, current, signal)
 }
 
@@ -152,18 +155,18 @@ async function renew(api: MusicService, expected: StoredBinding, signal: AbortSi
     throw error
   })
   if (!accountSelected || data?.platform !== platform || data.account !== expected.alias ||
-      data.user_id != null && String(data.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
+      data.user_id != null && String(data.user_id) !== expected.uid) throw new Error($t("services.music.personal.text_8ea41cb434"))
   if (data.authenticated === false) throw loginRequired(platform)
-  if (data.authenticated !== true || String(data.user_id) !== expected.uid) throw new Error("音乐账号身份无法核实。")
+  if (data.authenticated !== true || String(data.user_id) !== expected.uid) throw new Error($t("services.music.personal.text_8ea41cb434"))
   await assertCurrent(api, expected, signal)
   if (mode === "server") return data
   if (data.caller_credential?.platform !== platform || !data.caller_credential.value?.startsWith("twc1_")) {
-    throw new Error("音乐账号身份无法核实。")
+    throw new Error($t("services.music.personal.text_8ea41cb434"))
   }
   const saved = await saveMusicAccount(platform, { credential: data.caller_credential.value }, { file: api.accountsFile, expected: expected.saved, signal })
-    .catch(() => { throw new Error("无法保存音乐登录续期结果。") })
+    .catch(() => { throw new Error($t("services.music.personal.text_f6a2e27b7c")) })
   if (!saved) {
-    throw new Error("音乐账号已变更，未保存旧会话的续期结果。")
+    throw new Error($t("services.music.personal.text_dab2f27db4"))
   }
   return data
 }
@@ -184,7 +187,7 @@ async function withQqRenewal<T>(api: MusicService, expected: Binding, signal: Ab
     const profile = await refreshMusicBinding(api, expected, signal)
     const current = await binding(api, "qq", expected.owner, signal)
     if (current.alias !== expected.alias || current.uid !== expected.uid ||
-        current.saved.credential !== profile.caller_credential?.value) throw new Error("音乐账号已变更，请重新查询。")
+        current.saved.credential !== profile.caller_credential?.value) throw new Error($t("services.music.personal.text_a5426976e6"))
     return { result: await action(current), binding: current, renewed: true }
   }
 }
@@ -200,7 +203,7 @@ export async function readQqCollection(api: MusicService, kind: MusicCollection,
     await verify(api, current, signal)
     const items = await accountRequest<MusicTrack[]>(api, current, route, signal)
     await verify(api, current, signal)
-    if (!Array.isArray(items) || items.some(item => !isQqTrack(item))) throw new Error("QQ 音乐未返回可核实的歌曲。")
+    if (!Array.isArray(items) || items.some(item => !isQqTrack(item))) throw new Error($t("services.music.personal.text_bec2fd50c1"))
     return items.slice(0, limit)
   })
   return { tracks: result.result, binding: result.binding }

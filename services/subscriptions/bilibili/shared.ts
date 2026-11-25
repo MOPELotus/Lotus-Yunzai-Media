@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../../packages/i18n/index.ts";
+import messageCatalog from "../../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { loadGlobalConfig } from "../../../core/config/global.ts"
 import { BilibiliService } from "../../bilibili/service.ts"
 
@@ -115,7 +118,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
     const current = await enabled() ? await service.loadAccount() : undefined
     if (!current || current.tuneweave_account !== record.tuneweave_account ||
         current.saved_at !== record.saved_at || current.user_id !== record.user_id) {
-      throw new Error("B 站共享会话配置已变更，请稍后重试。")
+      throw new Error($t("services.subscriptions.bilibili.shared.text_497084fb2a"))
     }
     signal?.throwIfAborted()
   }
@@ -134,7 +137,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
     const { data, accountSelected } = response as SharedAccountResponse
     if (!accountSelected || data?.platform !== platform || data?.account !== alias ||
         data.authenticated === true && data.user_id !== record.user_id) {
-      throw new Error("TuneWeave 未确认 B 站共享会话的刷新结果。")
+      throw new Error($t("services.subscriptions.bilibili.shared.text_aef43b7c73"))
     }
     return authenticated(data, alias)
   }
@@ -194,7 +197,7 @@ export function biliSharedSession({ enabled = async () => true, createService = 
       signal?.throwIfAborted()
       const { data, accountSelected } = response as SharedAccountResponse
       if (!accountSelected || data?.authenticated !== true || !Array.isArray(data.items)) {
-        throw new Error("TuneWeave 未确认当前 B 站共享会话。")
+        throw new Error($t("services.subscriptions.bilibili.shared.text_664ccf4342"))
       }
       await ensureCurrent(service, record, signal)
       return data as SharedAccountProfile & { items: unknown[] }

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../../packages/i18n/index.ts";
+import messageCatalog from "../../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallbackContext } from "../../../../../lib/commands.ts"
 import { clearWeiboLogin, readWeiboLogin, type SubscriptionSession } from "../session.ts"
 import type { GetSubscriptionRedis, SubscriptionRedis } from "../types.ts"
@@ -56,13 +59,13 @@ export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch
   async function status(redis: SubscriptionRedis, active: AbortSignal) {
     const url = new URL("/api/config", base)
     const state = await readWeiboLogin(redis, url)
-    if (!state) return "当前没有微博登录会话。"
+    if (!state) return $t("services.subscriptions.weibo.login.text_746642a82f")
     const result = await get(request, session, state, url, active)
     const config = result.data?.data
-    if (result.expired || config?.login === false) return "微博未登录或会话已失效。"
+    if (result.expired || config?.login === false) return $t("services.subscriptions.weibo.login.text_6281d77c48")
     const uid = userId(config?.uid)
-    if (config?.login !== true || !uid) return "无法确认微博登录状态。"
-    const rows = ["微博动态订阅已登录", "UID：" + uid]
+    if (config?.login !== true || !uid) return $t("services.subscriptions.weibo.login.text_a0ec373a6c")
+    const rows = [$t("services.subscriptions.weibo.login.text_a78a2aba64"), "UID：" + uid]
     const profileUrl = new URL("/profile/info", base)
     profileUrl.searchParams.set("uid", uid)
     const token = config.user_token
@@ -75,9 +78,9 @@ export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch
         if (user && userId(user.id ?? user.idstr) === uid) {
           if (typeof user.screen_name === "string" && user.screen_name.trim()) {
             const name = user.screen_name.replace(/[\u0000-\u001f\u007f-\u009f]/gu, "").slice(0, 80).toWellFormed()
-            rows.push("昵称：" + name)
+            rows.push($t("services.subscriptions.weibo.login.text_c9f36e703d") + name)
           }
-          for (const [label, value] of [["SVIP 等级", user.svip], ["关注", user.follow_count]]) {
+          for (const [label, value] of [[$t("services.subscriptions.weibo.login.text_02fd80206a"), user.svip], [$t("services.subscriptions.weibo.login.text_eb137dee4c"), user.follow_count]]) {
             if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) rows.push(label + "：" + value)
           }
         }
@@ -93,21 +96,21 @@ export function weiboSubscriptionLogin({ getRedis, session, owner, signal, fetch
     const showing = show.test(input)
     const removing = remove.test(input)
     if (!showing && !removing) return
-    if (context.isDelegated || !owner(context)) return "仅机器人主人可管理微博动态登录。"
+    if (context.isDelegated || !owner(context)) return $t("services.subscriptions.weibo.login.text_d9c6e45055")
     const privateSignal = context.privateCredentialSignal
-    if (context.message_type !== "private" || !privateSignal) return "请在与机器人的好友私聊中管理微博动态登录。"
+    if (context.message_type !== "private" || !privateSignal) return $t("services.subscriptions.weibo.login.text_085e77f43d")
     const active = signal ? AbortSignal.any([signal, privateSignal]) : privateSignal
     const redis = getRedis()
-    if (!redis) return "动态登录存储未连接。"
+    if (!redis) return $t("services.subscriptions.weibo.login.text_0f6f31acf0")
     try {
       active.throwIfAborted()
       if (showing) return await status(redis, active)
       const result = await clearWeiboLogin(redis)
-      if (result === "cleared") return "微博动态登录会话已从本机清除。"
-      if (result === "absent") return "当前没有微博登录会话。"
-      return "微博会话刚发生变更，请重新查询后操作。"
+      if (result === "cleared") return $t("services.subscriptions.weibo.login.text_4f0c44b562")
+      if (result === "absent") return $t("services.subscriptions.weibo.login.text_746642a82f")
+      return $t("services.subscriptions.weibo.login.text_246387c5fa")
     } catch {
-      if (!active.aborted) return "微博动态登录操作未完成，请稍后重试。"
+      if (!active.aborted) return $t("services.subscriptions.weibo.login.text_5ae41fbcf7")
     }
   }
 }

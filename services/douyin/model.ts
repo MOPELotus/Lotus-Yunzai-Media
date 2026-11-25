@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 import { DouyinError } from "./http.ts"
 
@@ -253,7 +256,7 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
     }
     visit(nodes)
     if (!blocks.length) {
-      warnings.push("文章正文结构未知，已保留可读内容")
+      warnings.push($t("services.douyin.model.text_627d2c0d56"))
       if (typeof info.article_content === "string" && !Object.keys(content).length) visit(info.article_content)
       for (const image of images) {
         const urls = mediaUrls(image.high_image_url || image.origin_image_url || image.markdown_url)
@@ -266,8 +269,8 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
 
 export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expectedId }: NormalizeOptions = {}) {
   const id = douyinWorkId(detail?.aweme_id)
-  if (!id || expectedId && id !== expectedId) throw new DouyinError("invalid_detail", "作品详情 ID 不匹配")
-  const warnings = source === "ssr" ? ["使用分享页面降级解析，部分统计或清晰度信息可能缺失"] : []
+  if (!id || expectedId && id !== expectedId) throw new DouyinError("invalid_detail", $t("services.douyin.model.text_2e903c4bb5"))
+  const warnings = source === "ssr" ? [$t("services.douyin.model.text_b7d0bb226e")] : []
   const images = Array.isArray(detail.images) ? detail.images : []
   const articleInfo = isObject(detail.article_info) ? detail.article_info : undefined
   const isArticle = detail.aweme_type === 163 || Boolean(articleInfo)
@@ -276,8 +279,8 @@ export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expec
     const urls = mediaUrls(image)
     const motion = videoSources(image.video || {})
     const type = image.clip_type === 4 && motion.length ? "video" : motion.length || image.clip_type === 5 ? "live_photo" : "image"
-    if (!urls.length && !motion.length) warnings.push(`第 ${index + 1} 项缺少媒体地址`)
-    if ((type === "live_photo" || image.clip_type === 4) && !motion.length) warnings.push(`第 ${index + 1} 项动态资源缺失，保留静态图`)
+    if (!urls.length && !motion.length) warnings.push($t("services.douyin.model.text_a8a80c974c", { "value1": index + 1 }))
+    if ((type === "live_photo" || image.clip_type === 4) && !motion.length) warnings.push($t("services.douyin.model.text_8118ce59de", { "value1": index + 1 }))
     const assetId = typeof image.uri === "string" && /^[a-zA-Z0-9_/.~-]{1,240}$/u.test(image.uri) ? image.uri : undefined
     return { index: index + 1, type, urls, sources: motion, ...(assetId ? { assetId } : {}),
       width: positive(image.width), height: positive(image.height) }
@@ -290,15 +293,15 @@ export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expec
     media.splice(0, media.length, ...article.blocks.filter(block => block.type === "image").map((block, index) => ({ ...block, index: index + 1, sources: [] })))
     const description = plainText(detail.desc)
     if (!article.blocks.length && description) article.blocks.push({ type: "text", text: description })
-    if (!article.blocks.length) throw new DouyinError("no_media", "作品详情缺少可用的文章正文或图片")
+    if (!article.blocks.length) throw new DouyinError("no_media", $t("services.douyin.model.text_b4c633ad0f"))
   }
   if ((type === "video" && !sources.length) || (type !== "video" && !isArticle && !media.some(item => item.urls.length || item.sources.length))) {
-    throw new DouyinError("no_media", "作品详情缺少可用媒体资源")
+    throw new DouyinError("no_media", $t("services.douyin.model.text_2f9401e5b2"))
   }
   const author = detail.author || {}
   const statistics = detail.statistics || {}
   const createdAt = positive(detail.create_time)
-  const title = [articleInfo?.article_title, detail.preview_title, detail.item_title, detail.desc].map(plainText).find(Boolean) || `抖音作品 ${id}`
+  const title = [articleInfo?.article_title, detail.preview_title, detail.item_title, detail.desc].map(plainText).find(Boolean) || $t("services.douyin.model.text_d3da49380e", { "id": id })
   const owner = plainText(author.nickname)
   return {
     platform: "douyin" as const, id, type, title, desc: plainText(detail.desc), owner,

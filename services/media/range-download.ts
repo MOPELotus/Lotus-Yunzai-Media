@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import fs from "node:fs/promises"
 import type { FileHandle } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
@@ -41,7 +44,7 @@ export async function downloadRanges(urls: string | readonly (string | undefined
   const timeout = AbortSignal.timeout(timeoutMs), parentSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
   let lastError
   for (const url of new Set((typeof urls === "string" ? [urls] : urls ?? []).filter((item): item is string => Boolean(item)))) {
-    if (parentSignal.aborted) throw new Error("下载已取消或超时")
+    if (parentSignal.aborted) throw new Error($t("services.media.range-download.text_5ccee370f8"))
     const temp = `${target}.${randomUUID()}.part`, controller = new AbortController(), transferSignal = AbortSignal.any([parentSignal, controller.signal])
     let handle: FileHandle | undefined
     const full = async (initial: Response | (() => Promise<Response>), probedLength?: number, validators?: ReturnType<typeof resourceValidators>) => {
@@ -53,34 +56,34 @@ export async function downloadRanges(urls: string | readonly (string | undefined
           checkResponse(response)
           if (response.status !== 200 || !response.body || response.headers.has("content-range")) {
             discardBody(response)
-            throw new Error(`完整下载响应无效 HTTP ${response.status}`)
+            throw new Error($t("services.media.range-download.text_268c53c7dc", { "status": response.status }))
           }
           const contentLength = response.headers.get("content-length")
           const declared = contentLength === null ? undefined : Number(contentLength)
           if (changesResource(response.headers, validators)) {
             discardBody(response)
-            throw new Error("下载期间源文件发生变化")
+            throw new Error($t("services.media.range-download.text_591ae276a0"))
           }
           if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 1 ||
               (probedLength !== undefined && probedLength !== declared))) {
             discardBody(response)
-            throw new Error("下载文件体积与探测不一致")
+            throw new Error($t("services.media.range-download.text_9e3f358137"))
           }
           const expected = probedLength ?? declared
           if (maxBytes && expected !== undefined && expected > maxBytes) {
             discardBody(response)
-            throw new Error("下载文件超出大小限制")
+            throw new Error($t("services.media.range-download.text_09fcdc7933"))
           }
           const opened = handle = await fs.open(temp, "wx")
           let received = 0
           for await (const chunk of readStream(response.body, transferSignal)) {
             const next = received + chunk.length
-            if (maxBytes && next > maxBytes) throw new Error("下载文件超出大小限制")
-            if (expected !== undefined && next > expected) throw new Error("下载文件体积与探测不一致")
+            if (maxBytes && next > maxBytes) throw new Error($t("services.media.range-download.text_09fcdc7933"))
+            if (expected !== undefined && next > expected) throw new Error($t("services.media.range-download.text_9e3f358137"))
             await writeChunk(opened, chunk, received)
             received = next
           }
-          if (!received || expected !== undefined && received !== expected) throw Object.assign(new Error("下载文件不完整"), { code: "ERR_STREAM_PREMATURE_CLOSE" })
+          if (!received || expected !== undefined && received !== expected) throw Object.assign(new Error($t("services.media.range-download.text_9d83213887")), { code: "ERR_STREAM_PREMATURE_CLOSE" })
           await opened.close()
           handle = undefined
           return received
@@ -92,7 +95,7 @@ export async function downloadRanges(urls: string | readonly (string | undefined
     }
     try {
       const parsed = new URL(url)
-      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("下载地址协议无效")
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error($t("services.media.range-download.text_f0657608db"))
       const base = { "Accept-Encoding": "identity", ...headers }
       const probe = await probeRequest(parsed, { headers: { ...base, Range: "bytes=0-0" }, signal: transferSignal })
       let total: number
@@ -100,9 +103,9 @@ export async function downloadRanges(urls: string | readonly (string | undefined
       else {
         const range = probe.headers.get("content-range")?.match(/^bytes 0-0\/(\d+)$/)
         discardBody(probe)
-        if (probe.status !== 206 || !range) throw new Error(`下载探测失败 HTTP ${probe.status}`)
+        if (probe.status !== 206 || !range) throw new Error($t("services.media.range-download.text_f31707a8ce", { "status": probe.status }))
         const resourceLength = total = Number(range[1])
-        if (!Number.isSafeInteger(total) || total <= 0 || maxBytes && total > maxBytes) throw new Error("下载文件体积无效或超出限制")
+        if (!Number.isSafeInteger(total) || total <= 0 || maxBytes && total > maxBytes) throw new Error($t("services.media.range-download.text_8e77c5f436"))
         const count = Math.max(1, Math.min(16, Math.floor(concurrency), Math.ceil(total / (2 * 1024 * 1024))))
         const validators = resourceValidators(probe.headers)
         if (count === 1) await full(() => request(url, { headers: base, signal: transferSignal }), resourceLength, validators)
@@ -123,19 +126,19 @@ export async function downloadRanges(urls: string | readonly (string | undefined
                 const expected = `bytes ${start}-${end}/${resourceLength}`
                 if (!response.body || response.status !== 206 || response.headers.get("content-range") !== expected) {
                   discardBody(response)
-                  throw new Error("分段响应范围不一致")
+                  throw new Error($t("services.media.range-download.text_2b8966c0f7"))
                 }
                 if (changesResource(response.headers, validators)) {
                   discardBody(response)
-                  throw new Error("下载期间源文件发生变化")
+                  throw new Error($t("services.media.range-download.text_591ae276a0"))
                 }
                 let offset = start
                 for await (const chunk of readStream(response.body, transferSignal)) {
-                  if (offset + chunk.length > end + 1) throw new Error("下载分段超出范围")
+                  if (offset + chunk.length > end + 1) throw new Error($t("services.media.range-download.text_2700acb207"))
                   await writeChunk(opened, chunk, offset)
                   offset += chunk.length
                 }
-                if (offset !== end + 1) throw new Error("下载分段不完整")
+                if (offset !== end + 1) throw new Error($t("services.media.range-download.text_04134e32e4"))
                 return
               } catch (error) { last = error; if (transferSignal.aborted || !retryAllowed) break }
             }
@@ -155,5 +158,5 @@ export async function downloadRanges(urls: string | readonly (string | undefined
       try { await handle?.close() } finally { await fs.rm(temp, { force: true }) }
     }
   }
-  throw lastError || new Error("没有可用下载地址")
+  throw lastError || new Error($t("services.media.range-download.text_cbcfae0628"))
 }

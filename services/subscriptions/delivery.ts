@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { setTimeout as pause } from "node:timers/promises"
 import { Job } from "node-schedule"
 import type { GroupTransport } from "../../../../lib/adapters/onebot-groups.ts"
@@ -179,7 +182,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
       const selected = await redis.eval(claimLua, { keys: entries.flatMap(item => [item.legacy, item.journal]),
         arguments: [String(holdSeconds), ...entries.map(item => item.token)] })
       if (!Array.isArray(selected) || selected.some(index => typeof index !== "number" || !Number.isInteger(index) || index < 1 || index > entries.length)) {
-        throw new Error("动态投递占位结果无效。")
+        throw new Error($t("services.subscriptions.delivery.text_ffad309267"))
       }
       const claimed = new Set(selected)
       report.skipped += entries.length - claimed.size
@@ -213,12 +216,12 @@ export function createSubscriptionDelivery({providers,config,groups,notification
 
     let state: CheckinNotifyDelivery = "rejected"
     if (!active.aborted) {
-      try { state = await sender.send([{type:"at",qq:"all"}," B站 直播提醒"]) }
+      try { state = await sender.send([{type:"at",qq:"all"},$t("services.subscriptions.delivery.text_aae30a392a")]) }
       catch { state = "unknown" }
     }
     await redis.eval(settleLiveNoticeLua,{keys:[mark],arguments:[token,state,String(cooldown)]})
     if (state === "rejected" && !active.aborted && settings.liveFailureNotice) {
-      await sender.send("直播动态发送@全体成员失败，请检查权限或平台是否支持")
+      await sender.send($t("services.subscriptions.delivery.text_98dad0bdb3"))
     }
   }
 
@@ -284,7 +287,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
         break
       }
       let status: CheckinNotifyDelivery
-      try { markSent(); status = await sender.forward(["有新的"+provider.label+"动态了~", ...batch.map(item => postNode(item.payloads))]) }
+      try { markSent(); status = await sender.forward([$t("services.subscriptions.delivery.text_52a582a361")+provider.label+$t("services.subscriptions.delivery.text_80619736bf"), ...batch.map(item => postNode(item.payloads))]) }
       catch { status = "unknown" }
       if (status === "rejected") {
         await finish(redis, batch, "rejected")
@@ -344,7 +347,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
         posts = []
         if (!active.aborted) {
           report.failed++
-          console.warn("[media] 订阅 · " + provider.label + "动态读取失败：" + errorText(error))
+          console.warn($t("services.subscriptions.delivery.text_1600eb9b75") + provider.label + $t("services.subscriptions.delivery.text_3e37eaa8ff") + errorText(error))
         }
       }
       postsByUid.set(uid, posts)
@@ -380,7 +383,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
             } catch (error) {
               if (!active.aborted) {
                 report.failed++
-                console.warn("[media] 订阅 · " + provider.label + "动态构建失败：" + errorText(error))
+                console.warn($t("services.subscriptions.delivery.text_1600eb9b75") + provider.label + $t("services.subscriptions.delivery.text_43583a2c9f") + errorText(error))
               }
             }
           }
@@ -398,7 +401,7 @@ export function createSubscriptionDelivery({providers,config,groups,notification
           } catch (error) {
             if (!active.aborted) {
               report.failed++
-              console.warn("[media] 订阅 · " + provider.label + "推送前复核失败：" + errorText(error))
+              console.warn($t("services.subscriptions.delivery.text_1600eb9b75") + provider.label + $t("services.subscriptions.delivery.text_c7dfe09f7e") + errorText(error))
             }
             return []
           }
@@ -407,12 +410,12 @@ export function createSubscriptionDelivery({providers,config,groups,notification
       } catch (error) {
         if (!active.aborted) {
           report.failed++
-          console.warn("[media] 订阅 · " + provider.label + "推送失败：" + errorText(error))
+          console.warn($t("services.subscriptions.delivery.text_1600eb9b75") + provider.label + $t("services.subscriptions.delivery.text_e0c2108d60") + errorText(error))
         }
       }
     }
     if (settings.log && (report.confirmed || report.unknown || report.failed)) {
-      console.info("[media] 订阅 · " + provider.label + " 已确认 " + report.confirmed + "，未确认 " + report.unknown + "，异常 " + report.failed)
+      console.info($t("services.subscriptions.delivery.text_1600eb9b75") + provider.label + $t("services.subscriptions.delivery.text_ba765b7077") + report.confirmed + $t("services.subscriptions.delivery.text_bdf352ff50") + report.unknown + $t("services.subscriptions.delivery.text_b754f98688") + report.failed)
     }
     return report
   }
@@ -437,10 +440,10 @@ export function createSubscriptionDelivery({providers,config,groups,notification
         try {
           const settings = await config.settings(id)
           if (!settings.enable || active.aborted) continue
-          const job = new Job(() => { void run(id,true)?.catch(error => console.warn("[media] 订阅 · " + errorText(error))) })
-          if (!job.schedule({rule:settings.cron,tz:"Asia/Shanghai"})) throw new Error("定时配置无效")
+          const job = new Job(() => { void run(id,true)?.catch(error => console.warn($t("services.subscriptions.delivery.text_1600eb9b75") + errorText(error))) })
+          if (!job.schedule({rule:settings.cron,tz:"Asia/Shanghai"})) throw new Error($t("services.subscriptions.delivery.text_ca1f54d6be"))
           jobs.push(job)
-        } catch (error) { console.warn("[media] 订阅 · " + provider.label + " " + errorText(error)) }
+        } catch (error) { console.warn($t("services.subscriptions.delivery.text_1600eb9b75") + provider.label + " " + errorText(error)) }
       }
     },
     async dispose() {

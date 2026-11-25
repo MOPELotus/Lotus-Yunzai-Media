@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { fetchCdn, type CdnKind, type MediaFetch } from "./cdn.ts"
 import fs from "node:fs/promises"
 import { randomUUID } from "node:crypto"
@@ -49,24 +52,24 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
         checkResponse(response)
         if (response.status !== 200 || !response.body || response.headers.has("content-range")) {
           discardBody(response)
-          throw new Error(`媒体下载失败 HTTP ${response.status}`)
+          throw new Error($t("services.media.download.text_30727abc24", { "status": response.status }))
         }
         const declared = response.headers.get("content-length")
         const expected = declared === null ? undefined : Number(declared)
         if (expected !== undefined && (!/^\d+$/u.test(declared!) || !Number.isSafeInteger(expected) || expected < 1)) {
           discardBody(response)
-          throw new Error("媒体下载不完整")
+          throw new Error($t("services.media.download.text_feda651382"))
         }
         if (maxBytes > 0 && expected !== undefined && expected > maxBytes) {
           discardBody(response)
-          throw new Error("媒体大小超过下载限制")
+          throw new Error($t("services.media.download.text_e66262fd88"))
         }
         const output = await fs.open(temp, "wx").catch(error => { discardBody(response); throw error })
         try {
           for await (const chunk of readStream(response.body, active)) {
             const next = length + chunk.length
-            if (maxBytes > 0 && next > maxBytes) throw new Error("媒体大小超过下载限制")
-            if (expected !== undefined && next > expected) throw new Error("媒体下载不完整")
+            if (maxBytes > 0 && next > maxBytes) throw new Error($t("services.media.download.text_e66262fd88"))
+            if (expected !== undefined && next > expected) throw new Error($t("services.media.download.text_feda651382"))
             if (prefix.length < sniffBytes) prefix = Buffer.concat([prefix, chunk.subarray(0, sniffBytes - prefix.length)])
             await writeChunk(output, chunk, length)
             length = next
@@ -75,9 +78,9 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
           await output.close()
         }
         active.throwIfAborted()
-        if (length === 0 || expected !== undefined && length !== expected) throw Object.assign(new Error("媒体下载不完整"), { code: "ERR_STREAM_PREMATURE_CLOSE" })
+        if (length === 0 || expected !== undefined && length !== expected) throw Object.assign(new Error($t("services.media.download.text_feda651382")), { code: "ERR_STREAM_PREMATURE_CLOSE" })
         const detected = sniffMedia(prefix)
-        if (!detected || kind && detected.kind !== kind) throw new Error("返回内容不是预期媒体，可能为错误页面或无效 CDN 响应")
+        if (!detected || kind && detected.kind !== kind) throw new Error($t("services.media.download.text_899197bb78"))
         const file = `${targetBase}${detected.ext}`
         await fs.rename(temp, file)
         return { file, kind: detected.kind, sizeBytes: length }
@@ -88,7 +91,7 @@ export async function downloadMedia(url: string, targetBase: string, { fetch: fe
   } catch (error) {
     const timedOut = controller.signal.aborted || error instanceof Error && error.name === "AbortError"
     controller.abort()
-    throw new Error(signal?.aborted ? "媒体下载已取消" : timedOut ? "媒体下载超时" : error instanceof Error ? error.message : String(error), { cause: error })
+    throw new Error(signal?.aborted ? $t("services.media.download.text_5a28169950") : timedOut ? $t("services.media.download.text_d64b3770c7") : error instanceof Error ? error.message : String(error), { cause: error })
   } finally {
     clearTimeout(timer)
     controller.abort()

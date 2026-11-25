@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import type { BilibiliService } from "./service.ts"
 
@@ -48,7 +51,7 @@ function commentOf(value: unknown, target: BiliCommentTarget, parent?: string): 
   })
   if (!id || !text && !images.length) return
   const likes = typeof row.like === "number" && Number.isSafeInteger(row.like) && row.like > 0 ? row.like : 0
-  const author = safeText(record(row.member).uname, 80).replace(/\s+/gu, " ") || "匿名用户"
+  const author = safeText(record(row.member).uname, 80).replace(/\s+/gu, " ") || $t("services.bilibili.comments.text_dbb8915955")
   return { id, author, text, likes, images }
 }
 
@@ -62,19 +65,19 @@ export function createBiliComments(fetch: BilibiliService["fetch"] = globalThis.
       headers: { Referer: "https://www.bilibili.com/", "User-Agent": "Mozilla/5.0", Accept: "application/json" } })
     if (!response.ok || response.redirected || !response.body || Number(response.headers.get("content-length")) > limit) {
       await response.body?.cancel()
-      throw new Error("B 站公开评论暂不可用。")
+      throw new Error($t("services.bilibili.comments.text_4f8468aaef"))
     }
     let size = 0
     const parts = []
     for await (const part of response.body) {
       size += part.length
-      if (size > limit) throw new Error("B 站公开评论响应过大。")
+      if (size > limit) throw new Error($t("services.bilibili.comments.text_379b5c9b93"))
       parts.push(part)
     }
     signal?.throwIfAborted()
     const json = record(JSON.parse(Buffer.concat(parts, size).toString("utf8")))
     if (json.code === 12002 || json.code === -404) return
-    if (json.code !== 0) throw new Error("B 站公开评论暂不可用。")
+    if (json.code !== 0) throw new Error($t("services.bilibili.comments.text_4f8468aaef"))
     return record(json.data)
   }
 
@@ -108,7 +111,7 @@ export function createBiliComments(fetch: BilibiliService["fetch"] = globalThis.
       input.set("root", parent)
       const page = await read("/x/v2/reply/reply", input, signal)
       if (!page) return []
-      if (commentOf(page.root, target)?.id !== parent) throw new Error("B 站返回了不同的评论。")
+      if (commentOf(page.root, target)?.id !== parent) throw new Error($t("services.bilibili.comments.text_edad986d33"))
       return replies(page.replies, target, parent)
     },
   }

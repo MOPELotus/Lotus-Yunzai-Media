@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MusicCard } from "../../../../lib/messages.ts"
 import path from "node:path"
 import { isIP } from "node:net"
@@ -21,8 +24,8 @@ import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOw
   verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
 import { canRefreshPublicMusic, musicAuthenticationRequired, refreshOwnMusicAccount, refreshPublicMusicAccount } from "./personal.ts"
 
-export const MUSIC_PLATFORMS = Object.freeze({ netease: "网易云", qq: "QQ音乐", kugou: "酷狗", kuwo: "酷我", migu: "咪咕", soda: "汽水" })
-export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: "QQ音乐", type: "mobile" }, { name: "微信", type: "wechat" }], kugou: [{ name: "酷狗音乐", type: "standard" }, { name: "酷狗概念版", type: "concept" }, { name: "网页版", type: "web" }] })
+export const MUSIC_PLATFORMS = Object.freeze({ netease: $t("services.music.service.text_06afc99e7d"), qq: $t("services.music.service.text_3ef42060a2"), kugou: $t("services.music.service.text_6f5fe8042a"), kuwo: $t("services.music.service.text_2a6eaaa1f3"), migu: $t("services.music.service.text_017e2d4515"), soda: $t("services.music.service.text_e8b8acde12") })
+export const MUSIC_QR_TYPES = Object.freeze({ qq: [{ name: "QQ", type: "qq" }, { name: $t("services.music.service.text_3ef42060a2"), type: "mobile" }, { name: $t("services.music.service.text_81b430b696"), type: "wechat" }], kugou: [{ name: $t("services.music.service.text_7d0e831758"), type: "standard" }, { name: $t("services.music.service.text_992f7adeab"), type: "concept" }, { name: $t("services.music.service.text_4ad02c18cb"), type: "web" }] })
 export type MusicTrack = {
   readonly platform: string
   readonly ref: string
@@ -146,7 +149,7 @@ export class MusicService {
       const current = (await readMusicAccounts(this.accountsFile))[platform]
       renewalSignal.throwIfAborted()
       if (current?.alias !== signedIn.alias || current.uid !== signedIn.uid || current.owner !== signedIn.owner ||
-          current.credential !== credential) throw new Error("公共音乐账号已变更，请重新点歌。")
+          current.credential !== credential) throw new Error($t("services.music.service.text_dfab4403bd"))
       return request({ ...accounts, [platform]: current })
     }
   }
@@ -184,15 +187,15 @@ export class MusicService {
     }
     const latest = await findOwnedNeteaseAccount(this, owner, signal)
     if (currentBinding ? latest?.alias !== account.alias || latest.uid !== account.uid : Boolean(latest)) {
-      throw new Error("网易云绑定已变更，请重试。")
+      throw new Error($t("services.music.service.text_8dfb3c880c"))
     }
     const existing = (await this.partner.loadAccounts()).find(row => String(row.uid) === account.uid)
     if (legacy && (!existing || existing.cookie !== legacy.cookie || existing.tuneweave_account !== legacy.tuneweave_account)) {
-      throw new Error("网易云绑定已变更，请重试。")
+      throw new Error($t("services.music.service.text_8dfb3c880c"))
     }
-    if (existing?.qq && String(existing.qq) !== String(owner)) throw new Error("此网易云账号已绑定其他主人。")
+    if (existing?.qq && String(existing.qq) !== String(owner)) throw new Error($t("services.music.service.text_6fe91b4265"))
     if (existing?.tuneweave_account && existing.tuneweave_account !== account.alias) {
-      throw new Error("网易云绑定已变更，请重试。")
+      throw new Error($t("services.music.service.text_8dfb3c880c"))
     }
     if (!existing?.tuneweave_account || !existing.qq) {
       await this.partner.saveAccount({ uid: account.uid, nickname: profile.nickname, qq: owner, tuneweave_account: account.alias },
@@ -203,7 +206,7 @@ export class MusicService {
     if (!music || same || selectPublic) {
       const saved = await saveMusicAccount("netease", { alias: account.alias, uid: account.uid, nickname: profile.nickname || (same ? music.nickname : ""),
         credential: same ? music.credential ?? "" : "", owner }, { file: this.accountsFile, expected: music ?? null, signal })
-      if (!saved) throw new Error("网易云绑定已变更，请重试。")
+      if (!saved) throw new Error($t("services.music.service.text_8dfb3c880c"))
     }
     return true
   }
@@ -227,12 +230,12 @@ export class MusicService {
       const { data, accountSelected } = await this.tuneweave.request<TuneWeaveQrProfile>(
         "/v1/account?" + new URLSearchParams({ platform, account: alias }), { signal, redirect: "error", accountSelection: { platform, alias } })
       signal.throwIfAborted()
-      if (!accountSelected || data?.platform !== platform || data.account !== alias) throw new Error("平台登录账号未确认，请使用 #音乐重新登录 核实。")
-      if (data.user_id != null && String(data.user_id) !== String(saved.uid)) throw new Error("平台登录账号不一致，请使用 #音乐重新登录 核实。")
+      if (!accountSelected || data?.platform !== platform || data.account !== alias) throw new Error($t("services.music.service.text_1a412d4937"))
+      if (data.user_id != null && String(data.user_id) !== String(saved.uid)) throw new Error($t("services.music.service.text_e49887e4b6"))
       if (data.authenticated === false) return false
-      if (data.authenticated !== true || String(data.user_id) !== String(saved.uid)) throw new Error("平台登录账号不一致，请使用 #音乐重新登录 核实。")
+      if (data.authenticated !== true || String(data.user_id) !== String(saved.uid)) throw new Error($t("services.music.service.text_e49887e4b6"))
       const current = (await readMusicAccounts(this.accountsFile))[platform]
-      if (current?.owner !== owner || current.alias !== alias || current.uid !== saved.uid) throw new Error("音乐账号绑定已变更，请重试。")
+      if (current?.owner !== owner || current.alias !== alias || current.uid !== saved.uid) throw new Error($t("services.music.service.text_9a672f1044"))
       signal.throwIfAborted()
       return true
     }
@@ -261,7 +264,7 @@ export class MusicService {
     if (platform === "bilibili" && keyword.trim()) {
       return { tracks: await searchBilibiliAudio(this.tuneweave, keyword.trim(), limit, offset, signal), accountStatus: "unconfigured" }
     }
-    if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error("请选择有效平台并输入歌曲关键词")
+    if (!Object.hasOwn(MUSIC_PLATFORMS, platform) || !keyword.trim()) throw new Error($t("services.music.service.text_b6b27a109c"))
     // Kuwo supports authenticated playback but its catalog is public only.
     const account = platform === "kuwo" ? undefined : (await readMusicAccounts(this.accountsFile))[platform]
     const { alias, credential } = account || {}
@@ -275,7 +278,7 @@ export class MusicService {
     // Search can succeed with a stale login, so account selection alone cannot
     // confirm that the music provider still considers the account signed in.
     const accountStatus = alias || credential ? accountSelected ? "selected" : "unverified" : "unconfigured"
-    if (!Array.isArray(items)) throw new Error("音乐平台返回的搜索结果结构无效。")
+    if (!Array.isArray(items)) throw new Error($t("services.music.service.text_222b1141b0"))
     const tracks = items.flatMap(item => {
       const match = item?.type === "track" && item.data
       return match && match.platform === platform && typeof match.ref === "string" && match.ref.startsWith(platform + ":") &&
@@ -291,9 +294,9 @@ export class MusicService {
     const search = new URLSearchParams({ platform: "netease", type: "voice", variant: "legacy", limit: String(limit), q: keyword,
       ...(offset !== undefined && { offset: String(offset) }), ...(account && { account }) })
     const items = await this.tuneweave.request<VoiceSearchItem[]>(`/v1/search?${search}`, { signal, redirect: "error" })
-    if (!Array.isArray(items)) throw new Error("网易云播客搜索结果无法核实。")
+    if (!Array.isArray(items)) throw new Error($t("services.music.service.text_642c8a6d3e"))
     const episodes = items.map(voiceSearchSelection).filter(episode => episode !== undefined)
-    if (items.length && !episodes.length) throw new Error("网易云播客搜索结果缺少可核实的节目资料。")
+    if (items.length && !episodes.length) throw new Error($t("services.music.service.text_85a7015b7a"))
     return episodes
   }
   async playEpisode(episode: VoiceSearchSelection, signal?: AbortSignal) {
@@ -322,14 +325,14 @@ export class MusicService {
         `/v1/videos/${encodeURIComponent(ref)}?kind=mv`, { signal, redirect: "error" })
       const mv = item?.video
       if (item?.kind !== "mv" || mv?.ref !== ref || mv.platform !== target.platform || String(mv.id) !== target.id || !name(mv.title)) {
-        throw new Error("平台返回的 MV 与原链接不一致。")
+        throw new Error($t("services.music.service.text_f585d8368c"))
       }
       return { kind: "mv" as const, mv }
     }
     if (target.kind === "episode") {
       const item = await this.tuneweave.request<EpisodeData>(`/v1/episodes/${encodeURIComponent(ref)}`, { signal, redirect: "error" })
       const episode = voiceSearchSelection({ type: "podcast_episode", data: item })
-      if (!episode || episode.ref !== ref || !name(item.name)) throw new Error("节目身份无法核实。")
+      if (!episode || episode.ref !== ref || !name(item.name)) throw new Error($t("services.music.service.text_7ddca82d22"))
       return { kind: "episode" as const, episode }
     }
     const track = await this.tuneweave.request<MusicTrack>(`/v1/tracks/${encodeURIComponent(ref)}`, { signal, redirect: "error" })
@@ -338,11 +341,11 @@ export class MusicService {
         /^[A-Za-z0-9]{14}$/u.test(track.id) && track.ref === "qq:" + track.id
       : track?.ref === ref && String(track.id) === target.id
     if (!matchesIdentity || track?.platform !== target.platform || !name(track.name)) {
-      throw new Error("歌曲身份无法核实。")
+      throw new Error($t("services.music.service.text_bb67110976"))
     }
     if (target.platform === "kugou" && (String(track.extensions?.album_audio_id) !== target.id ||
         typeof track.extensions?.hash !== "string" || track.extensions.hash.toLowerCase() !== target.hash)) {
-      throw new Error("酷狗详情的音轨编号或哈希与分享页不一致。")
+      throw new Error($t("services.music.service.text_78f732b677"))
     }
     return { kind: "track" as const, track }
   }
@@ -354,7 +357,7 @@ export class MusicService {
     if (!url || stream.video_ref !== mv.ref || stream.platform !== mv.platform || stream.available !== true ||
         (mv.platform === "kugou" ? stream.format != null && stream.format !== "mp4" : stream.format !== "mp4") ||
         stream.source_range != null) {
-      throw new Error("没有可核实的完整公开 MV，请打开原链接。")
+      throw new Error($t("services.music.service.text_c819176217"))
     }
     let authorized = false
     const details = stream.extensions
@@ -373,7 +376,7 @@ export class MusicService {
         (mv.platform === "netease" ? stream.fee === 0 : stream.fee == null &&
           details.source_track_id === String(mv.id) && details.authorization_source === "current_metadata_and_play_url")
     }
-    if (!authorized) throw new Error("没有可核实的完整公开 MV，请打开原链接。")
+    if (!authorized) throw new Error($t("services.music.service.text_c819176217"))
     const urls = new Set([url.href])
     const hash = mv.platform === "kugou" ? details?.selected_resource?.hash?.toLowerCase() : undefined
     const matchesUrl = hash ? (candidate: URL) => candidate.pathname.toLowerCase().endsWith("/" + hash + ".mp4") : undefined
@@ -388,7 +391,7 @@ export class MusicService {
   async publicLyrics(track: MusicTrack, signal?: AbortSignal) {
     const data = await this.tuneweave.request<{ track_ref?: unknown; plain?: unknown; translated?: unknown }>(
       `/v1/tracks/${encodeURIComponent(track.ref)}/lyrics?translated=true`, { signal, redirect: "error" })
-    if (data?.track_ref !== track.ref) throw new Error("平台返回的歌词与此歌曲不一致。")
+    if (data?.track_ref !== track.ref) throw new Error($t("services.music.service.text_8015a67d3e"))
     const text = (value: unknown) => typeof value === "string" && value.length <= 32_000 ? value.trim() : ""
     return { original: text(data.plain), translated: text(data.translated) }
   }
@@ -400,10 +403,10 @@ export class MusicService {
       ...(account?.alias && !account.credential ? { account: account.alias } : {}) })
     const stream = await this.usePublicAccount(track.platform, exact ? { [track.platform]: account } : accounts, signal, current =>
       this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, current, undefined, signal))
-    if (!stream?.url || stream.trial) throw new Error("没有可用的完整音源，建议主人扫码登录音乐平台")
-    if (stream.origin_track != null && stream.origin_track !== track.ref) throw new Error("平台返回的完整音源属于其他歌曲。")
+    if (!stream?.url || stream.trial) throw new Error($t("services.music.service.text_98c685a3d9"))
+    if (stream.origin_track != null && stream.origin_track !== track.ref) throw new Error($t("services.music.service.text_60b540d826"))
     if (exact && (stream.resolved_platform !== track.platform || stream.origin_track !== track.ref || stream.resolved_track !== track.ref)) {
-      throw new Error("平台返回的完整音源与链接中的歌曲不一致。")
+      throw new Error($t("services.music.service.text_ff1431eec6"))
     }
     return stream
   }
@@ -428,28 +431,28 @@ export class MusicService {
         for (let i = 0; i < 6; i++) {
           if (!["http:", "https:"].includes(current.protocol) || current.username || current.password ||
               (biliAudio && !isBilibiliAudioCdn(current, stream.bilibili_part_ref)) ||
-              (allowMediaUrl && !allowMediaUrl(current))) throw new Error("音频地址无效")
+              (allowMediaUrl && !allowMediaUrl(current))) throw new Error($t("services.music.service.text_5a41b86fdf"))
           const response = await this.fetch(current, { ...options, headers, redirect: "manual" })
           if (![301, 302, 303, 307, 308].includes(response.status)) return response
           const location = response.headers.get("location")
           await response.body?.cancel()
-          if (!location) throw new Error("音频重定向缺少地址")
+          if (!location) throw new Error($t("services.music.service.text_ef3787a533"))
           const next = new URL(location, current)
           if (next.origin !== current.origin) headers = stripPrivate(headers)
           current = next
         }
-        throw new Error("音频地址重定向过多")
+        throw new Error($t("services.music.service.text_9adf27cc9b"))
       }
       await downloadRanges([url.href, ...(stream.backup_urls || []).map(u => new URL(u, this.tuneweave.config.api_url).href)], file, { fetch: fetchMedia, headers: stream.headers || {}, concurrency: 4, timeoutMs: this.config.download_timeout_ms, maxBytes: this.config.max_size_mb * 1024 * 1024, signal })
       const ffmpeg = await resolveCommandPath("ffmpeg", this.toolsPath), ffprobe = await resolveCommandPath("ffprobe", this.toolsPath)
-      if (!ffmpeg || !ffprobe) throw new Error("请先初始化 FFmpeg 工具环境")
+      if (!ffmpeg || !ffprobe) throw new Error($t("services.music.service.text_fd87252c32"))
       const probeOptions = { cwd: task.dir, timeoutMs: 30000, signal }
       const info: ProbeResult = JSON.parse((await runMediaProcess(ffprobe, ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", file], probeOptions)).output)
       const duration = Number(info.format?.duration)
-      if (!info.streams?.some(s => s.codec_type === "audio") || !Number.isFinite(duration) || duration <= 0) throw new Error("下载结果不是有效音频")
+      if (!info.streams?.some(s => s.codec_type === "audio") || !Number.isFinite(duration) || duration <= 0) throw new Error($t("services.music.service.text_a3a13217d6"))
       const expected = Math.max(Number(stream.duration_ms) || 0, Number(track.duration_ms) || 0)
-      if (expected && duration * 1000 < expected - Math.max(3000, expected * 0.02)) throw new Error("音频时长不足，未按完整歌曲发送")
-      if (biliAudio && (!expected || info.streams.some(s => s.codec_type === "video"))) throw new Error("B 站未返回独立完整音轨")
+      if (expected && duration * 1000 < expected - Math.max(3000, expected * 0.02)) throw new Error($t("services.music.service.text_f20964d661"))
+      if (biliAudio && (!expected || info.streams.some(s => s.codec_type === "video"))) throw new Error($t("services.music.service.text_b03c70716a"))
       const encodeOptions = { cwd: task.dir, timeoutMs: this.config.download_timeout_ms, signal }
       await runMediaProcess(ffmpeg, ["-nostdin", "-y", ...(biliAudio ? ["-xerror"] : []), "-i", file, "-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", voice], encodeOptions)
       if (biliAudio) {
@@ -458,7 +461,7 @@ export class MusicService {
           "format=duration", "-of", "json", voice], probeOptions)).output)
         const milliseconds = Number(decoded.format?.duration) * 1000
         if (!Number.isFinite(milliseconds) || Math.abs(milliseconds - expected) > Math.max(1500, expected * 0.01) ||
-            Math.abs(milliseconds - duration * 1000) > 1000) throw new Error("B 站音轨未完整解码，未发送语音")
+            Math.abs(milliseconds - duration * 1000) > 1000) throw new Error($t("services.music.service.text_a47cace5b4"))
       }
       return { taskDir: task.dir, taskId: task.id, voiceFile: voice, duration, stream, track }
     } catch (error) { await releaseMediaTask(this.tasksDir, task.dir);throw error }
@@ -466,28 +469,28 @@ export class MusicService {
   recoverTasks() { return recoverMediaTasks(this.tasksDir) }
   async cleanup(result: { taskDir: string }) { await releaseMediaTask(this.tasksDir, result.taskDir) }
   async createLogin(platform: string, owner: number | undefined, loginType?: string, { signal }: { signal?: AbortSignal } = {}): Promise<MusicLogin> {
-    if (!Object.hasOwn(MUSIC_PLATFORMS, platform)) throw new Error("不支持的音乐平台")
+    if (!Object.hasOwn(MUSIC_PLATFORMS, platform)) throw new Error($t("services.music.service.text_7a1608a226"))
     const alias = platform === "netease" && owner !== undefined ? neteaseOwnerAlias(owner) : `lotus-music-${platform}`
     const qr = await this.tuneweave.request<QrCode>("/v1/auth/qr", {
       method: "POST", body: { platform, account: alias, credential_mode: "both", ...(loginType ? { login_type: loginType } : {}) },
       signal, redirect: "error",
     })
-    if (!qr.transaction_id || !qr.url && !qr.image_data_url) throw new Error("平台没有返回可用二维码")
+    if (!qr.transaction_id || !qr.url && !qr.image_data_url) throw new Error($t("services.music.service.text_b175bf3b3e"))
     return { platform, key: qr.transaction_id, alias, image: qr.image_data_url || await QRCode.toDataURL(qr.url!), owner }
   }
   async waitLogin(login: Pick<MusicLogin, "platform" | "key" | "alias"> & { owner?: number },
     { signal, timeoutMs = musicLoginTimeout(login.platform), pollMs = 3000 }: { signal?: AbortSignal; timeoutMs?: number; pollMs?: number } = {}) {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      if (signal?.aborted) throw new Error("扫码登录已取消")
+      if (signal?.aborted) throw new Error($t("services.music.service.text_f6c21b7575"))
       const result = await this.tuneweave.request<QrStatus>(`/v1/auth/qr/${encodeURIComponent(login.key)}`, { signal, redirect: "error" })
-      if (signal?.aborted) throw new Error("扫码登录已取消")
+      if (signal?.aborted) throw new Error($t("services.music.service.text_f6c21b7575"))
       if (result.state === "confirmed") {
         const profile = await resolveQrProfile(this.tuneweave, { platform: login.platform, alias: login.alias, profile: result.profile, signal })
         const caller = result.caller_credential
-        if (caller?.platform != null && caller.platform !== login.platform) throw new Error("登录凭据平台不匹配，请重新登录")
+        if (caller?.platform != null && caller.platform !== login.platform) throw new Error($t("services.music.service.text_d52f4e56a4"))
         if (caller != null && (typeof caller.value !== "string" || !/^twc1_[A-Za-z0-9_-]+$/u.test(caller.value))) {
-          throw new Error("登录凭据格式无效，请重新登录")
+          throw new Error($t("services.music.service.text_221b156c88"))
         }
         const nickname = typeof profile.nickname === "string" ? profile.nickname : ""
         if (login.platform === "netease") await this.partner.saveAccount({
@@ -497,10 +500,10 @@ export class MusicService {
           owner: login.owner }, { file: this.accountsFile, signal })
         return { ok: true }
       }
-      if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("二维码已过期或需要附加验证，请重新登录")
+      if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error($t("services.music.service.text_9611dde9e3"))
       await sleep(pollMs, undefined, { signal })
     }
-    throw new Error("扫码登录超时")
+    throw new Error($t("services.music.service.text_b4c3a73986"))
   }
 }
 export function musicShare(track: MusicTrack, stream: Pick<MusicStream, "url" | "headers">) {
@@ -509,7 +512,7 @@ export function musicShare(track: MusicTrack, stream: Pick<MusicStream, "url" | 
   const types: Partial<Record<string, MusicCard["type"]>> = { netease: "163", qq: "qq", kugou: "kugou", kuwo: "kuwo", migu: "migu" }
   const type = types[track.platform]
   if (!type) return null
-  const artists = track.artists?.map(a => a.name).join(" / ") || "未知歌手", id = encodeURIComponent(track.id)
+  const artists = track.artists?.map(a => a.name).join(" / ") || $t("services.music.service.text_f374d78a34"), id = encodeURIComponent(track.id)
   const netease = track.episode_id ? neteaseEpisodePage(track.episode_id) : `https://music.163.com/#/song?id=${id}`
   const links: Partial<Record<string, string>> = { netease, qq: `https://y.qq.com/n/ryqq/songDetail/${id}` }
   const url = links[track.platform] || track.extensions?.url

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { discardBody, readStream } from "../media/transfer.ts"
 import { withReadRetries } from "@lotus-yunzai/http"
 
@@ -33,14 +36,14 @@ export async function requestText(fetchImpl: DouyinFetch, url: string, options: 
     }
     if (Number(response.headers.get("content-length")) > maxBytes) {
       discardBody(response)
-      throw new DouyinError("response_too_large", "抖音响应超过大小限制")
+      throw new DouyinError("response_too_large", $t("services.douyin.http.text_f923227784"))
     }
     const chunks: Buffer[] = []
     let length = 0
     if (response.body) {
       for await (const chunk of readStream(response.body, active)) {
         length += chunk.length
-        if (length > maxBytes) { controller.abort(); throw new DouyinError("response_too_large", "抖音响应超过大小限制") }
+        if (length > maxBytes) { controller.abort(); throw new DouyinError("response_too_large", $t("services.douyin.http.text_f923227784")) }
         chunks.push(Buffer.from(chunk))
       }
     }
@@ -50,6 +53,6 @@ export async function requestText(fetchImpl: DouyinFetch, url: string, options: 
     controller.abort()
     options.signal?.throwIfAborted()
     if (error instanceof DouyinError) throw error
-    throw new DouyinError(timedOut ? "timeout" : "network", timedOut ? "抖音请求超时" : "抖音网络请求失败", { cause: error })
+    throw new DouyinError(timedOut ? "timeout" : "network", timedOut ? $t("services.douyin.http.text_944a4f8067") : $t("services.douyin.http.text_3182a3c07d"), { cause: error })
   } finally { clearTimeout(timer) }
 }

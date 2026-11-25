@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { setTimeout as sleep } from "node:timers/promises"
 import { ReleaseHttpError, retryReleaseRequest, releaseFailure } from "../release-network.ts"
 import fs from "node:fs/promises"
@@ -140,7 +143,7 @@ export class ToolInstallerService {
       try {
         const executable = await findCommandExecutable(config[name].command, [binDir], this.platform)
         const probe = await findCommandExecutable("ffprobe", [binDir], this.platform)
-        if (!executable || !probe) throw new Error("媒体工具尚未初始化，请运行 bun run bootstrap")
+        if (!executable || !probe) throw new Error($t("services.tools.installer.text_372413a6c5"))
         const real = await fs.realpath(executable)
         if (path.dirname(real) === path.resolve(binDir)) {
           const health = await inspectToolInstall(name, executable, binDir, toolsDir, this.platform)
@@ -169,11 +172,11 @@ export class ToolInstallerService {
 
     const items: ToolResult[] = []
     for (const name of TOOL_NAMES) {
-      await emitProgress(onProgress, `工具链：检查 ${name}`)
+      await emitProgress(onProgress, $t("services.tools.installer.text_8679f4a9af", { "name": name }))
       items.push(await this.ensureTool(name, config, { onProgress: options.onProgress || this.onProgress, onTaskProgress, signal }).catch(async (error: unknown): Promise<ToolResult> => {
         signal?.throwIfAborted()
         const reason = errorMessage(error)
-        await emitProgress(onProgress, `工具链：${name} 失败：${reason}`)
+        await emitProgress(onProgress, $t("services.tools.installer.text_9631d3e088", { "name": name, "reason": reason }))
         return {
           name,
           ok: false,
@@ -221,20 +224,20 @@ export class ToolInstallerService {
       const real = await fs.realpath(existing)
       if (path.dirname(real) !== path.resolve(binDir)) {
         const probe = await findCommandExecutable("ffprobe", [binDir], this.platform)
-        if (!probe) throw new Error("外部 FFmpeg 缺少 ffprobe，请由部署者修复")
+        if (!probe) throw new Error($t("services.tools.installer.text_b887879271"))
         try {
           await runSpawn(this.spawn, existing, ["-version"], { timeoutMs: 15000, signal })
           await runSpawn(this.spawn, probe, ["-version"], { timeoutMs: 15000, signal })
-        } catch { signal?.throwIfAborted(); throw new Error("外部 FFmpeg 环境异常，请由部署者修复") }
+        } catch { signal?.throwIfAborted(); throw new Error($t("services.tools.installer.text_6299039150")) }
         return { name, ok: true, status: "ready", path: existing, external: true }
       }
       health = await inspectToolInstall(name, existing, binDir, toolsDir, this.platform)
       if (health.ok) {
         await ensureExecutablePermissions(name, existing, binDir, this.platform)
         try { await runSpawn(this.spawn, existing, ["-version"], { timeoutMs: 15000, signal }); await runSpawn(this.spawn, path.join(binDir, commandFileName("ffprobe", this.platform)), ["-version"], { timeoutMs: 15000, signal }) }
-        catch { signal?.throwIfAborted(); health = { ok: false, reason: "工具无法正常执行" } }
+        catch { signal?.throwIfAborted(); health = { ok: false, reason: $t("services.tools.installer.text_b9cf56e101") } }
       }
-      if (!health.ok) await emitProgress(onProgress, `工具链：${name} 需要修复：${health.reason}`)
+      if (!health.ok) await emitProgress(onProgress, $t("services.tools.installer.text_04a28b892f", { "name": name, "reason": health.reason }))
     }
 
     const receiptFile = path.join(toolsDir, `${name}-install.json`)
@@ -254,7 +257,7 @@ export class ToolInstallerService {
       signal?.throwIfAborted()
       if (typeof this.fetch !== "function") throw new Error("fetch is unavailable")
       if (name === "ffmpeg") await removeSharedFfmpegArtifacts(toolsDir)
-      await emitProgress(onProgress, `工具链：查询 ${tool.repo} 最新版本`)
+      await emitProgress(onProgress, $t("services.tools.installer.text_1534e5daa0", { "repo": tool.repo }))
       const release = await this.fetchLatestRelease(tool.repo, normalized.github_api, null, signal, onTaskProgress)
       const asset = pickReleaseAsset(name, release.assets, {
         platform: this.platform,
@@ -282,12 +285,12 @@ export class ToolInstallerService {
           await fs.mkdir(extractDir, { recursive: true })
           await fs.rm(archive, { force: true }).catch(() => null)
 
-          await emitProgress(onProgress, `工具链：下载 ${asset.name}${attempt > 1 ? `（重试 ${attempt}/${attempts}）` : ""}`)
+          await emitProgress(onProgress, $t("services.tools.installer.text_3e1e5fab97", { "name": asset.name, "value2": attempt > 1 ? $t("services.tools.installer.text_dccc06ce08", { "attempt": attempt, "attempts": attempts }) : "" }))
           await this.downloadAsset(asset.browser_download_url, archive, { timeoutMs: normalized.timeout_ms, signal, onTaskProgress })
-          if (!asset.digest || !/^sha256:[a-f0-9]{64}$/i.test(asset.digest)) throw new Error("发布包缺少 SHA-256，保留原工具")
-          if (await sha256File(archive, signal, onTaskProgress) !== asset.digest.slice(7).toLowerCase()) throw new Error("FFmpeg 发布包 SHA-256 不匹配")
-          await emitProgress(onProgress, `工具链：准备 ${asset.name}`)
-          emitTaskProgress(onTaskProgress, { stage: "ffmpeg-extract", message: "正在解包 FFmpeg" })
+          if (!asset.digest || !/^sha256:[a-f0-9]{64}$/i.test(asset.digest)) throw new Error($t("services.tools.installer.text_474b52ff56"))
+          if (await sha256File(archive, signal, onTaskProgress) !== asset.digest.slice(7).toLowerCase()) throw new Error($t("services.tools.installer.text_deffb54d8b"))
+          await emitProgress(onProgress, $t("services.tools.installer.text_ad1bb5837a", { "name": asset.name }))
+          emitTaskProgress(onTaskProgress, { stage: "ffmpeg-extract", message: $t("services.tools.installer.text_3cafbc0f53") })
           await extractArchive(this.spawn, archive, extractDir, { timeoutMs: normalized.timeout_ms, signal })
 
           const executable = await findExtractedExecutable(extractDir, tool.command, this.platform)
@@ -297,14 +300,14 @@ export class ToolInstallerService {
 
           // Finish publishing the checked pair and receipt as one operation once replacement starts.
           signal?.throwIfAborted()
-          emitTaskProgress(onTaskProgress, { stage: "ffmpeg-install", message: "正在安装并校验 FFmpeg 与 ffprobe" })
+          emitTaskProgress(onTaskProgress, { stage: "ffmpeg-install", message: $t("services.tools.installer.text_58cad14ffe") })
           const target = await copyToolPayload(name, executable, binDir, tool.command, this.platform)
           const receiptTemp = `${receiptFile}.${randomUUID()}.tmp`
           try {
             await fs.writeFile(receiptTemp, JSON.stringify({ repo: tool.repo, assetId: asset.id, updatedAt: asset.updated_at, digest: asset.digest, files: await fingerprintPayload(binDir, this.platform, undefined, onTaskProgress) }), { flag: "wx" })
             await fs.rename(receiptTemp, receiptFile)
           } finally { await fs.rm(receiptTemp, { force: true }) }
-          await emitProgress(onProgress, `工具链：${name} 安装完成`)
+          await emitProgress(onProgress, $t("services.tools.installer.text_09ee0a42f4", { "name": name }))
 
           return {
             name,
@@ -320,21 +323,21 @@ export class ToolInstallerService {
           await cleanupBrokenInstallArtifacts(archive, extractDir)
           signal?.throwIfAborted()
           if (error instanceof ReleaseHttpError && ![408, 425, 429, 500, 502, 503, 504].includes(error.status)) {
-            throw new Error(`FFmpeg 发布文件下载失败（${new URL(asset.browser_download_url).host}）：${error.message}`, { cause: error })
+            throw new Error($t("services.tools.installer.text_b0a886bf89", { "host": new URL(asset.browser_download_url).host, "message": error.message }), { cause: error })
           }
           if (attempt < attempts) {
-            await emitProgress(onProgress, `工具链：${name} 下载或安装失败（${new URL(asset.browser_download_url).host}），已清理并准备重试 ${attempt + 1}/${attempts}：${releaseFailure(error)}`)
+            await emitProgress(onProgress, $t("services.tools.installer.text_4cc82931d2", { "name": name, "host": new URL(asset.browser_download_url).host, "value3": attempt + 1, "attempts": attempts, "value5": releaseFailure(error) }))
             await sleep(500 * attempt, undefined, { signal })
           }
         }
       }
-      throw new Error(`FFmpeg 发布文件下载或安装失败（${new URL(asset.browser_download_url).host}，已尝试 ${attempts} 次）：${releaseFailure(lastError)}`, { cause: lastError })
+      throw new Error($t("services.tools.installer.text_4e55e6c97e", { "host": new URL(asset.browser_download_url).host, "attempts": attempts, "value3": releaseFailure(lastError) }), { cause: lastError })
     } catch (error) {
       signal?.throwIfAborted()
       // Only retain the exact healthy payload checked before attempting update.
       // Missing files, receipt mismatches and a failed rollback remain errors.
       if (localVerified && JSON.stringify(await fingerprintPayload(binDir, this.platform, undefined, onTaskProgress)) === JSON.stringify(localFiles)) {
-        return { name, ok: true, status: "ready", path: existing, updateDeferred: true, reason: "现有 FFmpeg 已通过执行与文件检查，更新暂未完成，稍后重试。" }
+        return { name, ok: true, status: "ready", path: existing, updateDeferred: true, reason: $t("services.tools.installer.text_8b9663f6e2") }
       }
       throw error
     }
@@ -355,13 +358,13 @@ export class ToolInstallerService {
       const release: unknown = await response.json()
       const assets: unknown[] = isRecord(release) && Array.isArray(release.assets) ? release.assets : []
       return { assets: assets.filter(isReleaseAsset) }
-    }, { label: `查询 FFmpeg 发布版本 ${repo}`, url, signal, onTaskProgress })
+    }, { label: $t("services.tools.installer.text_8726d6b949", { "repo": repo }), url, signal, onTaskProgress })
   }
 
   async downloadAsset(url: string, target: string, { timeoutMs = 300000, signal, onTaskProgress }: ProcessOptions = {}) {
     signal?.throwIfAborted()
     const temp = `${target}.part-${process.pid}-${Date.now()}`
-    emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download-request", message: `正在连接 FFmpeg 发布文件（${new URL(url).host}）` })
+    emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download-request", message: $t("services.tools.installer.text_b119b79bda", { "host": new URL(url).host }) })
     const response = await this.fetch(url, {
       signal: deadline(timeoutMs, signal),
       headers: {
@@ -374,7 +377,7 @@ export class ToolInstallerService {
     }
     const total = responseBytes(response)
     let completed = 0
-    const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download", message: "正在下载 FFmpeg", completed, total, unit: "bytes" })
+    const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-download", message: $t("services.tools.installer.text_0745e87276"), completed, total, unit: "bytes" })
     report()
     await fs.mkdir(path.dirname(target), { recursive: true })
     try {
@@ -480,7 +483,7 @@ async function extractArchive(spawnImpl: typeof spawn, archive: string, target: 
   const lower = archive.toLowerCase()
   const command = lower.endsWith(".zip") ? process.platform === "win32" ? "powershell.exe" : "unzip"
     : /\.(tar\.gz|tgz|tar\.xz|txz)$/i.test(lower) ? "tar" : undefined
-  if (command && !Bun.which(command)) throw new Error(`无法解包媒体工具：缺少 ${command}，请安装该工具后重新运行 bun run bootstrap。`)
+  if (command && !Bun.which(command)) throw new Error($t("services.tools.installer.text_bfba8a1ad5", { "command": command }))
   if (lower.endsWith(".zip")) {
     if (process.platform === "win32") {
       const command = `Expand-Archive -LiteralPath '${archive.replace(/'/g, "''")}' -DestinationPath '${target.replace(/'/g, "''")}' -Force`
@@ -573,20 +576,20 @@ async function inspectToolInstall(name: ToolName, executable: string, binDir: st
   if (await hasSharedFfmpegMarker(toolsDir)) {
     return {
       ok: false,
-      reason: "检测到旧 ffmpeg shared 下载包",
+      reason: $t("services.tools.installer.text_1bd9b06c89"),
     }
   }
   const ffprobe = path.join(binDir, commandFileName("ffprobe", platform))
   if (!await exists(ffprobe)) {
     return {
       ok: false,
-      reason: "缺少 ffprobe",
+      reason: $t("services.tools.installer.text_057b0da4fe"),
     }
   }
   if (!await exists(executable)) {
     return {
       ok: false,
-      reason: "缺少 ffmpeg",
+      reason: $t("services.tools.installer.text_5175f94133"),
     }
   }
   return { ok: true }
@@ -635,7 +638,7 @@ async function copyToolPayload(name: ToolName, executable: string, binDir: strin
 async function sha256File(file: string, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
   const hash = createHash("sha256"), total = (await fs.stat(file)).size
   let completed = 0
-  const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-verify", message: `正在校验 ${path.basename(file)}`, completed, total, unit: "bytes" })
+  const report = () => emitTaskProgress(onTaskProgress, { stage: "ffmpeg-verify", message: $t("services.tools.installer.text_93728e9863", { "value1": path.basename(file) }), completed, total, unit: "bytes" })
   report()
   for await (const chunk of fsSync.createReadStream(file, { signal })) { hash.update(chunk); completed += chunk.length; report() }
   return hash.digest("hex")

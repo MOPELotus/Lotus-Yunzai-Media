@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 
 // Strip presentation markup while retaining the text inside links/terms.
@@ -27,7 +30,7 @@ export function plainGameText(value: unknown) {
 function arithmeticText(expression: string) {
   if (/AvatarSkillLevel/.test(expression)) return expression.replace(/AvatarSkillLevel\(\d+\)/g, "技能等级").replace(/\*/g, " × ").replace(/\+/g, " + ").replace(/\//g, " ÷ ")
   const tokens = expression.match(/\d+(?:\.\d+)?|[()+*/-]/g) || []
-  if (tokens.join("") !== expression.replace(/\s/g, "")) return "随技能效果变化"
+  if (tokens.join("") !== expression.replace(/\s/g, "")) return $t("core.render.plain-text.text_e6e7acdf42")
   let cursor = 0
   function factor(): number {
     if (tokens[cursor] === "-") { cursor++; return -factor() }
@@ -59,6 +62,6 @@ function arithmeticText(expression: string) {
   }
   try {
     const n = sum()
-    return cursor === tokens.length && Number.isFinite(n) ? String(Math.round(n * 10000) / 10000) : "随技能效果变化"
-  } catch { return "随技能效果变化" }
+    return cursor === tokens.length && Number.isFinite(n) ? String(Math.round(n * 10000) / 10000) : $t("core.render.plain-text.text_e6e7acdf42")
+  } catch { return $t("core.render.plain-text.text_e6e7acdf42") }
 }

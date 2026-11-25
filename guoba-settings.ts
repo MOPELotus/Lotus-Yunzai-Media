@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../packages/i18n/index.ts";
+import messageCatalog from "./i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { Job } from "node-schedule"
 import { sep } from "node:path"
 import { isDeepStrictEqual } from "node:util"
@@ -43,66 +46,66 @@ interface GuobaContext<Result> {
 }
 
 const sharedFields: readonly SettingsField[] = [
-  { key: "pushMsgMode", setting: "picture", label: "推送消息模式", options: ["文字模式", "图片模式"] },
-  { key: "mergeTextPic", setting: "merge", label: "文字图片合并发送", options: ["分开发送", "合并发送"],
-    help: "仅在文字模式下生效。" },
-  { key: "forwardSendDynamic", setting: "mergeForward", label: "合并转发动态", options: ["关闭", "开启"],
-    help: "同一会话本次待推送的图片总数或文字总长度超过阈值时使用合并转发。" },
-  { key: "maxPicsForSingleMsg", setting: "forwardPictureThreshold", label: "图片总数阈值", max: 100 },
-  { key: "maxTextLengthForSingleMsg", setting: "forwardTextThreshold", label: "文字总长度阈值", max: 50_000 },
-  { key: "pushStatus", setting: "enable", label: "定时推送", options: ["关闭", "开启"],
-    help: "关闭后停止继续发送。启用时若宿主未注册定时任务，需重启。主人仍可手动执行任务。" },
-  { key: "checkDynamicCD", setting: "cron", label: "定时推送周期", component: "EasyCron",
-    help: "支持五段或六段 Cron 表达式，按北京时间执行，重启后生效。" },
-  { key: "pushTransmit", setting: "forwards", label: "推送转发动态", options: ["关闭", "开启"],
-    help: "关闭后，此平台的所有订阅都跳过转发动态。" },
-  { key: "dynamicTimeRange", setting: "horizon", label: "动态时间范围（秒）", min: 1, max: 259_200,
-    help: "只推送此时间范围内发布的动态。" },
-  { key: "getDataRandomDelay", setting: "delay", label: "抓取间隔上限（毫秒）", max: 60_000,
-    help: "同一轮获取多个账号的动态时随机等待。微博分条发送也会留出间隔。设为 0 可关闭等待。" },
-  { key: "whiteWordslist", setting: "whitelist", label: "白名单关键词", tags: true,
-    help: "填入关键词后，只推送命中至少一个关键词的动态。" },
-  { key: "banWords", setting: "blacklist", label: "屏蔽关键词", tags: true,
-    help: "每行一个关键词。正文或标题包含关键词时跳过推送。" },
-  { key: "pushPicCountLimit", setting: "pictureLimit", label: "单条动态配图上限", max: 12 },
-  { key: "pushContentLenLimit", setting: "contentLimit", label: "正文字符上限", max: 8000,
-    help: "设为 0 时隐藏正文。" },
-  { key: "pushContentLineLimit", setting: "lineLimit", label: "正文行数上限", max: 500,
-    help: "设为 0 时隐藏正文。" },
-  { key: "isSplit", setting: "split", label: "分片截图模式", options: ["单张图卡", "分片截图"],
-    help: "仅在图片模式下生效。开启后，较长的动态可分成多张图卡。" },
-  { key: "splitHeight", setting: "splitHeight", label: "分片高度（像素）", min: 700, max: 20_000,
-    help: "仅在分片截图模式下生效。" },
-  { key: "noSplitHeight", setting: "noSplitHeight", label: "单张图卡正文高度（像素）", min: 700, max: 20_000,
-    help: "仅在单张图卡模式下生效。" },
-  { key: "boxGrid", setting: "grid", label: "九宫格样式", options: ["逐图排列", "宫格排列"],
-    help: "仅在图片模式下生效。多张图片可放在同一行。" },
-  { key: "pushTaskLog", setting: "log", label: "记录推送结果汇总", options: ["关闭", "开启"],
-    help: "记录已确认、未确认和异常的发送数量。" },
+  { key: "pushMsgMode", setting: "picture", label: $t("guoba-settings.text_2f0382d71e"), options: [$t("guoba-settings.text_33b1fc99ac"), $t("guoba-settings.text_f84261b06f")] },
+  { key: "mergeTextPic", setting: "merge", label: $t("guoba-settings.text_5db4f2266a"), options: [$t("guoba-settings.text_45a8421b35"), $t("guoba-settings.text_b6e0fc7fc1")],
+    help: $t("guoba-settings.text_2812dae477") },
+  { key: "forwardSendDynamic", setting: "mergeForward", label: $t("guoba-settings.text_05b78fdd0f"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+    help: $t("guoba-settings.text_e7e53e6488") },
+  { key: "maxPicsForSingleMsg", setting: "forwardPictureThreshold", label: $t("guoba-settings.text_8021c2a9c2"), max: 100 },
+  { key: "maxTextLengthForSingleMsg", setting: "forwardTextThreshold", label: $t("guoba-settings.text_04e23da801"), max: 50_000 },
+  { key: "pushStatus", setting: "enable", label: $t("guoba-settings.text_60947f0c24"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+    help: $t("guoba-settings.text_02856d1f1d") },
+  { key: "checkDynamicCD", setting: "cron", label: $t("guoba-settings.text_0526fa0ce0"), component: "EasyCron",
+    help: $t("guoba-settings.text_8667e4aed1") },
+  { key: "pushTransmit", setting: "forwards", label: $t("guoba-settings.text_b2ebb05417"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+    help: $t("guoba-settings.text_2f808fffc7") },
+  { key: "dynamicTimeRange", setting: "horizon", label: $t("guoba-settings.text_e32aa23ac7"), min: 1, max: 259_200,
+    help: $t("guoba-settings.text_cb39b94fd1") },
+  { key: "getDataRandomDelay", setting: "delay", label: $t("guoba-settings.text_b35306e1c6"), max: 60_000,
+    help: $t("guoba-settings.text_2d92fff83b") },
+  { key: "whiteWordslist", setting: "whitelist", label: $t("guoba-settings.text_5517f3fe91"), tags: true,
+    help: $t("guoba-settings.text_c6145efdef") },
+  { key: "banWords", setting: "blacklist", label: $t("guoba-settings.text_1d6c3a1841"), tags: true,
+    help: $t("guoba-settings.text_fe5c7e2893") },
+  { key: "pushPicCountLimit", setting: "pictureLimit", label: $t("guoba-settings.text_8d42b41b9c"), max: 12 },
+  { key: "pushContentLenLimit", setting: "contentLimit", label: $t("guoba-settings.text_74690beb19"), max: 8000,
+    help: $t("guoba-settings.text_b18efbbefc") },
+  { key: "pushContentLineLimit", setting: "lineLimit", label: $t("guoba-settings.text_132c6935bf"), max: 500,
+    help: $t("guoba-settings.text_b18efbbefc") },
+  { key: "isSplit", setting: "split", label: $t("guoba-settings.text_5420d2fe8c"), options: [$t("guoba-settings.text_ece01bbfaa"), $t("guoba-settings.text_391de7a063")],
+    help: $t("guoba-settings.text_fd1efb6bfb") },
+  { key: "splitHeight", setting: "splitHeight", label: $t("guoba-settings.text_22b104cf6e"), min: 700, max: 20_000,
+    help: $t("guoba-settings.text_455094f7cb") },
+  { key: "noSplitHeight", setting: "noSplitHeight", label: $t("guoba-settings.text_f67e10c249"), min: 700, max: 20_000,
+    help: $t("guoba-settings.text_3974ea0d10") },
+  { key: "boxGrid", setting: "grid", label: $t("guoba-settings.text_e3a61badaa"), options: [$t("guoba-settings.text_ebeab3b65b"), $t("guoba-settings.text_669f8fbbdc")],
+    help: $t("guoba-settings.text_39b6e2ffae") },
+  { key: "pushTaskLog", setting: "log", label: $t("guoba-settings.text_2e0ab455aa"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+    help: $t("guoba-settings.text_45ca7bb666") },
 ]
 const platforms: readonly { id: SubscriptionPlatform; label: string; fields: readonly SettingsField[] }[] = [
-  { id: "bilibili", label: "B站", fields: [
+  { id: "bilibili", label: $t("guoba-settings.text_acfb839ad1"), fields: [
     ...sharedFields,
-    { key: "liveAtAll", setting: "liveAtAll", label: "直播动态@全体成员", options: ["关闭", "开启"],
-      help: "仅在下方指定的群生效，机器人需有全员提醒权限。" },
-    { key: "liveAtAllGroupList", setting: "liveGroups", label: "直播提醒群号", tags: "groupIds",
-      help: "每项输入一个群号。留空时不会提醒全体成员。" },
-    { key: "liveAtAllCD", setting: "liveCooldown", label: "@全体成员冷却时间（秒）", min: 60, max: 86_400,
-      help: "每个群单独计算冷却时间，默认为 1800 秒。" },
-    { key: "liveAtAllErrMsg", setting: "liveFailureNotice", label: "@全体成员失败时提示", options: ["关闭", "开启"],
-      help: "网关明确拒绝提醒时给出提示，直播动态仍会发送。" },
-    { key: "parseVideoLink", setting: "parseVideoLink", label: "视频链接解析", options: ["关闭", "开启"],
-      help: "控制聊天中的视频链接、视频编号和短链自动解析。搜看和下载指令仍可使用。" },
-    { key: "sharedBiliLogin", setting: "sharedBiliLogin", label: "视频与动态共用 B 站登录", options: ["关闭", "开启"],
-      help: "开启后，动态可使用 TuneWeave 中已登录且支持动态读取的 B 站会话。" },
+    { key: "liveAtAll", setting: "liveAtAll", label: $t("guoba-settings.text_da1ef04e5a"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_2a265869e0") },
+    { key: "liveAtAllGroupList", setting: "liveGroups", label: $t("guoba-settings.text_00d3776138"), tags: "groupIds",
+      help: $t("guoba-settings.text_083e51f167") },
+    { key: "liveAtAllCD", setting: "liveCooldown", label: $t("guoba-settings.text_c0c5dad971"), min: 60, max: 86_400,
+      help: $t("guoba-settings.text_cd53a02ae1") },
+    { key: "liveAtAllErrMsg", setting: "liveFailureNotice", label: $t("guoba-settings.text_adf84becdc"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_0323a1a892") },
+    { key: "parseVideoLink", setting: "parseVideoLink", label: $t("guoba-settings.text_88fd352635"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_a49dcb75c4") },
+    { key: "sharedBiliLogin", setting: "sharedBiliLogin", label: $t("guoba-settings.text_2e42c1f303"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_0c9d2dbdfc") },
   ] },
-  { id: "weibo", label: "微博", fields: [...sharedFields,
-    { key: "parseWeiboLink", setting: "parseWeiboLink", label: "公开动态链接预览", options: ["关闭", "开启"],
-      help: "自动预览聊天中分享的公开微博。站点要求登录时提示打开原文。" },
-    { key: "parseWeiboPrivate", setting: "parseWeiboPrivate", label: "私聊预览公开微博", options: ["关闭", "开启"],
-      help: "主开关开启后，允许在私聊自动预览。" },
-    { key: "weiboComments", setting: "weiboComments", label: "预览公开微博热评", options: ["关闭", "开启"],
-      help: "聊天预览最多附带 20 条公开热评，订阅推送不受影响。" },
+  { id: "weibo", label: $t("guoba-settings.text_0fc69798d8"), fields: [...sharedFields,
+    { key: "parseWeiboLink", setting: "parseWeiboLink", label: $t("guoba-settings.text_7b89be2fdf"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_5385a0038b") },
+    { key: "parseWeiboPrivate", setting: "parseWeiboPrivate", label: $t("guoba-settings.text_646c7a6881"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_3a73107b7a") },
+    { key: "weiboComments", setting: "weiboComments", label: $t("guoba-settings.text_f5c51a4d82"), options: [$t("guoba-settings.text_3fd47edce4"), $t("guoba-settings.text_8da97ddda9")],
+      help: $t("guoba-settings.text_b532f0c078") },
   ] },
 ]
 
@@ -113,18 +116,18 @@ function fieldValue(field: SettingsField, settings: SubscriptionSettings) {
 }
 
 const officialVideoToggles = [
-  ["forwardMsg", "合并转发"], ["cover", "使用封面原图"], ["bh3", "包含崩坏3"],
-  ["by", "包含崩坏因缘精灵"], ["xbgd", "包含星布谷地"],
+  ["forwardMsg", $t("guoba-settings.text_5c8697bb9f")], ["cover", $t("guoba-settings.text_bd1f24e0d1")], ["bh3", $t("guoba-settings.text_9663fc5dbb")],
+  ["by", $t("guoba-settings.text_555ceff239")], ["xbgd", $t("guoba-settings.text_98a8569cfe")],
 ] as const
 const officialVideoTags = [
-  ["groups", "定时推送群", "每行填写一个群号。留空时只提供手动查询。"],
-  ["group_config", "群聊屏蔽的游戏", "按「群号: gs, sr」填写。游戏代号为 gs、sr、zzz、bh3、by、xbgd。"],
+  ["groups", $t("guoba-settings.text_3d0ec334f0"), $t("guoba-settings.text_985e883d81")],
+  ["group_config", $t("guoba-settings.text_fdbe9f4a67"), $t("guoba-settings.text_45054a1a4a")],
 ] as const
 
 const publicShareSites = Object.keys(publicShareSiteNames) as PublicShareSite[]
 const publicShareToggles = [
-  ["enable", "解析及播放", "允许从群聊中的公开分享显示作品信息，并响应显式播放指令。"],
-  ["private_preview", "私聊自动预览", "关闭时仍可在私聊发送播放指令。"],
+  ["enable", $t("guoba-settings.text_a491bc9f1a"), $t("guoba-settings.text_4d869b88ca")],
+  ["private_preview", $t("guoba-settings.text_cf97f46a42"), $t("guoba-settings.text_0659cec525")],
 ] as const
 
 type SharePatch = Partial<Record<typeof publicShareToggles[number][0], boolean>>
@@ -236,30 +239,30 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
   const officialLinks = createOfficialLinkSettings(directory, root)
   const summary = createSummaryModel({ directory, root })
   const summaryFields = [
-    { key: "summaryEnabled", label: "使用模型总结网页", component: "Switch",
-      bottomHelpMessage: "开启后，支持的公开网页正文会发送给下方配置的模型服务。" },
-    { key: "summaryMode", label: "网页总结模式", component: "Select",
-      componentProps: { options: [{ label: "通用兼容接口", value: "general" }, { label: "保留旧元宝设置", value: "yuanbao" }] },
-      bottomHelpMessage: "旧元宝模式使用已启用的通用兼容接口回退。未配置通用模型时显示原文预览。" },
-    { key: "summaryBaseUrl", label: "网页总结接口地址", component: "Input" },
-    { key: "summaryModel", label: "网页总结模型名", component: "Input" },
-    { key: "summaryApiKey", label: "网页总结 API 密钥", component: "InputPassword" },
+    { key: "summaryEnabled", label: $t("guoba-settings.text_0655e8e0c1"), component: "Switch",
+      bottomHelpMessage: $t("guoba-settings.text_9773426ab2") },
+    { key: "summaryMode", label: $t("guoba-settings.text_8a247b638a"), component: "Select",
+      componentProps: { options: [{ label: $t("guoba-settings.text_73944a9c99"), value: "general" }, { label: $t("guoba-settings.text_bacdc0ead5"), value: "yuanbao" }] },
+      bottomHelpMessage: $t("guoba-settings.text_2d38e23178") },
+    { key: "summaryBaseUrl", label: $t("guoba-settings.text_9596563130"), component: "Input" },
+    { key: "summaryModel", label: $t("guoba-settings.text_a966176ffc"), component: "Input" },
+    { key: "summaryApiKey", label: $t("guoba-settings.text_3b7d1d8595"), component: "InputPassword" },
   ] as const
   const exclusionFields = [
-    { key: "deny_hosts", label: "网页摘要排除域名", bottomHelpMessage: "每行一个域名，最多 32 个。请输入完整域名，请勿填写网址或通配符。" },
-    { key: "deny_networks", label: "网页摘要排除 IP 网段", bottomHelpMessage: "每行一个 IPv4、IPv6 地址或 CIDR 网段，最多 64 项。留空时仍会排除内置受管地址。" },
+    { key: "deny_hosts", label: $t("guoba-settings.text_ef36915efb"), bottomHelpMessage: $t("guoba-settings.text_f6858b96b6") },
+    { key: "deny_networks", label: $t("guoba-settings.text_e32192bb5d"), bottomHelpMessage: $t("guoba-settings.text_71b746ee56") },
   ] as const
   const publicShares = [
-    { id: "pipixia", name: "皮皮虾", fields: pipixiaFields, store: pipixia },
-    { id: "kuaishou", name: "快手", fields: kuaishouFields, store: kuaishou },
-    { id: "jike", name: "即刻", fields: jikeFields, store: jike },
-    { id: "xigua", name: "西瓜视频", fields: xiguaFields, store: createPublicShareSettings("xigua", "西瓜视频", directory, fileURLToPath(root)) },
+    { id: "pipixia", name: $t("guoba-settings.text_13618d1860"), fields: pipixiaFields, store: pipixia },
+    { id: "kuaishou", name: $t("guoba-settings.text_b210af9eae"), fields: kuaishouFields, store: kuaishou },
+    { id: "jike", name: $t("guoba-settings.text_61528bef0f"), fields: jikeFields, store: jike },
+    { id: "xigua", name: $t("guoba-settings.text_939dc2066a"), fields: xiguaFields, store: createPublicShareSettings("xigua", $t("guoba-settings.text_939dc2066a"), directory, fileURLToPath(root)) },
   ] as const
   return {
-    pluginInfo: { name: "media", title: "媒体", isV3: true, isV2: false },
+    pluginInfo: { name: "media", title: $t("guoba-settings.text_fa33e10009"), isV3: true, isV2: false },
     configInfo: {
       schemas: [...platforms.flatMap(({ id, label: platform, fields }) => [
-        { component: "SOFT_GROUP_BEGIN", label: `${platform}动态推送` },
+        { component: "SOFT_GROUP_BEGIN", label: $t("guoba-settings.text_14970058c7", { "platform": platform }) },
         ...fields.map(({ key, label, options, min, max, help, component, tags }) => ({
           field: `${id}.${key}`,
           label: key === "pushMsgMode" ? platform + label : label,
@@ -269,29 +272,29 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             : max !== undefined ? { min: min ?? 0, max, step: 1 } : undefined,
         })),
       ]),
-      { component: "SOFT_GROUP_BEGIN", label: "B 站番剧" },
-      { field: "bilibili.biliPgcAuto", label: "自动发送公开可下载分集", component: "Switch",
-        bottomHelpMessage: "关闭时仍可显式播放。平台下载授权和 B 站下载权限同时生效。" },
-      { field: "bilibili.biliPgcQuality", label: "番剧画质上限", component: "Select",
+      { component: "SOFT_GROUP_BEGIN", label: $t("guoba-settings.text_5914196fa3") },
+      { field: "bilibili.biliPgcAuto", label: $t("guoba-settings.text_9901c582ed"), component: "Switch",
+        bottomHelpMessage: $t("guoba-settings.text_4e486cabbb") },
+      { field: "bilibili.biliPgcQuality", label: $t("guoba-settings.text_811bcd0212"), component: "Select",
         componentProps: { options: biliPgcQualities.map(([value, label]) => ({ label, value })) } },
-      { field: "bilibili.biliPgcDuration", label: "番剧最长时长（秒）", component: "InputNumber",
+      { field: "bilibili.biliPgcDuration", label: $t("guoba-settings.text_4062f32600"), component: "InputNumber",
         componentProps: { min: 1, max: 86_400, step: 1 } },
       ...publicShareSites.flatMap(site => [
-        { component: "SOFT_GROUP_BEGIN", label: site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site] },
+        { component: "SOFT_GROUP_BEGIN", label: site === "acfun" ? $t("guoba-settings.text_712abaa5fb") : publicShareSiteNames[site] },
         ...publicShareToggles.map(([key, label, bottomHelpMessage]) => ({
           field: `${site}.${key}`,
-          label: site === "wxchannels" && key === "enable" ? "解析视频号公开分享"
-            : site === "xhs" ? (key === "enable" ? "解析小红书公开笔记" : "小红书私聊自动预览")
-            : site === "xhh" ? (key === "enable" ? "解析小黑盒 PC 游戏分享" : "小黑盒游戏私聊自动预览")
-            : key === "enable" ? `${label} ${site === "acfun" ? "AcFun 视频" : publicShareSiteNames[site]}` : label,
+          label: site === "wxchannels" && key === "enable" ? $t("guoba-settings.text_9e3955c093")
+            : site === "xhs" ? (key === "enable" ? $t("guoba-settings.text_f39432053c") : $t("guoba-settings.text_5199b61553"))
+            : site === "xhh" ? (key === "enable" ? $t("guoba-settings.text_26e475c3e8") : $t("guoba-settings.text_dfaab26f1d"))
+            : key === "enable" ? `${label} ${site === "acfun" ? $t("guoba-settings.text_712abaa5fb") : publicShareSiteNames[site]}` : label,
           bottomHelpMessage: site === "wxchannels" ? (key === "enable"
-            ? "预览公开作品，可打开原文在微信中观看。" : "开启后也可在好友私聊预览。")
-            : site === "xhs" ? (key === "enable" ? "显示官方匿名返回的笔记简介和封面。" : "开启后也可在好友私聊预览。")
-            : site === "xhh" ? (key === "enable" ? "显示官方分享返回的游戏名称，并附原链接。" : "开启后也可在好友私聊预览。")
+            ? $t("guoba-settings.text_b5cdd4ef78") : $t("guoba-settings.text_52d4a75489"))
+            : site === "xhs" ? (key === "enable" ? $t("guoba-settings.text_d46969a0af") : $t("guoba-settings.text_52d4a75489"))
+            : site === "xhh" ? (key === "enable" ? $t("guoba-settings.text_1c21a93420") : $t("guoba-settings.text_52d4a75489"))
             : bottomHelpMessage, component: "Switch",
         })),
       ]),
-      { component: "SOFT_GROUP_BEGIN", label: "米游社官号视频" },
+      { component: "SOFT_GROUP_BEGIN", label: $t("guoba-settings.text_42cb32e402") },
       ...officialVideoToggles.map(([key, label]) => ({ field: `officialVideo.${key}`, label, component: "Switch" })),
       ...officialVideoTags.map(([key, label, bottomHelpMessage]) => ({ field: `officialVideo.${key}`, label, bottomHelpMessage,
         component: "Select", componentProps: { mode: "tags" } })),
@@ -299,11 +302,11 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
         { component: "SOFT_GROUP_BEGIN", label: share.name },
         ...share.fields.map(([key, label]) => ({ field: `${share.id}.${key}`, label, component: "Switch" })),
       ]),
-      { component: "SOFT_GROUP_BEGIN", label: "公开链接预览" },
+      { component: "SOFT_GROUP_BEGIN", label: $t("guoba-settings.text_e6322d7411") },
       ...officialLinkToggles.map(([key, label]) => ({ field: `officialLinks.${key}`, label, component: "Switch" })),
       ...([[officialLinkTrustFields.telegram, "Telegram"], [officialLinkTrustFields.x, "X"]] as const).map(([key, label]) => ({
-        field: `officialLinks.${key}`, label: `${label} 信任 QQ`, component: "Select",
-        componentProps: { mode: "tags" }, bottomHelpMessage: "留空将只允许主人使用此来源。"
+        field: `officialLinks.${key}`, label: $t("guoba-settings.text_5363847c40", { "label": label }), component: "Select",
+        componentProps: { mode: "tags" }, bottomHelpMessage: $t("guoba-settings.text_ae6799f309")
       })),
       ...summaryFields.map(({ key, ...schema }) => ({ ...schema, field: `officialLinks.${key}` })),
       ...exclusionFields.map(({ key, ...schema }) => ({ ...schema, field: `web_summary.${key}`,
@@ -334,11 +337,11 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
       async setConfigData<Result>(values: Readonly<Record<string, unknown>>, { Result, changedFields }: GuobaContext<Result>) {
         const edited = Array.isArray(changedFields) ? new Set(changedFields) : undefined
         const videoPatch = officialVideoPatch(values, edited)
-        if (!videoPatch) return Result.error("请填写有效的米游社官号视频设置。", 422)
+        if (!videoPatch) return Result.error($t("guoba-settings.text_fc9e127d73"), 422)
         const sharePatches = new Map<PublicShareSite, SharePatch>()
         for (const site of publicShareSites) {
           const patch = publicSharePatch(site, values, edited)
-          if (!patch) return Result.error(`请填写有效的${publicShareSiteNames[site]}设置。`, 422)
+          if (!patch) return Result.error($t("guoba-settings.text_6949b04c81", { "value1": publicShareSiteNames[site] }), 422)
           if (Object.keys(patch).length) sharePatches.set(site, patch)
         }
         const publicSharePatches = new Map<typeof publicShares[number]["store"], Partial<PipixiaSettings>>()
@@ -348,7 +351,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             const name = `${share.id}.${key}`
             if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
             const value = values[name]
-            if (typeof value !== "boolean") return Result.error(`请填写有效的${share.name}开关。`, 422)
+            if (typeof value !== "boolean") return Result.error($t("guoba-settings.text_e11f1b2549", { "name": share.name }), 422)
             patch[key] = value
           }
           if (Object.keys(patch).length) publicSharePatches.set(share.store, patch)
@@ -358,27 +361,27 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           const field = `officialLinks.${key}`
           if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
           const value = values[field]
-          if (typeof value !== "boolean") return Result.error("请填写有效的公开链接预览设置。", 422)
+          if (typeof value !== "boolean") return Result.error($t("guoba-settings.text_2c80b0fd14"), 422)
           officialLinkPatch[key] = value
         }
         for (const key of Object.values(officialLinkTrustFields)) {
           const field = `officialLinks.${key}`
           if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
           const users = parseTrustedOfficialLinkUsers(values[field])
-          if (!users) return Result.error("请填写有效的公开链接信任 QQ。", 422)
+          if (!users) return Result.error($t("guoba-settings.text_aa4c41e7a4"), 422)
           officialLinkPatch[key] = users
         }
         const summaryPatch = parseSummaryModelPatch(Object.fromEntries(summaryFields.flatMap(({ key }) => {
           const field = `officialLinks.${key}`
           return Object.hasOwn(values, field) && (!edited || edited.has(field)) ? [[key, values[field]]] : []
         })))
-        if (!summaryPatch) return Result.error("请填写有效的网页总结配置。", 422)
+        if (!summaryPatch) return Result.error($t("guoba-settings.text_8693a6e974"), 422)
         const exclusionPatch: Partial<Record<keyof typeof publicPageExclusions, string[]>> = {}
         for (const { key, label } of exclusionFields) {
           const field = `web_summary.${key}`
           if (!Object.hasOwn(values, field) || (edited && !edited.has(field))) continue
           const entries = publicPageExclusions[key](values[field])
-          if (!entries) return Result.error(`请填写有效的${label}。`, 422)
+          if (!entries) return Result.error($t("guoba-settings.text_3d26426d12", { "label": label }), 422)
           exclusionPatch[key] = entries
         }
         const pgcPatch: Record<string, boolean | number> = {}
@@ -389,7 +392,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
           const valid = key === "biliPgcAuto" ? typeof value === "boolean"
             : typeof value === "number" && Number.isSafeInteger(value) &&
               (key === "biliPgcQuality" ? biliPgcQualities.some(([quality]) => quality === value) : value >= 1 && value <= 86_400)
-          if (!valid) return Result.error("请填写有效的 B 站番剧播放设置。", 422)
+          if (!valid) return Result.error($t("guoba-settings.text_c7ccb96332"), 422)
           pgcPatch[key] = value as number | boolean
         }
         const changes = new Map<SubscriptionPlatform, { field: SettingsField; value: FieldInput }[]>()
@@ -400,7 +403,7 @@ export function supportGuoba(directory = dataPath, officialVideo = createOfficia
             if (!Object.hasOwn(values, name) || (edited && !edited.has(name))) continue
             const value = submittedValue(field, values[name])
             if (value === undefined) {
-              return Result.error(`请填写有效的${label}动态推送设置。`, 422)
+              return Result.error($t("guoba-settings.text_cd7091728d", { "label": label }), 422)
             }
             selected.push({ field, value })
           }

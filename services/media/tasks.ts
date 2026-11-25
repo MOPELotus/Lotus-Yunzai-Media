@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
@@ -27,7 +30,7 @@ const ownedTasks = new Map<string, string>()
 async function readMarker(dir: string, name: string) {
   const file = path.join(dir, name)
   const stat = await fs.lstat(file)
-  if (!stat.isFile() || stat.size > 4096) throw new Error("媒体任务标记无效")
+  if (!stat.isFile() || stat.size > 4096) throw new Error($t("services.media.tasks.text_a7a829af97"))
   return record(JSON.parse(await fs.readFile(file, "utf8")))
 }
 
@@ -41,9 +44,9 @@ async function readTaskOwner(dir: string) {
     throw error
   })
   if (!stat) return
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("媒体任务目录无效")
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error($t("services.media.tasks.text_e04a26127b"))
   const owner = await readMarker(dir, MARKER)
-  if (!hasLocalOwner(owner)) throw new Error("无法核实本机媒体任务标记")
+  if (!hasLocalOwner(owner)) throw new Error($t("services.media.tasks.text_c1f4e276e1"))
   return owner
 }
 
@@ -76,14 +79,14 @@ export async function createMediaTask(root: string) {
 export async function releaseMediaTask(root: string, dir: string | undefined) {
   if (!dir || !isInside(root, dir) || path.dirname(path.resolve(dir)) !== path.resolve(root) ||
       !path.basename(path.resolve(dir)).startsWith("task-")) {
-    throw new Error("拒绝清理不属于当前媒体任务的目录")
+    throw new Error($t("services.media.tasks.text_696f7da577"))
   }
   const resolved = path.resolve(dir)
   const owner = await readTaskOwner(resolved)
   if (owner) {
     // Direct release is for tasks created by this runtime. Startup recovery handles exited owners separately.
     const id = ownedTasks.get(resolved)
-    if (!id || owner.pid !== process.pid || owner.id !== id) throw new Error("媒体任务不属于当前运行进程")
+    if (!id || owner.pid !== process.pid || owner.id !== id) throw new Error($t("services.media.tasks.text_ba46817912"))
     await removeTaskDirectory(resolved)
   }
   ownedTasks.delete(resolved)

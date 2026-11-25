@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { CommandForward, CommandReply, MessageFallbackContext } from "../../../../lib/commands.ts"
 import { renderTemplate } from "../../core/render/service.ts"
 import { messageLinkValues } from "../official-links/command.ts"
@@ -55,9 +58,9 @@ function summaryReply(title: string, owner: string | undefined, text: string, so
   const chars = Array.from(text)
   const units = Array.from(original).length
   const minutes = Math.max(1, Math.ceil(units / 500))
-  const nodes = [`《${title}》 · 原文 ${units} 字 · 预计阅读 ${minutes} 分钟`, ...(owner ? [owner] : [])]
-  if (yuanbaoFallback) nodes.push("本次使用已配置的通用模型生成摘要。")
-  if (excerpt.length < original.length) nodes.push(`摘要依据开头 ${Array.from(excerpt).length} 字，完整内容请查看原文。`)
+  const nodes = [$t("services.web-summary.command.text_109081da5d", { "title": title, "units": units, "minutes": minutes }), ...(owner ? [owner] : [])]
+  if (yuanbaoFallback) nodes.push($t("services.web-summary.command.text_248e42201c"))
+  if (excerpt.length < original.length) nodes.push($t("services.web-summary.command.text_7ee539ea25", { "length": Array.from(excerpt).length }))
   for (let offset = 0; offset < chars.length; offset += 900) nodes.push(chars.slice(offset, offset + 900).join(""))
   nodes.push(source)
   return { type: "forward", nodes }
@@ -93,7 +96,7 @@ export function createWebSummary({
           (context.message_type === "private" && !options.private)) return []
       const generic = isGenericPage(target)
       const genericConfiguration = generic ? await model.settings().catch(() => undefined) : undefined
-      if (generic && !genericConfiguration) return `暂无法读取公开原文。\n${target.link}`
+      if (generic && !genericConfiguration) return $t("services.web-summary.command.text_e09f78b1ec", { "link": target.link })
       let article
       try {
         const deadline = AbortSignal.any([active, AbortSignal.timeout(8000)])
@@ -102,7 +105,7 @@ export function createWebSummary({
       }
       catch { if (active.aborted) return [] }
       if (active.aborted) return []
-      if (!article) return `暂无法读取公开原文。\n${target.link}`
+      if (!article) return $t("services.web-summary.command.text_e09f78b1ec", { "link": target.link })
       const configuration = generic ? genericConfiguration : await model.settings().catch(() => undefined)
       if (article.text && configuration?.summaryEnabled && !active.aborted) {
         try {
@@ -115,7 +118,7 @@ export function createWebSummary({
       if (active.aborted) return []
       const chars = Array.from(article.text)
       const desc = chars.length > 1200 ? chars.slice(0, 1200).join("") + "…" : article.text
-      const card = { title: article.title, owner: article.owner, desc, id: v2ex ? `V2EX · ${target.id}` : "原文摘录",
+      const card = { title: article.title, owner: article.owner, desc, id: v2ex ? `V2EX · ${target.id}` : $t("services.web-summary.command.text_bc38e1daaf"),
         type: "public-link", showStats: false }
       const limit = context.inlineImageByteLimit ?? Infinity
       let image = await render("bilibili-info", card).catch(() => undefined)

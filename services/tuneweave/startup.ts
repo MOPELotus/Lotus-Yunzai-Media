@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { runInitializationStage } from "../../../../lib/initialization-progress.ts"
 import { setTimeout as delay } from "node:timers/promises"
 import { loadGlobalConfig } from "../../core/config/global.ts"
@@ -52,7 +55,7 @@ function isLocal(tune: Pick<TuneWeaveService, "localUrl">) {
 export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices, {
   load = loadGlobalConfig,
   createTune = config => new TuneWeaveService({ config }),
-  prepareTools = (config, active) => runInitializationStage("检查已有 FFmpeg", onTaskProgress => new ToolInstallerService({ config }).checkAll({ signal: active, onTaskProgress }), { label: "媒体维护", signal: active }),
+  prepareTools = (config, active) => runInitializationStage($t("services.tuneweave.startup.text_7781ba1349"), onTaskProgress => new ToolInstallerService({ config }).checkAll({ signal: active, onTaskProgress }), { label: $t("services.tuneweave.startup.text_5522303635"), signal: active }),
   wait = (ms, active) => delay(ms, undefined, { signal: active, ref: false }),
 }: StartupHooks = {}) {
   if (!mediaRuntime) return
@@ -81,7 +84,7 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
     active.throwIfAborted()
     if (local) {
       try {
-        const item = await runInitializationStage("检查已有 TuneWeave", () => tune.status("netease", active, "error"), { label: "媒体维护", signal: active })
+        const item = await runInitializationStage($t("services.tuneweave.startup.text_59cec365f9"), () => tune.status("netease", active, "error"), { label: $t("services.tuneweave.startup.text_5522303635"), signal: active })
         items.push({ name: "TuneWeave", ok: item.ok && !item.requiresUpdate,
           changed: false, updateDeferred: false })
       } catch {
@@ -100,10 +103,10 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
       const tune = createTune(config.tuneweave)
       const local = isLocal(tune)
       if (local) {
-        try { await runInitializationStage("恢复本机 TuneWeave", () => tune.resume(active), { label: "媒体维护", signal: active }) } catch {
+        try { await runInitializationStage($t("services.tuneweave.startup.text_4c24112568"), () => tune.resume(active), { label: $t("services.tuneweave.startup.text_5522303635"), signal: active }) } catch {
           active.throwIfAborted()
-          console.warn("[media] TuneWeave 启动失败，继续检查服务状态。")
-          await notify("TuneWeave 启动失败，请检查服务状态。")
+          console.warn($t("services.tuneweave.startup.text_cabf735036"))
+          await notify($t("services.tuneweave.startup.text_0cb39aeef2"))
         }
       }
 
@@ -114,15 +117,15 @@ export function startMediaMaintenance({ mediaRuntime, signal }: StartupServices,
         if (attempt === 1) firstRound.resolve(failed.length ? "failed" : "ready")
         const changed = items.filter(item => item.changed).map(item => item.name)
         const deferred = items.filter(item => item.updateDeferred).map(item => item.name)
-        if (failed.length) await notify("媒体工具检查失败：" + failed.join("、") + "。请运行 bun run bootstrap 补齐。")
-        else if (changed.length) await notify("媒体工具更新完成：" + changed.join("、") + "，已通过就绪检查。")
-        if (deferred.length) console.warn("[media] 现有环境可用，更新暂未完成：" + deferred.join("、"))
+        if (failed.length) await notify($t("services.tuneweave.startup.text_cca2c5ce0c") + failed.join("、") + $t("services.tuneweave.startup.text_b348d66a77"))
+        else if (changed.length) await notify($t("services.tuneweave.startup.text_4e60d24081") + changed.join("、") + $t("services.tuneweave.startup.text_0c5b0fd746"))
+        if (deferred.length) console.warn($t("services.tuneweave.startup.text_72f8fb4d14") + deferred.join("、"))
         if (!failed.length && !deferred.length) return
       }
     })().catch(() => {
       if (!active.aborted) {
         firstRound.resolve("failed")
-        console.warn("[media] 媒体工具检查失败，请检查配置或运行 bun run bootstrap。")
+        console.warn($t("services.tuneweave.startup.text_2d16e4b506"))
       }
     })
   })

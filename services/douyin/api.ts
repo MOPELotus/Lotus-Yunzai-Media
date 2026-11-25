@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { WEB_UA, generateABogus } from "./signature.ts"
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
 import { signVisitorUrl } from "./guest-signature.ts"
@@ -39,20 +42,20 @@ export async function fetchWebDetail(id: string, visitor: string | VisitorSessio
     redirect: "error", signal, headers: { "User-Agent": WEB_UA, Referer: "https://www.douyin.com/", "Accept-Language": "zh-CN,zh;q=0.9", Cookie: `ttwid=${session?.ttwid || ""};`, ...request.headers },
   }, { timeoutMs })
   if (!response.ok) {
-    if (/ArgusSecurityPlugin|Uifid Not Found/i.test(text)) throw new DouyinError("risk_control", "抖音风控要求额外游客校验")
-    throw new DouyinError("api_http", `抖音作品接口 HTTP ${response.status}`)
+    if (/ArgusSecurityPlugin|Uifid Not Found/i.test(text)) throw new DouyinError("risk_control", $t("services.douyin.api.text_22b95e5136"))
+    throw new DouyinError("api_http", $t("services.douyin.api.text_2555b3220b", { "status": response.status }))
   }
   let payload: unknown
   try { payload = JSON.parse(text) } catch {}
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new DouyinError("api_empty", "抖音作品接口返回的详情结构无效")
+    throw new DouyinError("api_empty", $t("services.douyin.api.text_685f5bdd1d"))
   }
   const data = payload as DetailResponse
   const message = typeof data.status_msg === "string" ? data.status_msg : typeof data.message === "string" ? data.message : ""
   if (data.status_code !== 0) {
     if (/已删除|不存在|私密|无权|不可见/.test(message)) throw new DouyinError("unavailable", message)
-    throw new DouyinError("api_rejected", "抖音作品接口拒绝请求或遭遇风控")
+    throw new DouyinError("api_rejected", $t("services.douyin.api.text_ceb74efb24"))
   }
-  if (!data.aweme_detail || douyinWorkId(data.aweme_detail.aweme_id) !== id) throw new DouyinError("api_empty", "接口未返回匹配的作品详情")
+  if (!data.aweme_detail || douyinWorkId(data.aweme_detail.aweme_id) !== id) throw new DouyinError("api_empty", $t("services.douyin.api.text_518c8ed925"))
   return data.aweme_detail
 }

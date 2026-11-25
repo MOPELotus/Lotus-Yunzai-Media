@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { isChatFileName, maxChatFileBytes } from "../../../../lib/chat-files.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { renderStatusCard } from "../../core/render/service.ts"
@@ -16,7 +19,7 @@ type CloudAction =
   | { readonly kind: "match"; readonly index?: number; readonly target?: string }
   | { readonly kind: "refresh" | "clear" | "upload" }
 
-export const cloudHelp = "主人好友私聊可使用 #我的云盘 [关键词]、#云盘下一页、#听云盘 1、#云盘更新、#清除云盘缓存。上传请引用自己发送的音频文件后用 #上传云盘。使用 #云盘匹配 1 网易云歌曲链接 可关联当前列表中的云盘曲目与官方歌曲。"
+export const cloudHelp = $t("services.music.cloud-command.text_0bfc154254")
 
 export function cloudAction(message: string): CloudAction | undefined {
   const list = /^(?:#?我的云盘|#rnc|#云盘搜索)(?:\s+(.+))?$/iu.exec(message)
@@ -57,7 +60,7 @@ interface CloudCommandsOptions {
 const pageSize = 10
 const turnLength = 120_000
 const diskSpace = (value: number) => `${(value / (1024 * 1024)).toFixed(1)} MiB`
-const matchUsage = "请使用 #云盘匹配 本页序号 网易云单曲链接或歌曲编号。"
+const matchUsage = $t("services.music.cloud-command.text_ed4047347e")
 
 function matchTarget(value: string | undefined) {
   if (!value) return
@@ -67,7 +70,7 @@ function matchTarget(value: string | undefined) {
 }
 function inventory({ tracks, used, capacity }: Browse["snapshot"]) {
   const usage = used !== undefined && capacity !== undefined ? ` · ${diskSpace(used)} / ${diskSpace(capacity)}` : ""
-  return `共 ${tracks.length} 首${usage}`
+  return $t("services.music.cloud-command.text_79a09edff6", { "length": tracks.length, "usage": usage })
 }
 
 export function createCloudCommands({ signal, ownerSignal, open, sendVoice, accountBusy, render = renderStatusCard }: CloudCommandsOptions) {
@@ -99,16 +102,16 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
 
   async function assertVisible(context: Context, api: MusicService, binding: Binding, querySignal: AbortSignal) {
     const scope = privateScope(context)
-    if (!scope || scope.owner !== binding.owner) throw new Error("当前会话无法访问此网易云盘。")
+    if (!scope || scope.owner !== binding.owner) throw new Error($t("services.music.cloud-command.text_346e5b2fc8"))
     await library.assertCurrent(api, binding, AbortSignal.any([scope.active, querySignal]))
   }
 
   async function play(context: Context, api: MusicService, expected: Binding, selected: CloudTrack) {
     const scope = privateScope(context)
-    if (!scope || scope.owner !== expected.owner || accountBusy?.()) throw new Error("当前会话无法访问此网易云盘。")
+    if (!scope || scope.owner !== expected.owner || accountBusy?.()) throw new Error($t("services.music.cloud-command.text_346e5b2fc8"))
     const { active } = scope
     const binding = await library.verify(api, scope.owner, active)
-    if (binding.key !== expected.key) throw new Error("网易云绑定已变更，请重新查询云盘。")
+    if (binding.key !== expected.key) throw new Error($t("services.music.cloud-command.text_5e5afccf99"))
     const stream = await library.stream(api, binding, selected, active)
     const media = await api.prepareStream(selected.track, stream, { signal: active, allowMediaUrl: isCloudMediaUrl })
     try {
@@ -121,17 +124,17 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
     const start = (browse.page - 1) * pageSize
     const tracks = browse.tracks.slice(start, start + pageSize)
     const maxPage = Math.max(1, Math.ceil(browse.tracks.length / pageSize))
-    if (browse.page < 1 || browse.page > maxPage) return `请选择 1–${maxPage} 页。`
-    const details = inventory(browse.snapshot) + (browse.keyword ? ` · 匹配 ${browse.tracks.length} 首` : "")
-    const notes = `第 ${browse.page}/${maxPage} 页。使用 #听云盘 1 播放本页第 1 首，或 #云盘下一页 翻页。`
+    if (browse.page < 1 || browse.page > maxPage) return $t("services.music.cloud-command.text_2635a486db", { "maxPage": maxPage })
+    const details = inventory(browse.snapshot) + (browse.keyword ? $t("services.music.cloud-command.text_493cf69b78", { "length": browse.tracks.length }) : "")
+    const notes = $t("services.music.cloud-command.text_4949e16c4f", { "page": browse.page, "maxPage": maxPage })
     const items = tracks.map(({ track, matched_track_ref }, index) => ({ label: String(index + 1),
-      value: `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"}` +
-        (matched_track_ref && /^netease:[1-9]\d{0,21}$/u.test(matched_track_ref) ? " · 已匹配 " + matched_track_ref.slice("netease:".length) : "") }))
-    const image = await render({ title: "网易云盘", subtitle: browse.keyword, message: `${details}\n${notes}`, items }).catch(() => undefined)
+      value: `${track.name} · ${track.artists?.map(artist => artist.name).join(" / ") || $t("services.music.cloud-command.text_f374d78a34")}` +
+        (matched_track_ref && /^netease:[1-9]\d{0,21}$/u.test(matched_track_ref) ? $t("services.music.cloud-command.text_6a380f1dec") + matched_track_ref.slice("netease:".length) : "") }))
+    const image = await render({ title: $t("services.music.cloud-command.text_178f317ffa"), subtitle: browse.keyword, message: `${details}\n${notes}`, items }).catch(() => undefined)
     await library.assertCurrent(api, browse.binding, active)
     if (!image || !await context.reply({ type: "image", file: image })) {
       active.throwIfAborted()
-      return ["网易云盘", details, notes, ...items.map(item => `${item.label}. ${item.value}`)].join("\n")
+      return [$t("services.music.cloud-command.text_178f317ffa"), details, notes, ...items.map(item => `${item.label}. ${item.value}`)].join("\n")
     }
     return []
   }
@@ -139,9 +142,9 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
   async function handle(message: string, context: Context) {
     const scope = privateScope(context)
     if (!scope) {
-      return "请由机器人主人在已连接的好友私聊使用网易云盘。"
+      return $t("services.music.cloud-command.text_907b445e2b")
     }
-    if (accountBusy?.()) return "网易云扫码正在进行，请在登录完成后再操作云盘。"
+    if (accountBusy?.()) return $t("services.music.cloud-command.text_e895daa11b")
     const { owner, active } = scope
     const key = musicSessionKey(context)
     for (const [scope, browse] of browsing) if (browse.expires <= Date.now()) browsing.delete(scope)
@@ -154,29 +157,29 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
       if (action?.kind === "clear") {
         library.clear(binding)
         browsing.delete(key)
-        return "已清除当前网易云账号的本地云盘缓存。"
+        return $t("services.music.cloud-command.text_339eb933cb")
       }
       if (action?.kind === "refresh") {
         const snapshot = await library.list(api, binding, active, true)
         browsing.delete(key)
-        return `网易云盘已刷新，${inventory(snapshot)}。`
+        return $t("services.music.cloud-command.text_0170e4feac", { "value1": inventory(snapshot) })
       }
       if (action?.kind === "upload") {
-        if (writing.has(binding.key)) return "当前网易云账号已有云盘操作，请稍候。"
-        if (accountBusy?.()) return "网易云扫码正在进行，请在登录完成后再上传。"
+        if (writing.has(binding.key)) return $t("services.music.cloud-command.text_e7a4fbe594")
+        if (accountBusy?.()) return $t("services.music.cloud-command.text_900b2c06f7")
         writing.add(binding.key)
         try {
           const quote = context.reply_id && context.lookupReply ? await context.lookupReply() : undefined
           active.throwIfAborted()
           const attachment = context.reply_id ? quote?.user_id === owner ? quote.attachment : undefined : context.attachment
-          if (!attachment || context.canReadAttachments !== true || !isChatFileName(attachment.name)) return "请添加音频文件，或引用自己发送的音频文件后使用 #上传云盘。"
-          if (attachment.size !== undefined && (attachment.size <= 0 || attachment.size > maxChatFileBytes)) return "请选择不超过 16 MiB 的音频附件。"
+          if (!attachment || context.canReadAttachments !== true || !isChatFileName(attachment.name)) return $t("services.music.cloud-command.text_66b67a936f")
+          if (attachment.size !== undefined && (attachment.size <= 0 || attachment.size > maxChatFileBytes)) return $t("services.music.cloud-command.text_c5fe0c967f")
           const bytes = await attachment.read(active)
           active.throwIfAborted()
-          if (!bytes || attachment.size !== undefined && bytes.byteLength !== attachment.size) return "音频附件无法读取，请重新发送。"
+          if (!bytes || attachment.size !== undefined && bytes.byteLength !== attachment.size) return $t("services.music.cloud-command.text_bbca5763bb")
           try { await library.upload(api, binding, { name: attachment.name, bytes }, active) }
           finally { browsing.delete(key) }
-          return "音频已存入当前网易云账号的云盘。"
+          return $t("services.music.cloud-command.text_a95573208b")
         } finally { writing.delete(binding.key) }
       }
       if (action?.kind === "list") {
@@ -187,19 +190,19 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
         return await show(context, api, browse, active)
       }
       const browse = browsing.get(key)
-      if (!browse || browse.binding.key !== binding.key) return "请先使用 #我的云盘 [关键词] 查看云盘曲目。"
+      if (!browse || browse.binding.key !== binding.key) return $t("services.music.cloud-command.text_023e7026dd")
       if (action?.kind === "play" || action?.kind === "match") {
         const index = action.index ?? 0
         const position = (browse.page - 1) * pageSize + index - 1
         const selected = browse.tracks[position]
-        if (index < 1 || index > pageSize || !selected) return "请输入当前页内的曲目序号。"
+        if (index < 1 || index > pageSize || !selected) return $t("services.music.cloud-command.text_2277a2c63f")
         if (action.kind === "match") {
           if (!target) return matchUsage
-          if (writing.has(binding.key) || accountBusy?.()) return "当前网易云账号已有云盘操作，请稍候。"
+          if (writing.has(binding.key) || accountBusy?.()) return $t("services.music.cloud-command.text_e7a4fbe594")
           writing.add(binding.key)
           try {
             const result = await library.match(api, binding, selected, target, active)
-            return result.changed ? `云盘曲目已匹配《${result.name}》。` : `该云盘曲目已关联《${result.name}》。`
+            return result.changed ? $t("services.music.cloud-command.text_9865b6a45f", { "name": result.name }) : $t("services.music.cloud-command.text_02648951c1", { "name": result.name })
           } finally {
             writing.delete(binding.key)
             browsing.delete(key)
@@ -209,12 +212,12 @@ export function createCloudCommands({ signal, ownerSignal, open, sendVoice, acco
         return []
       }
       const nextPage = browse.page + (message === "#云盘下一页" ? 1 : -1)
-      if (nextPage < 1 || nextPage > Math.max(1, Math.ceil(browse.tracks.length / pageSize))) return "已经没有更多云盘曲目。"
+      if (nextPage < 1 || nextPage > Math.max(1, Math.ceil(browse.tracks.length / pageSize))) return $t("services.music.cloud-command.text_38b6085c33")
       const next = { ...browse, page: nextPage, expires: Date.now() + turnLength }
       browsing.set(key, next)
       return await show(context, api, next, active)
     } catch (error) {
-      if (!active.aborted) return error instanceof Error ? error.message : "网易云盘请求失败，请稍后重试。"
+      if (!active.aborted) return error instanceof Error ? error.message : $t("services.music.cloud-command.text_f671445650")
       return []
     }
   }

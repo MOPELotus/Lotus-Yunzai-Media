@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 export const TUNEWEAVE_REQUIRED_VERSION = "1.0.0-beta.3"
 
 export function compareTuneWeaveVersions(left: unknown, right: unknown) {
@@ -6,7 +9,7 @@ export function compareTuneWeaveVersions(left: unknown, right: unknown) {
       ? /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.exec(value)
       : null
     const pre = match?.[4]?.split(".")
-    if (!match || match[0] !== value || pre?.some(identifier => /^0[0-9]+$/u.test(identifier))) throw new Error("无法识别 TuneWeave 版本。")
+    if (!match || match[0] !== value || pre?.some(identifier => /^0[0-9]+$/u.test(identifier))) throw new Error($t("services.tuneweave.version.text_240edefe34"))
     return { numbers: [BigInt(match[1]!), BigInt(match[2]!), BigInt(match[3]!)] as const, pre }
   }
   const a = parse(left), b = parse(right)

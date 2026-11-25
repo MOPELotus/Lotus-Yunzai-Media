@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import { lockFile } from "../../../../lib/file-lock.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
@@ -173,7 +176,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
   const cancelRecovery = mediaRuntime?.whenReady(() => {
     if (signal?.aborted) return
     recovery = new BilibiliService().recoverTasks().catch(error => {
-      console.warn("[media] B 站任务恢复失败：" + error.message)
+      console.warn($t("services.bilibili.video-command.text_9b422b0968") + error.message)
     })
   })
 
@@ -232,11 +235,11 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     const active = commentSignal(context)
     if (active?.aborted) return
     const items = rows.map((row, index) => {
-      const characters = Array.from(`${row.text}${row.images.length ? " [图片]" : ""}`.trim())
-      return { label: `${index + 1}. ${row.author}${row.pinned ? " · 置顶" : ""}`,
+      const characters = Array.from(`${row.text}${row.images.length ? $t("services.bilibili.video-command.text_fc91a0bbf6") : ""}`.trim())
+      return { label: `${index + 1}. ${row.author}${row.pinned ? $t("services.bilibili.video-command.text_7759a425b7") : ""}`,
         value: characters.length > 100 ? characters.slice(0, 100).join("") + "…" : characters.join("") }
     })
-    const hint = items.length ? "引用这条回复，发送 展开 1 查看对应编号。" : ""
+    const hint = items.length ? $t("services.bilibili.video-command.text_e71dacf209") : ""
     const rootText = parent ? `${parent.author}\n${parent.text}` : undefined
     const card = { title, message: [rootText, hint].filter(Boolean).join("\n"), userId: context.user_id, items }
     const fallback = [title, rootText, ...items.map(item => `${item.label}\n${item.value}`), hint].filter(Boolean).join("\n\n")
@@ -262,17 +265,17 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     const preview = receivedPreview(context, source.user_id)
     if (!preview) return
     const discussion = preview.discussion
-    if (!discussion?.rows.length) return "这条 B 站预览没有可展开的公开评论。"
+    if (!discussion?.rows.length) return $t("services.bilibili.video-command.text_c780ea699e")
     const selected = discussion.rows[index - 1]
-    if (!selected) return `评论序号超出范围，请发送 1–${discussion.rows.length}。`
+    if (!selected) return $t("services.bilibili.video-command.text_787dd2c120", { "length": discussion.rows.length })
     if (discussion.children) {
-      await showDiscussion(context, {}, "B 站子评论", selected)
+      await showDiscussion(context, {}, $t("services.bilibili.video-command.text_51f2401b3b"), selected)
       return []
     }
     let rows: readonly BiliComment[] = []
     try { rows = await comments.thread(discussion.target, selected.id, active) }
-    catch { if (!active?.aborted) return "B 站公开子评论暂不可用。" }
-    await showDiscussion(context, { discussion: { ...discussion, rows, children: true } }, "B 站评论详情", selected)
+    catch { if (!active?.aborted) return $t("services.bilibili.video-command.text_c0b6ef1c29") }
+    await showDiscussion(context, { discussion: { ...discussion, rows, children: true } }, $t("services.bilibili.video-command.text_10c8925238"), selected)
     return []
   }
 
@@ -286,7 +289,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     const url = target && URL.parse(target)
     if (!url || active.aborted) return
     if (!text || Array.from(text).length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) {
-      return "引用 B 站分享卡片或机器人解析结果后发送 评论 正文，正文须在 1–1000 字以内。"
+      return $t("services.bilibili.video-command.text_9d01eb5c2d")
     }
     return postComment(url, text, context, active)
   }
@@ -300,23 +303,23 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       const bytes = await readOriginal(url, limit, active, transport)
       if (bytes && await reply(context, { type: "image", file: bytes })) sent++
     }
-    return sent ? [] : "没有可以发送的 B 站原图。"
+    return sent ? [] : $t("services.bilibili.video-command.text_eb7e6e1756")
   }
 
   async function reportError(context: MessageFallbackContext, title: string, cause: unknown) {
     if (signal?.aborted) return
     const error = cause as Error & { code?: string }
-    const message = error instanceof Error ? error.message : "请求失败，请稍后重试。"
+    const message = error instanceof Error ? error.message : $t("services.bilibili.video-command.text_8977b79aa8")
     const diskFull = error?.code === "ENOSPC" || error?.code === "EDQUOT" || /No space left on device|Disk quota exceeded/iu.test(message)
-    const detail = diskFull ? "服务器磁盘空间不足，暂时无法下载或合并视频。" : message
+    const detail = diskFull ? $t("services.bilibili.video-command.text_1aa1d82019") : message
     const unconfirmed = error?.code === mediaDeliveryUnknown
-    const fallback = unconfirmed || diskFull || error?.code === mediaDeliveryTooLarge ? detail : `${title}失败。`
+    const fallback = unconfirmed || diskFull || error?.code === mediaDeliveryTooLarge ? detail : $t("services.bilibili.video-command.text_491921973e", { "title": title })
     const image = await renderStatusCard({
-      title, subtitle: "Lotus-Yunzai · B 站", badge: unconfirmed ? "未确认" : "失败",
+      title, subtitle: $t("services.bilibili.video-command.text_7f5440b5cf"), badge: unconfirmed ? $t("services.bilibili.video-command.text_c098e854e6") : $t("services.bilibili.video-command.text_28384d7afd"),
       message: detail,
       userId: context.user_id,
       items: unconfirmed ? [] : [
-        { label: "建议", value: diskFull ? "请联系机器人主人清理磁盘空间后重试。" : "检查链接是否有效，或稍后重试。" },
+        { label: $t("services.bilibili.video-command.text_abee497473"), value: diskFull ? $t("services.bilibili.video-command.text_68ebf9d47c") : $t("services.bilibili.video-command.text_97b575de6d") },
       ],
     }, { saveId: `media-bilibili-error-${context.user_id || "user"}` }).catch(() => undefined)
     await imageReply(context, image, `${fallback}`)
@@ -330,32 +333,32 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
 
   async function showSearch(context: MessageFallbackContext, service: BilibiliService, key: string,
     keyword: string, page: number, tuku: boolean) {
-    if (running.has(key)) return "当前 B 站搜索正在进行。"
+    if (running.has(key)) return $t("services.bilibili.video-command.text_a054c4b8eb")
     running.add(key)
     try {
-      if (tuku) await reply(context, "好的，正在搜索")
+      if (tuku) await reply(context, $t("services.bilibili.video-command.text_4f31e957b1"))
       if (signal?.aborted) return []
       const results = await service.search(keyword, { page, signal: commentSignal(context), ...(tuku && { limit: tukuPageSize }) })
       if (signal?.aborted) return []
-      if (page > 1 && !results.length) return "已经没有下一页了。"
+      if (page > 1 && !results.length) return $t("services.bilibili.video-command.text_c1edfcf4d4")
       const message = results.length
-        ? tuku ? `第 ${page} 页 · 两分钟内可翻页，或发送 #看B站视频 1 选择结果。` : "两分钟内发送 #看1 这类序号继续解析。"
-        : "没有搜索到相关视频。"
+        ? tuku ? $t("services.bilibili.video-command.text_a58246ae84", { "page": page }) : $t("services.bilibili.video-command.text_eb460db326")
+        : $t("services.bilibili.video-command.text_86c8c8064e")
       const items = results.map((item, index) => ({
-        label: tuku ? `#看B站视频 ${index + 1}` : `#看${index + 1}`,
-        value: `${item.title} · ${item.author || "未知"} · ${formatNumber(item.play)}`,
+        label: tuku ? $t("services.bilibili.video-command.text_0675556447", { "value1": index + 1 }) : `#看${index + 1}`,
+        value: `${item.title} · ${item.author || $t("services.bilibili.video-command.text_4d8c1c5b42")} · ${formatNumber(item.play)}`,
       }))
       const now = Date.now()
       for (const [id, session] of sessions) if (session.expires <= now) sessions.delete(id)
       sessions.set(key, { expires: now + searchWindow, keyword, page, tuku, results })
       const image = await renderStatusCard({
-        title: "B站搜索", subtitle: keyword,
-        badge: tuku ? `第 ${page} 页 · ${results.length} 条` : String(results.length),
+        title: $t("services.bilibili.video-command.text_442d83ee94"), subtitle: keyword,
+        badge: tuku ? $t("services.bilibili.video-command.text_7d392b71c1", { "page": page, "length": results.length }) : String(results.length),
         message, userId: context.user_id, items,
       }, { saveId: `media-bilibili-search-${context.user_id || "user"}` })
-      await imageReply(context, image, "B站搜索完成。")
+      await imageReply(context, image, $t("services.bilibili.video-command.text_a89cf4fc5f"))
     } catch (error) {
-      await reportError(context, "B站搜索", error)
+      await reportError(context, $t("services.bilibili.video-command.text_442d83ee94"), error)
     } finally {
       running.delete(key)
     }
@@ -371,20 +374,20 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         id: `直播间 ${info.roomId}`, liveStatus: info.liveStatus, online: info.online, stat: {},
       } : { id: info.bvid, duration: info.duration, stat: info.stat || {} }),
     }, { saveId: `media-bilibili-${context.user_id || "user"}` }).catch(error => {
-      console.warn("[media] B 站解析图卡生成失败：" + error.message)
+      console.warn($t("services.bilibili.video-command.text_3e0a85193a") + error.message)
     })
     const discussion = info.type === "video" && info.stat.reply !== 0
       ? await discussionFor(biliCommentTarget(info.aid, 1), context) : undefined
     const preview = info.type === "video" ? { target: info.url, discussion } : undefined
     const receipt = preview && previewReceipt(context, preview)
     if (!image && info.type === "video") await reply(context, formatBilibiliPreviewText(info), undefined, receipt)
-    else await imageReply(context, image || undefined, "B站解析完成。", receipt)
+    else await imageReply(context, image || undefined, $t("services.bilibili.video-command.text_3218cf73b0"), receipt)
     if (signal?.aborted) return
-    if (discussion && preview) await showDiscussion(context, preview, "B 站评论")
+    if (discussion && preview) await showDiscussion(context, preview, $t("services.bilibili.video-command.text_39028a915f"))
     if (info.type === "live" && info.playerUrl) {
-      await reply(context, "独立播放器：" + info.playerUrl)
+      await reply(context, $t("services.bilibili.video-command.text_bad0d56016") + info.playerUrl)
     } else if (info.type === "video" && info.url && download) {
-      await runDownload(context, service, info.url, "B站解析下载")
+      await runDownload(context, service, info.url, $t("services.bilibili.video-command.text_cdd1bbf155"))
     }
   }
 
@@ -397,11 +400,11 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       const config = await loadGlobalConfig()
       const permissions = new PermissionService({ permissions: config.permissions })
       const subject = context.canManagePackages ? { ...context, isMaster: true } : context
-      if (!permissions.explain(subject, "bilibili.download").ok) throw new Error("你没有使用 B站下载的权限。")
+      if (!permissions.explain(subject, "bilibili.download").ok) throw new Error($t("services.bilibili.video-command.text_a9c966feb5"))
       const bilibili = config.bilibili as BiliConfig
       const settings = { ...bilibili, ...bilibili.download }
       const download = normalizeDownloadConfig(settings)
-      if (!download.enable) throw new Error("B站下载未启用，请由 bot 主人在 global.yaml 中开启 bilibili.download.enable。")
+      if (!download.enable) throw new Error($t("services.bilibili.video-command.text_7f86f2569d"))
       const installed = await Promise.all(["ffmpeg", "ffprobe"].map(name => resolveCommandPath(name, download.tools_path)))
       if (active?.aborted) return
       // Requests with working local tools do not wait for remote version checks.
@@ -409,14 +412,14 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
         const tools = await new ToolInstallerService({ config: config.tools }).ensureAll()
         if (!tools.ok) {
           const failures = tools.items?.filter(item => !item.ok).map(item => `${item.name}:${item.reason}`).join(" / ")
-          throw new Error("工具链初始化失败：" + (failures || "unknown"))
+          throw new Error($t("services.bilibili.video-command.text_4bc90272ca") + (failures || "unknown"))
         }
       }
       if (active?.aborted) return
       result = await service.download(target, settings, {
         signal: active,
         onEvent: event => {
-          console.debug("[media] B 站下载：" + event.message)
+          console.debug($t("services.bilibili.video-command.text_415d23f772") + event.message)
         },
       })
       if (active?.aborted) return
@@ -436,7 +439,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     } finally {
       if (result?.ok) {
         await service.releaseTask(result).catch(error => {
-          console.warn("[media] B 站任务清理失败：" + error.message)
+          console.warn($t("services.bilibili.video-command.text_32013e6ece") + error.message)
         })
       }
     }
@@ -450,23 +453,23 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (action.kind === "write-comment") return writeComment(context, action.text)
     const key = sessionKey(context)
     const session = currentSession(key)
-    if (action.kind === "page" && !session?.tuku) return "请先发送 #点B站视频 关键词。"
+    if (action.kind === "page" && !session?.tuku) return $t("services.bilibili.video-command.text_d90eae7174")
     if (action.kind === "pick" && !session) {
-      return action.tuku ? "搜索结果已过期，请发送 #点B站视频 关键词。" : undefined
+      return action.tuku ? $t("services.bilibili.video-command.text_cbf586658d") : undefined
     }
-    if (action.kind === "download" && !action.target) return "请输入要下载的 B站链接、BV号或 av号。"
+    if (action.kind === "download" && !action.target) return $t("services.bilibili.video-command.text_749b1a5f23")
     const config = await loadGlobalConfig()
     const service = new BilibiliService({ fetch, tuneweaveConfig: config.tuneweave, searchLimit: (config.bilibili as BiliConfig).search_limit })
     switch (action.kind) {
       case "search":
-        if (!action.keyword) return "请输入搜索关键词。"
+        if (!action.keyword) return $t("services.bilibili.video-command.text_b708871132")
         return showSearch(context, service, key, action.keyword, 1, action.tuku)
       case "page":
         if (!session) return
-        if (!action.next && session.page === 1) return "当前已经是第一页。"
+        if (!action.next && session.page === 1) return $t("services.bilibili.video-command.text_84210ffe50")
         return showSearch(context, service, key, session.keyword, session.page + (action.next ? 1 : -1), true)
       case "download":
-        await runDownload(context, service, action.target, "B站下载")
+        await runDownload(context, service, action.target, $t("services.bilibili.video-command.text_08458c593a"))
         return []
     }
     let target: string
@@ -474,13 +477,13 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     try {
       if (action.kind === "pick") {
         const item = session!.results[action.index - 1]
-        if (!item) return session!.results.length ? `请输入 1-${session!.results.length} 之间的序号。` : "当前页没有可选的视频。"
-        if (action.tuku) await reply(context, "正在解析中，请稍等片刻")
+        if (!item) return session!.results.length ? $t("services.bilibili.video-command.text_18f43e7832", { "length": session!.results.length }) : $t("services.bilibili.video-command.text_9f9c8bf140")
+        if (action.tuku) await reply(context, $t("services.bilibili.video-command.text_2d36952dc2"))
         target = item.url
       } else if (action.kind === "watch") {
-        if (!action.keyword) return "请输入关键词。"
+        if (!action.keyword) return $t("services.bilibili.video-command.text_c9df43d930")
         const [first] = await service.search(action.keyword, { limit: 1, signal: commentSignal(context) })
-        if (!first) throw new Error("未搜索到相关视频")
+        if (!first) throw new Error($t("services.bilibili.video-command.text_efe6058d6e"))
         target = first.url
       } else {
         let options: Awaited<ReturnType<typeof settings>> | undefined
@@ -511,7 +514,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
             const provider = createBiliProvider({ fetch })
             const post = await provider.fetchPost(id, active)
             if (active?.aborted) return
-            if (!post) return "这条 B 站动态不可用。"
+            if (!post) return $t("services.bilibili.video-command.text_72ee3d3616")
             if (action.kind === "quote" && action.action === "images") {
               return sendOriginals(context, [...post.images, ...(post.forwarded?.images ?? [])], service.fetch, active)
             }
@@ -521,7 +524,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
             const messages = await makeDynamicMessages(provider, post, options,
               { signal: active, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
             for (const message of messages) await reply(context, message, undefined, previewReceipt(context, preview))
-            if (discussion) await showDiscussion(context, preview, "B 站评论")
+            if (discussion) await showDiscussion(context, preview, $t("services.bilibili.video-command.text_39028a915f"))
             return []
           }
           if (action.kind === "quote" && (!resolved || !isBiliVideoPage(resolved))) return
@@ -531,7 +534,7 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       if (signal?.aborted) return
       if (action.kind === "quote" && action.action === "video") {
         if (!informationUrl || !isBiliVideoPage(new URL(informationUrl))) return
-        await runDownload(context, service, informationUrl, "B站下载")
+        await runDownload(context, service, informationUrl, $t("services.bilibili.video-command.text_08458c593a"))
         return []
       }
       const info = await service.getInfo(informationUrl ?? target, commentSignal(context))
@@ -539,12 +542,12 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
       if (action.kind === "quote" && action.action !== "preview") {
         if (info.type !== "video") return
         if (action.action === "cover") return sendOriginals(context, info.cover ? [info.cover] : [], service.fetch)
-        if (action.action === "description") return info.description.trim().slice(0, 3000) || "这条 B 站视频没有简介。"
+        if (action.action === "description") return info.description.trim().slice(0, 3000) || $t("services.bilibili.video-command.text_2dc5fa6ff0")
         return
       }
       await renderInfo(context, service, info, action.kind !== "quote")
     } catch (error) {
-      if (!commentSignal(context)?.aborted) await reportError(context, action.kind === "watch" ? "B站直看" : "B站解析", error)
+      if (!commentSignal(context)?.aborted) await reportError(context, action.kind === "watch" ? $t("services.bilibili.video-command.text_7228d2c9ff") : $t("services.bilibili.video-command.text_3e8934a646"), error)
     }
     return []
   }

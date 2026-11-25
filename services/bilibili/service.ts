@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
@@ -322,14 +325,14 @@ export class BilibiliService {
     if (/^av0*[1-9]\d{0,19}$/i.test(text)) return { type: "video", aid: text.slice(2).replace(/^0+/u, "") }
     const bare = bareB23Target.exec(text)
     const parsed = parseBiliUrl(bare ? "https://b23.tv/" + bare[1] : text)
-    if (!parsed) throw new Error("不支持的 B 站链接")
+    if (!parsed) throw new Error($t("services.bilibili.service.text_554197ad15"))
     const url = await this.resolveShortLink(parsed, signal)
     const roomId = biliLiveRoomId(url)
     if (roomId) return { type: "live", roomId }
-    if (!isBiliVideoPage(url)) throw new Error("不支持的 B 站链接")
+    if (!isBiliVideoPage(url)) throw new Error($t("services.bilibili.service.text_554197ad15"))
     const [, , token] = url.pathname.split("/")
     const page = biliPartNumber(url)
-    if (page === null) throw new Error("B 站分 P 编号无效")
+    if (page === null) throw new Error($t("services.bilibili.service.text_17fa80d8c2"))
     const picked = page === undefined ? {} : { page }
     if (token?.slice(0, 2).toLowerCase() === "bv") return { type: "video", bvid: "BV" + token.slice(2), ...picked }
     return { type: "video", aid: token!.slice(2).replace(/^0+/u, ""), ...picked }
@@ -348,7 +351,7 @@ export class BilibiliService {
       if (!next) break
       url = next
     }
-    throw new Error("B 站短链接未跳转至可识别的地址")
+    throw new Error($t("services.bilibili.service.text_7fe21c9c29"))
   }
 
   async getInfo(input: BilibiliInput, signal?: AbortSignal): Promise<VideoInfo | LiveInfo> {
@@ -378,14 +381,14 @@ export class BilibiliService {
     if (!alias || !record) return false
     try {
       const profile = await this.tuneRequest<TuneWeaveBiliProfile>("/v1/auth/session", { platform: "bilibili" }, signal)
-      if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
-      if (profile?.platform !== "bilibili" || profile.account !== alias) throw new Error("TuneWeave 未确认原 B 站账号。")
+      if (!await this.sameSelection(alias, record, signal)) throw new Error($t("services.bilibili.service.text_894274d346"))
+      if (profile?.platform !== "bilibili" || profile.account !== alias) throw new Error($t("services.bilibili.service.text_af966e8c11"))
       if (profile.authenticated === false) {
         if (!record.user_id || this.refreshed) return false
         return await this.refreshLogin(alias, record, signal)
       }
       if (profile.authenticated !== true || !profile.user_id || !/^[1-9]\d{0,19}$/u.test(profile.user_id) ||
-          record.user_id && record.user_id !== profile.user_id) throw new Error("TuneWeave 未确认原 B 站账号。")
+          record.user_id && record.user_id !== profile.user_id) throw new Error($t("services.bilibili.service.text_af966e8c11"))
       return true
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "authentication_required") return false
@@ -396,15 +399,15 @@ export class BilibiliService {
   private async refreshLogin(alias: string, record: StoredAccount, signal?: AbortSignal): Promise<boolean> {
     const originalUid = record.user_id
     if (typeof originalUid !== "string" || !/^[1-9]\d{0,19}$/u.test(originalUid)) return false
-    if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+    if (!await this.sameSelection(alias, record, signal)) throw new Error($t("services.bilibili.service.text_894274d346"))
     this.refreshed = true
     const { data, accountSelected } = await this.tuneweave.request<TuneWeaveBiliProfile>(
       "/v1/auth/session/refresh", { method: "POST", signal, redirect: "error",
         accountSelection: { platform: "bilibili", alias },
         body: { platform: "bilibili", account: alias, credential_mode: "server" } })
-    if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+    if (!await this.sameSelection(alias, record, signal)) throw new Error($t("services.bilibili.service.text_894274d346"))
     if (!accountSelected || data?.platform !== "bilibili" || data.account !== alias || typeof data.authenticated !== "boolean" ||
-        data.authenticated === true && data.user_id !== originalUid) throw new Error("TuneWeave 未确认原 B 站账号续期。")
+        data.authenticated === true && data.user_id !== originalUid) throw new Error($t("services.bilibili.service.text_6594d38005"))
     return data.authenticated === true
   }
 
@@ -415,20 +418,20 @@ export class BilibiliService {
     if (!alias) return this.tuneweave.request<Data>(endpoint, { signal, redirect: "error" })
     const accountSelection = { platform: "bilibili", alias }
     const verify = async () => {
-      if (!await this.sameSelection(alias, record, signal)) throw new Error("B 站原账号已变更，请重试。")
+      if (!await this.sameSelection(alias, record, signal)) throw new Error($t("services.bilibili.service.text_894274d346"))
     }
     const read = async () => {
       await verify()
       const result = await this.tuneweave.request<Data>(endpoint, { signal, redirect: "error", accountSelection })
       await verify()
-      if (!result.accountSelected) throw new Error("TuneWeave 未确认原 B 站账号。")
+      if (!result.accountSelected) throw new Error($t("services.bilibili.service.text_af966e8c11"))
       return result.data
     }
     try { return await read() }
     catch (error) {
       if (!record || this.refreshed || !(error && typeof error === "object" && "code" in error && error.code === "authentication_required")) throw error
       if (!await this.refreshLogin(alias, record, signal)) {
-        throw Object.assign(new Error("B 站原账号已失效，请重新扫码登录。"), { code: "authentication_required" })
+        throw Object.assign(new Error($t("services.bilibili.service.text_4224be5c04")), { code: "authentication_required" })
       }
       return read()
     }
@@ -439,24 +442,24 @@ export class BilibiliService {
     const route = `/v1/videos/${encodeURIComponent(ref)}`
     const detail = await this.tuneRequest<{ video?: TuneWeaveVideo }>(route, { kind: "video" }, signal)
     const data = detail?.video
-    if (!data?.ref) throw new Error("TuneWeave 视频详情不完整")
+    if (!data?.ref) throw new Error($t("services.bilibili.service.text_567244b07c"))
     const ext = data.extensions || {}
     const pages: TuneWeavePart[] = []
     const bvid = ext.bvid || target.bvid
     const resolvedRef = bvid ? `bilibili:bvid:${bvid}` : ref
     if (bvid && !/^BV[1-9A-Za-z]{10}$/u.test(bvid) || target.bvid && bvid !== target.bvid ||
         target.aid && String(ext.aid) !== target.aid || data.ref !== resolvedRef) {
-      throw new Error("TuneWeave 视频编号与请求不匹配")
+      throw new Error($t("services.bilibili.service.text_eac51673a1"))
     }
     for (let offset = 0; offset < 10000; offset += 100) {
       const part = await this.tuneRequest<TuneWeavePart[]>(route + "/parts", { kind: "video", limit: "100", offset: String(offset) }, signal)
       pages.push(...part)
       if (part.length < 100) break
-      if (offset === 9900) throw new Error("视频分P数量超过限制")
+      if (offset === 9900) throw new Error($t("services.bilibili.service.text_f4d2e43338"))
     }
     const parsedPages = parseParts(pages, data.ref)
     const selected = target.page === undefined ? undefined : parsedPages.find(item => item.page === target.page)
-    if (target.page !== undefined && !selected) throw new Error("TuneWeave 未返回指定分 P")
+    if (target.page !== undefined && !selected) throw new Error($t("services.bilibili.service.text_4cceb5bed8"))
     const description = stripHtml(data.description)
     const ownerRef = data.creators?.[0]?.ref ?? data.creators?.[0]?.resource_ref
     return {
@@ -494,17 +497,17 @@ export class BilibiliService {
 
   async getLiveInfo(roomId: string | number, signal?: AbortSignal): Promise<LiveInfo> {
     const json = await this.requestJson(`${LIVE_INFO_API}?room_id=${encodeURIComponent(roomId)}`, signal)
-    if (json.code !== 0) throw new Error(json.message || `B站直播接口错误 ${json.code}`)
+    if (json.code !== 0) throw new Error(json.message || $t("services.bilibili.service.text_5b89a115b8", { "code": json.code }))
     const data = json.data || {}
     return {
       type: "live",
-      title: stripHtml(data.title || `直播间 ${roomId}`),
+      title: stripHtml(data.title || $t("services.bilibili.service.text_3de263cd42", { "roomId": roomId })),
       roomId: String(roomId),
       url: `https://live.bilibili.com/${roomId}`,
       playerUrl: livePlayerUrl(roomId),
       cover: normalizeBiliImage(data.user_cover || data.keyframe || ""),
       owner: data.uname || "",
-      liveStatus: data.live_status === 1 ? "直播中" : "未开播",
+      liveStatus: data.live_status === 1 ? $t("services.bilibili.service.text_6c50a8522a") : $t("services.bilibili.service.text_56210666b5"),
       online: data.online || 0,
       desc: data.area_name ? `${data.parent_area_name || ""} · ${data.area_name}` : "",
     }
@@ -565,7 +568,7 @@ export class BilibiliService {
     if (!plan.ok) return plan
     const task = await createMediaTask(this.tasksDir)
     try {
-      await emitBiliEvent(hooks, { type: "download-start", message: `开始下载 ${plan.info.bvid}，分P策略：${plan.policy}。` })
+      await emitBiliEvent(hooks, { type: "download-start", message: $t("services.bilibili.service.text_57adba479b", { "bvid": plan.info.bvid, "policy": plan.policy }) })
       let files = await this.downloadWithTuneWeave(plan, download, task.dir, hooks)
       hooks.signal?.throwIfAborted()
       let archiveName: string | undefined
@@ -588,7 +591,7 @@ export class BilibiliService {
     } catch (error) {
       await releaseMediaTask(this.tasksDir, task.dir).catch(cleanupError => {
         const { logger } = globalThis as typeof globalThis & { logger?: { warn?: (message: string) => void } }
-        logger?.warn?.(`[media] B 站任务清理失败： ${cleanupError.message}`)
+        logger?.warn?.($t("services.bilibili.service.text_973851f86c", { "message": cleanupError.message }))
       })
       throw error
     }
@@ -596,22 +599,22 @@ export class BilibiliService {
 
   async downloadWithTuneWeave(plan: DownloadPlan, download: BilibiliDownloadConfig, workDir: string, hooks: DownloadHooks = {}): Promise<string[]> {
     const ffmpeg = await resolveCommandPath("ffmpeg", download.tools_path)
-    if (!ffmpeg) throw new Error("未找到 FFmpeg，请先初始化工具环境")
+    if (!ffmpeg) throw new Error($t("services.bilibili.service.text_b30846fbc0"))
     const files: string[] = []
     const signal = hooks.signal
     const processOptions = { cwd: workDir, spawnImpl: this.spawn, timeoutMs: download.timeout_ms, signal }
     for (const page of plan.pages) {
       if (!/^\d+$/.test(String(page.cid)) || !Number.isSafeInteger(page.page) || page.page < 1) {
-        throw new Error("TuneWeave 视频分 P 编号无效")
+        throw new Error($t("services.bilibili.service.text_a2f120acdc"))
       }
       const manifest = await this.tuneRequest<TuneWeavePlayback>(`/v1/videos/${encodeURIComponent(plan.info.ref)}/playback`,
         { kind: "video", part: page.partId || "cid:" + page.cid }, signal)
       if (manifest.video_ref !== plan.info.ref || manifest.part_ref !== "bilibili:cid:" + page.cid) {
-        throw new Error("TuneWeave 播放来源与所选分 P 不匹配")
+        throw new Error($t("services.bilibili.service.text_8d6a3396fb"))
       }
       const stem = `video-${plan.info.bvid || "av" + plan.info.aid}-P${page.page}-${page.cid}`, output = path.join(workDir, stem + ".mp4")
       const options = { fetch: this.fetch, headers: manifest.headers || {}, timeoutMs: download.timeout_ms, maxBytes: download.max_estimated_size_mb > 0 ? download.max_estimated_size_mb * 1024 * 1024 : 0, concurrency: download.concurrency, signal }
-      await emitBiliEvent(hooks, { type: "download-part", message: `正在下载 P${page.page}，JS 并发 ${download.concurrency}。` })
+      await emitBiliEvent(hooks, { type: "download-part", message: $t("services.bilibili.service.text_10ef03b59a", { "page": page.page, "concurrency": download.concurrency }) })
       if (manifest.video_tracks?.length) {
         const videos = [...manifest.video_tracks].sort((a, b) => b.id - a.id || Number(a.codec_id !== 7) - Number(b.codec_id !== 7))
         const lowestQuality = videos.at(-1)!.id
@@ -637,8 +640,8 @@ export class BilibiliService {
         await fs.writeFile(list, paths.map(file => "file '" + path.basename(file) + "'").join("\n"))
         await runMediaProcess(ffmpeg, ["-nostdin", "-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", output], processOptions)
         await Promise.all([...paths, list].map(file => fs.rm(file, { force: true })))
-      } else throw new Error("TuneWeave 未返回可下载视频流")
-      if (!(await fs.stat(output)).size) throw new Error("合流结果为空")
+      } else throw new Error($t("services.bilibili.service.text_6563bbb6ae"))
+      if (!(await fs.stat(output)).size) throw new Error($t("services.bilibili.service.text_b76472ba23"))
       files.push(output)
     }
     return files
@@ -658,12 +661,12 @@ export class BilibiliService {
       method: "POST", body: { platform: "bilibili", account: this.pendingAlias, credential_mode: "server" },
       signal, redirect: "error",
     })
-    if (!qr.transaction_id || !qr.url) throw new Error("B站二维码创建失败")
+    if (!qr.transaction_id || !qr.url) throw new Error($t("services.bilibili.service.text_f47e9ac51c"))
     return { url: qr.url, qrcodeKey: qr.transaction_id, qrDataUrl: qr.image_data_url || await QRCode.toDataURL(qr.url) }
   }
 
   async waitQrLogin({ qrcodeKey, timeoutMs = 180000, pollMs = 3000, signal }: QrOptions = {}) {
-    if (!qrcodeKey) throw new Error("B站二维码事务缺失")
+    if (!qrcodeKey) throw new Error($t("services.bilibili.service.text_acb2586067"))
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       signal?.throwIfAborted()
@@ -672,7 +675,7 @@ export class BilibiliService {
         const alias = this.pendingAlias || "lotus-bilibili"
         const profile = result.profile
         if (!profile?.authenticated || (profile.platform && profile.platform !== "bilibili") ||
-            (profile.account && profile.account !== alias)) throw new Error("B站登录身份未核实")
+            (profile.account && profile.account !== alias)) throw new Error($t("services.bilibili.service.text_49e80aa4f4"))
         const account = { tuneweave_account: alias, saved_at: formatLocalIso(this.now()), source: "tuneweave",
           ...(typeof profile.user_id === "string" && /^[1-9]\d{0,19}$/u.test(profile.user_id) && { user_id: profile.user_id }) }
         await this.saveAccount(account, { signal })
@@ -681,10 +684,10 @@ export class BilibiliService {
         this.refreshed = false
         return { ok: true as const, account }
       }
-      if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error("B站二维码已过期或需要附加验证，请重新登录")
+      if (["expired", "failed", "verification_required"].includes(result.state)) throw new Error($t("services.bilibili.service.text_5316da6dc1"))
       await delay(pollMs, undefined, { signal })
     }
-    throw new Error("B站二维码登录超时")
+    throw new Error($t("services.bilibili.service.text_7d78573a3e"))
   }
 
   async loadAccount() {
@@ -695,7 +698,7 @@ export class BilibiliService {
     const saved = await readAccountFile(this.accountFile)
     if (saved) return configuredAccount(saved)
     if (snapshots.some(snapshot => snapshot.status === "rejected")) {
-      throw new Error("无法读取旧 B 站账号记录，请从当前部署重新登录。")
+      throw new Error($t("services.bilibili.service.text_88231a541e"))
     }
     const previous = snapshots.flatMap(snapshot => {
       const account = snapshot.status === "fulfilled" && configuredAccount(snapshot.value)
@@ -703,13 +706,13 @@ export class BilibiliService {
     })
     const first = previous[0]
     if (first && previous.some(account => !sameAccount(first, account))) {
-      throw new Error("两处旧 B 站账号记录不一致，请从当前部署重新登录。")
+      throw new Error($t("services.bilibili.service.text_b3de4de080"))
     }
     return first ?? null
   }
 
   async saveAccount(account: BilibiliAccount = {}, { signal }: { signal?: AbortSignal } = {}) {
-    if (!account.cookie && !account.tuneweave_account) throw new Error("B站账号登录信息为空")
+    if (!account.cookie && !account.tuneweave_account) throw new Error($t("services.bilibili.service.text_5fd2d95181"))
     signal?.throwIfAborted()
     await fs.mkdir(path.dirname(this.accountFile), { recursive: true, mode: 0o700 })
     const data = YAML.stringify({
@@ -748,11 +751,11 @@ export class BilibiliService {
     signal.throwIfAborted()
     if (!response.ok) {
       await response.body?.cancel()
-      throw new Error(`B站请求失败 HTTP ${response.status}`)
+      throw new Error($t("services.bilibili.service.text_8e6ddbb1ff", { "status": response.status }))
     }
     const json = await response.json().catch(() => null) as LiveRoomResponse | null
     signal.throwIfAborted()
-    if (!json) throw new Error("B站直播接口返回无效响应")
+    if (!json) throw new Error($t("services.bilibili.service.text_695877517c"))
     return json
   }
 }
@@ -773,16 +776,16 @@ async function readAccountFile(file: string): Promise<StoredAccount | undefined>
   if (!handle) return
   try {
     const stat = await handle.stat()
-    if (!stat.isFile() || stat.size > 64 * 1024) throw new Error("B站账号记录格式无效")
+    if (!stat.isFile() || stat.size > 64 * 1024) throw new Error($t("services.bilibili.service.text_a9c87a52f8"))
     const data: unknown = YAML.parse(await handle.readFile("utf8")) ?? {}
     if (!data || typeof data !== "object" || Array.isArray(data) ||
         ("cookie" in data && data.cookie != null && typeof data.cookie !== "string") ||
         ("tuneweave_account" in data && data.tuneweave_account != null && typeof data.tuneweave_account !== "string")) {
-      throw new Error("B站账号记录格式无效")
+      throw new Error($t("services.bilibili.service.text_a9c87a52f8"))
     }
     return data
   } catch {
-    throw new Error("B站账号记录格式无效")
+    throw new Error($t("services.bilibili.service.text_a9c87a52f8"))
   } finally {
     await handle.close()
   }
@@ -816,21 +819,21 @@ export function extractLoginCookie(data: { url?: string } = {}, headers: CookieH
 export function buildBilibiliItems(info: LiveInfo | (Omit<VideoInfo, "pages"> & { pages?: VideoPage[] | number })) {
   if (info.type === "live") {
     return [
-      { label: "类型", value: "直播" },
-      { label: "主播", value: info.owner || "未知" },
-      { label: "状态", value: info.liveStatus },
-      { label: "热度", value: formatNumber(info.online) },
-      { label: "链接", value: info.url },
-      { label: "播放器", value: info.playerUrl || livePlayerUrl(info.roomId) },
+      { label: $t("services.bilibili.service.text_ba40014ff4"), value: $t("services.bilibili.service.text_e472b37cf9") },
+      { label: $t("services.bilibili.service.text_a41fab00b5"), value: info.owner || $t("services.bilibili.service.text_4d8c1c5b42") },
+      { label: $t("services.bilibili.service.text_6320b4a872"), value: info.liveStatus },
+      { label: $t("services.bilibili.service.text_095f31ef0d"), value: formatNumber(info.online) },
+      { label: $t("services.bilibili.service.text_305378ddd2"), value: info.url },
+      { label: $t("services.bilibili.service.text_deed64d846"), value: info.playerUrl || livePlayerUrl(info.roomId) },
     ]
   }
   return [
-    { label: "类型", value: "视频" },
-    { label: "UP", value: info.owner || "未知" },
-    { label: "时长", value: formatDuration(info.duration) },
-    { label: "播放", value: formatNumber(info.stat?.view || 0) },
-    { label: "分P", value: String(Array.isArray(info.pages) ? info.pages.length : info.pages || 1) },
-    { label: "链接", value: info.url },
+    { label: $t("services.bilibili.service.text_ba40014ff4"), value: $t("services.bilibili.service.text_c20f7618d3") },
+    { label: "UP", value: info.owner || $t("services.bilibili.service.text_4d8c1c5b42") },
+    { label: $t("services.bilibili.service.text_04a95e0654"), value: formatDuration(info.duration) },
+    { label: $t("services.bilibili.service.text_c3396195e9"), value: formatNumber(info.stat?.view || 0) },
+    { label: $t("services.bilibili.service.text_b073431962"), value: String(Array.isArray(info.pages) ? info.pages.length : info.pages || 1) },
+    { label: $t("services.bilibili.service.text_305378ddd2"), value: info.url },
   ]
 }
 
@@ -850,7 +853,7 @@ export function formatBilibiliPreviewText(info: VideoPreview) {
   const seconds = Math.floor(info.duration)
   const duration = Number.isFinite(seconds) && seconds > 0
     ? `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}` : ""
-  const copyright = info.copyright === "original" ? "原创" : info.copyright === "repost" ? "转载" : undefined
+  const copyright = info.copyright === "original" ? $t("services.bilibili.service.text_91ba3a619f") : info.copyright === "repost" ? $t("services.bilibili.service.text_f11331ce55") : undefined
   const characters = Array.from(info.description || info.desc || "")
   const description = characters.length > 2000 ? characters.slice(0, 2000).join("") + "..." : characters.join("")
   const statistics = (groups: [keyof PreviewStats, string][]) => groups.map(([key, label]) => {
@@ -858,19 +861,19 @@ export function formatBilibiliPreviewText(info: VideoPreview) {
     return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? formatNumber(value) + label : ""
   }).filter(Boolean).join(" • ")
   const fields = [
-    ["bvid", info.bvid], ["分区", category], ["投稿", formatPreviewTime(info.createdAt)], ["发布", formatPreviewTime(info.publishedAt)],
-    ["时长", duration], ["创作", copyright], ["UP主", info.owner], ["UID", info.ownerId], ["视频简介", description && "\n" + description],
+    ["bvid", info.bvid], [$t("services.bilibili.service.text_5d6f637daa"), category], [$t("services.bilibili.service.text_d627c37789"), formatPreviewTime(info.createdAt)], [$t("services.bilibili.service.text_b61f333b91"), formatPreviewTime(info.publishedAt)],
+    [$t("services.bilibili.service.text_04a95e0654"), duration], [$t("services.bilibili.service.text_685ad54102"), copyright], [$t("services.bilibili.service.text_6b072def69"), info.owner], ["UID", info.ownerId], [$t("services.bilibili.service.text_4422cb288c"), description && "\n" + description],
   ]
   return [info.title, ...fields.filter(([,value])=>value).map(([label,value])=>label+"："+value),
-    statistics([["view","播放"],["danmaku","弹幕"],["reply","评论"]]),
-    statistics([["like","点赞"],["coin","投币"],["favorite","收藏"]]),
-    statistics([["share","分享"]]), info.url && `链接：${info.url}`,
+    statistics([["view",$t("services.bilibili.service.text_c3396195e9")],["danmaku",$t("services.bilibili.service.text_2591ec6870")],["reply",$t("services.bilibili.service.text_6849b8254d")]]),
+    statistics([["like",$t("services.bilibili.service.text_aced5d7f9f")],["coin",$t("services.bilibili.service.text_9e7e005e15")],["favorite",$t("services.bilibili.service.text_60a53514eb")]]),
+    statistics([["share",$t("services.bilibili.service.text_7e564575eb")]]), info.url && $t("services.bilibili.service.text_331104e391", { "url": info.url }),
   ].filter(Boolean).join("\n")
 }
 
 export function formatNumber(value?: string | number) {
   const number = Number(value || 0)
-  if (number >= 10000) return `${(number / 10000).toFixed(1)}万`
+  if (number >= 10000) return $t("services.bilibili.service.text_b2e8dfa288", { "value1": (number / 10000).toFixed(1) })
   return String(number)
 }
 
@@ -931,7 +934,7 @@ function parseParts(rows: readonly TuneWeavePart[], ref: string): VideoPage[] {
     const cid = /^cid:([1-9]\d{0,19})$/u.exec(part.id)?.[1]
     const { page } = part
     if (!cid || !Number.isSafeInteger(page) || page < 1 || part.video_ref !== ref || seenPages.has(page) || seenCids.has(cid)) {
-      throw new Error("TuneWeave 返回不匹配或重复的 B 站分 P")
+      throw new Error($t("services.bilibili.service.text_daa20cf022"))
     }
     seenPages.add(page)
     seenCids.add(cid)

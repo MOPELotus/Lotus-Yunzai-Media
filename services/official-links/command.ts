@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { renderTemplate } from "../../core/render/service.ts"
@@ -54,12 +57,12 @@ export function createOfficialLinkPreview({
         enabled = options[input.platform] && (context.message_type !== "private" || options.private)
         if (!enabled || active.aborted) return
         if (trust && !context.isMaster && !options[officialLinkTrustFields[trust]].includes(String(context.user_id))) {
-          if (trust === "x") return "你没有权限使用此命令。"
+          if (trust === "x") return $t("services.official-links.command.text_64938f18f7")
           return
         }
         const preview = await getOfficialLink(input, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)]))
         if (active.aborted) return
-        if (!preview) return `${platform} 暂无法读取公开预览。\n${input.link}`
+        if (!preview) return $t("services.official-links.command.text_db4d59eabd", { "platform": platform, "link": input.link })
         const { link = input.link, ...content } = preview
         const card = { ...content, id: `${platform} · ${input.id}`, type: "public-link", showStats: false }
         const limit = context.inlineImageByteLimit ?? Infinity
@@ -71,7 +74,7 @@ export function createOfficialLinkPreview({
         if (image && image.length <= limit) return [{ type: "image", file: image }, { type: "text", text: link }]
         return [preview.title, preview.owner, preview.desc, link].filter(Boolean).join("\n")
       } catch {
-        if (enabled && !active.aborted) return `${platform} 暂无法读取公开预览。\n${input.link}`
+        if (enabled && !active.aborted) return $t("services.official-links.command.text_db4d59eabd", { "platform": platform, "link": input.link })
       }
     },
   }

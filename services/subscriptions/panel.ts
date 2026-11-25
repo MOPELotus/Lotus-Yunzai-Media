@@ -1,15 +1,18 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { fileURLToPath } from "node:url"
 import { isDeepStrictEqual } from "node:util"
 import { lockFile } from "../../../../lib/file-lock.ts"
 import { parseFriendList, type OwnerContactListSession } from "../../../../lib/owner-contact-list.ts"
 import { readPanelJson } from "../../../../lib/panel.ts"
-import { biliTypes, createBiliProvider } from "./bilibili/index.ts"
+import { biliTypesLabels as biliTypes, createBiliProvider } from "./bilibili/index.ts"
 import {
   createSubscriptionConfig, numericId, ownerRoutes, subscriptionRouteKey, SubscriptionRouteConflict, SubscriptionRouteUnauthorized,
   type EditableSubscriptionRoute,
 } from "./config.ts"
 import { subscriptionSession } from "./session.ts"
-import { createWeiboProvider, weiboTypes } from "./weibo/index.ts"
+import { createWeiboProvider, weiboTypesLabels as weiboTypes } from "./weibo/index.ts"
 import type { SubscriptionPlatform, SubscriptionProvider, SubscriptionRedis } from "./types.ts"
 
 const platforms = { bilibili: biliTypes, weibo: weiboTypes }
@@ -49,9 +52,9 @@ export function panelMediaSubscriptionSettings(root: URL, platform: Subscription
   const provider = providerOptions ?? (platform === "bilibili" ? createBiliProvider({ session }) : createWeiboProvider({ session }))
   const labels = platforms[platform]
   const fields = [{
-    key: "routes", label: "当前机器人的订阅名单", type: "json",
-    hint: "每条填写 kind（group 群或 private 本人私聊）、chat（QQ 或群号）、uid（平台 UID）、types（动态类别）。" +
-      "账号标识请用引号括起。types 填 [] 表示全部动态。支持的类别有 " +
+    key: "routes", label: $t("services.subscriptions.panel.text_95465a8060"), type: "json",
+    hint: $t("services.subscriptions.panel.text_99e66fa99f") +
+      $t("services.subscriptions.panel.text_aa8f902fbf") +
       Object.entries(labels).map(([key, label]) => `${label} ${key}`).join("、") + "。",
   }]
   const output = (routes: readonly EditableSubscriptionRoute[]) => Response.json({ fields, values: { routes } })
@@ -64,7 +67,7 @@ export function panelMediaSubscriptionSettings(root: URL, platform: Subscription
     const authorized = () => !!gateway && !gateway.signal.aborted && !request.signal.aborted &&
       stillAuthorized() && gateway.authorized()
     if (!gateway || !bot || !authorized()) {
-      return Response.json({ message: "请通过当前机器人私聊签发的面板链接登录，并保持机器人在线。" }, { status: 403 })
+      return Response.json({ message: $t("services.subscriptions.panel.text_c085c4d105") }, { status: 403 })
     }
     const signal = AbortSignal.any([request.signal, gateway.signal, AbortSignal.timeout(15_000)])
     try {
@@ -81,7 +84,7 @@ export function panelMediaSubscriptionSettings(root: URL, platform: Subscription
       const nextKeys = new Set(next.map(subscriptionRouteKey))
       const removed = previous.filter(route => !nextKeys.has(subscriptionRouteKey(route)))
       if ([...changed, ...removed].some(route => route.kind === "private" && route.chat !== String(gateway.ownerId))) {
-        return Response.json({ message: "私聊订阅只能修改当前登录主人的本人会话。" }, { status: 403 })
+        return Response.json({ message: $t("services.subscriptions.panel.text_8707c39b88") }, { status: 403 })
       }
       if (changed.some(({ types }) => types.some(type => !Object.hasOwn(labels, type)) || new Set(types).size !== types.length)) {
         return new Response(null, { status: 400 })
@@ -93,10 +96,10 @@ export function panelMediaSubscriptionSettings(root: URL, platform: Subscription
         verifyFriends ? gateway.friends(signal).then(parseFriendList).catch(() => undefined) : [],
       ])
       if (!authorized()) return new Response(null, { status: 403 })
-      if (!groups || !friends || signal.aborted) return unavailable("暂时无法核对机器人的群和好友，请稍后重试。")
+      if (!groups || !friends || signal.aborted) return unavailable($t("services.subscriptions.panel.text_3a1dbf36b6"))
       const allowed = { group: new Set(groups.map(({ id }) => String(id))), private: new Set(friends.map(({ id }) => String(id))) }
       if (changed.some(route => !allowed[route.kind].has(route.chat))) {
-        return Response.json({ message: "修改的目标须是当前机器人所在的群或已添加的好友。" }, { status: 403 })
+        return Response.json({ message: $t("services.subscriptions.panel.text_604f72efa9") }, { status: 403 })
       }
       const added = new Set(changed.filter(route => !old.has(subscriptionRouteKey(route))).map(route => route.uid))
       const names = new Map<string, string>()
@@ -104,11 +107,11 @@ export function panelMediaSubscriptionSettings(root: URL, platform: Subscription
         const result = await provider.profile(uid, { signal }).then(profile => ({ profile })).catch(() => undefined)
         if (!authorized()) return new Response(null, { status: 403 })
         if (!result || signal.aborted || result.profile?.verificationFailure) {
-          return unavailable(`暂时无法核验 UID ${uid} 的账号，请稍后重试。`)
+          return unavailable($t("services.subscriptions.panel.text_b8189cf5dd", { "uid": uid }))
         }
         const { profile } = result
         if (!profile || profile.uid !== uid || !profile.name.trim()) {
-          return Response.json({ message: `未找到 UID ${uid} 的公开资料。` }, { status: 400 })
+          return Response.json({ message: $t("services.subscriptions.panel.text_6a99163572", { "uid": uid }) }, { status: 400 })
         }
         names.set(uid, profile.name)
       }

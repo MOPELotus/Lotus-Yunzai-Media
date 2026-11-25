@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 export type ExternalMusicShare = {
   readonly platform: "apple" | "spotify"
@@ -42,7 +45,7 @@ function field(input: unknown) {
 async function boundedBody(response: Response, limit: number, signal: AbortSignal) {
   if (!response.ok || !response.body || Number(response.headers.get("content-length")) > limit) {
     await response.body?.cancel().catch(() => {})
-    throw new Error("原平台分享页暂时不可用。")
+    throw new Error($t("services.music.external-share.text_eaa0c2d34d"))
   }
   const decoder = new TextDecoder()
   let size = 0
@@ -50,7 +53,7 @@ async function boundedBody(response: Response, limit: number, signal: AbortSigna
   for await (const chunk of response.body) {
     signal.throwIfAborted()
     size += chunk.byteLength
-    if (size > limit) throw new Error("原平台分享页超过读取限制。")
+    if (size > limit) throw new Error($t("services.music.external-share.text_970eeeff1f"))
     body += decoder.decode(chunk, { stream: true })
   }
   return body + decoder.decode()
@@ -83,5 +86,5 @@ export async function readExternalMusicShare(
     if (title && data.provider_name === "Spotify" && embed?.origin === "https://open.spotify.com" &&
         embed.pathname === "/embed/track/" + share.id) return { title, url: share.url }
   }
-  throw new Error("原平台返回的单曲编号无法核实。")
+  throw new Error($t("services.music.external-share.text_6c81748cdc"))
 }

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { createHash } from "node:crypto"
 import { WEB_UA } from "./signature.ts"
 
@@ -17,7 +20,7 @@ const hashText = (text: string, seed = 0, xor = true) => {
 
 /** Page challenge signature, computed locally without running downloaded scripts. */
 export function generateNonceSignature(nonce: string, { url = "https://www.douyin.com/", userAgent = WEB_UA, now = Date.now(), profile = NONCE_PROFILE } = {}) {
-  if (!/^[a-f0-9]{21}$/i.test(nonce) || !Number.isSafeInteger(now) || now <= 0) throw new Error("抖音页面签名参数无效")
+  if (!/^[a-f0-9]{21}$/i.test(nonce) || !Number.isSafeInteger(now) || now <= 0) throw new Error($t("services.douyin.guest-signature.text_5030f58c54"))
   const location = new URL(url)
   const seconds = Math.floor(now / 1000)
   const route = hashText(`${seconds}${location.host}${location.pathname}`) % 65521
@@ -39,7 +42,7 @@ export function generateNonceSignature(nonce: string, { url = "https://www.douyi
 
 /** The second signing layer covers the exact serialized query, including a_bogus. */
 export function signVisitorUrl(input: string, uifid: string, { now = Date.now() } = {}) {
-  if (typeof uifid !== "string" || !uifid || /[;\r\n]/.test(uifid) || !Number.isSafeInteger(now) || now <= 0) throw new Error("抖音游客签名参数无效")
+  if (typeof uifid !== "string" || !uifid || /[;\r\n]/.test(uifid) || !Number.isSafeInteger(now) || now <= 0) throw new Error($t("services.douyin.guest-signature.text_3cec633a2b"))
   const url = new URL(input)
   const stamp = String(Math.floor(now / 1000))
   url.searchParams.delete("x-secsdk-web-signature")

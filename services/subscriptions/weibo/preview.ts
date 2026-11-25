@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../../packages/i18n/index.ts";
+import messageCatalog from "../../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { nativeImageRasterScale } from "@lotus-yunzai/skia"
 import type { MessageFallbackContext } from "../../../../../lib/commands.ts"
 import { segment, type MessageReply } from "../../../../../lib/messages.ts"
@@ -5,10 +8,10 @@ import { renderSourceCard } from "../../../core/render/source-cards.ts"
 import { buildMediaMessageText, isMediaCommandText } from "../../media/message.ts"
 import type { SubscriptionSettings } from "../config.ts"
 import { makeDynamicMessages } from "../render.ts"
-import { fetchPublicWeiboComments, fetchPublicWeiboPost, weiboTypes, type WeiboPostIdentity, type WeiboPublicComment } from "./index.ts"
+import { fetchPublicWeiboComments, fetchPublicWeiboPost, weiboTypesLabels as weiboTypes, type WeiboPostIdentity, type WeiboPublicComment } from "./index.ts"
 
 const feature = "[media] 微博解析"
-const renderer = { id: "weibo", label: "微博", typeNames: weiboTypes } as const
+const renderer = { id: "weibo", label: $t("services.subscriptions.weibo.preview.text_0fc69798d8"), typeNames: weiboTypes } as const
 const hostnames = new Set(["weibo.com", "www.weibo.com", "m.weibo.cn"])
 const link = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])https?:\/\/[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
 const commentTime = new Intl.DateTimeFormat("zh-CN", {
@@ -17,7 +20,7 @@ const commentTime = new Intl.DateTimeFormat("zh-CN", {
 })
 
 function commentLine({ author, text, likes, createdAt, source }: WeiboPublicComment) {
-  const details = [likes === undefined ? undefined : `赞 ${likes}`,
+  const details = [likes === undefined ? undefined : $t("services.subscriptions.weibo.preview.text_8a5362b07e", { "likes": likes }),
     createdAt === undefined ? undefined : commentTime.format(createdAt * 1000), source].filter(Boolean).join(" · ")
   return [author, text, details].filter(Boolean).join("\n")
 }
@@ -52,7 +55,7 @@ export function createWeiboPreview({ settings, signal, fetchPost = fetchPublicWe
     const rows = comments.slice(0, 20).map(commentLine)
     for (let index = 0; index < rows.length && !active?.aborted; index += 5) {
       const items = rows.slice(index, index + 5)
-      const title = `微博热评 · ${index + 1}–${index + items.length} / ${rows.length}`
+      const title = $t("services.subscriptions.weibo.preview.text_539a8267ee", { "value1": index + 1, "value2": index + items.length, "length": rows.length })
       let file: Uint8Array | undefined
       // The shared renderer already applies the low preset to the requested canvas size.
       const scales = nativeImageRasterScale() === 4 ? [4, 2] : [4]
@@ -83,7 +86,7 @@ export function createWeiboPreview({ settings, signal, fetchPost = fetchPublicWe
         if (!options.parseWeiboLink || (context.message_type === "private" && !options.parseWeiboPrivate) || active?.aborted) return
         const post = await fetchPost(input.target, active)
         if (active?.aborted) return
-        if (!post) return `微博暂时无法匿名读取这条动态，请打开原文查看。\n${input.link}`
+        if (!post) return $t("services.subscriptions.weibo.preview.text_adc2d2cc57", { "link": input.link })
         const comments = options.weiboComments && post.id && post.activity?.comments !== "0"
           ? fetchComments(post.id, active).catch(() => []) : []
         const messages = await render(renderer, post, options, { signal: active, inlineImageByteLimit: context.inlineImageByteLimit, preview: true })
@@ -94,7 +97,7 @@ export function createWeiboPreview({ settings, signal, fetchPost = fetchPublicWe
         if (nodes.length > 1) return { type: "forward" as const, nodes }
         return nodes[0]
       } catch {
-        if (!active?.aborted) return `暂时无法生成微博预览，请打开原文查看。\n${input.link}`
+        if (!active?.aborted) return $t("services.subscriptions.weibo.preview.text_c62eceb6ab", { "link": input.link })
       }
     },
   }

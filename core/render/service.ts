@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { renderPassportQrCard, type PassportQrCardModel } from "@lotus-yunzai/skia/passport-qr"
 import { formatLocalDateTime } from "../time.ts"
 import { renderMode, renderSourceCard, type SourceTemplate, type SourceCard, type RenderOptions } from "./source-cards.ts"
@@ -10,7 +13,7 @@ export async function renderTemplate(template: "qr-login" | SourceTemplate, data
   const generatedAt = formatLocalDateTime()
   if (template === "qr-login") {
     const prefix = "data:image/png;base64,"
-    if (!("qrDataUrl" in data) || !data.qrDataUrl.startsWith(prefix)) throw new Error("B 站二维码图像不是 PNG。")
+    if (!("qrDataUrl" in data) || !data.qrDataUrl.startsWith(prefix)) throw new Error($t("core.render.service.text_d9ff68b84f"))
     const bytes = Buffer.from(data.qrDataUrl.slice(prefix.length), "base64")
     return (await renderPassportQrCard({ ...data, qrPng: bytes, generatedAt }, {
       mode: options.mode ?? renderMode(),

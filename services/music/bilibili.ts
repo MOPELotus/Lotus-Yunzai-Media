@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { TuneWeaveService } from "../tuneweave/service.ts"
 import type { MusicStream, MusicTrack } from "./service.ts"
 
@@ -45,7 +48,7 @@ export function isBilibiliAudioCdn(url: URL, partRef?: string) {
 export async function searchBilibiliAudio(api: VideoApi, keyword: string, limit: number, offset: number, signal?: AbortSignal): Promise<MusicTrack[]> {
   const query = new URLSearchParams({ platform: "bilibili", type: "video", q: keyword, limit: String(limit), offset: String(offset) })
   const results = await api.request<{ type: string; data?: Video }[]>(`/v1/search?${query}`, { signal, redirect: "error" })
-  if (!Array.isArray(results)) throw new Error("B 站视频搜索结果无法核实。")
+  if (!Array.isArray(results)) throw new Error($t("services.music.bilibili.text_af247c2432"))
   return results.flatMap(({ type, data }) => {
     const bvid = data?.extensions?.bvid
     if (type !== "video" || !bvid || !bvidPattern.test(bvid) || data.platform !== "bilibili" ||
@@ -60,7 +63,7 @@ export async function searchBilibiliAudio(api: VideoApi, keyword: string, limit:
 
 export async function resolveBilibiliAudio(api: VideoApi, track: MusicTrack, signal?: AbortSignal): Promise<MusicStream> {
   const bvid = String(track.id)
-  const unavailable = () => new Error("没有可核实的完整公开音轨，请打开 B 站原视频。")
+  const unavailable = () => new Error($t("services.music.bilibili.text_085eee8870"))
   if (!bvidPattern.test(bvid) || track.ref !== `bilibili:bvid:${bvid}`) throw unavailable()
   const route = `/v1/videos/${encodeURIComponent(track.ref)}`
   const request = { signal, redirect: "error" } as const

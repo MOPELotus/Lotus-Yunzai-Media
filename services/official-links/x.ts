@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 
 export interface OfficialXLink { readonly platform: "x"; readonly id: string; readonly link: string }
@@ -42,5 +45,5 @@ export async function xPreview(input: OfficialXLink, read: (url: URL) => Promise
   body.find("br").replaceWith(" ")
   const desc = text(body.text(), 1200)
   if (!desc) return
-  return { title: "X 公开帖", owner: `${name} (@${handle})`, desc, link: post.link }
+  return { title: $t("services.official-links.x.text_12b9bd641c"), owner: `${name} (@${handle})`, desc, link: post.link }
 }

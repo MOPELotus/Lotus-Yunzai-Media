@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { officialVideoGames, type OfficialVideoGame } from "./settings.ts"
 
@@ -43,13 +46,13 @@ function content(value: unknown) {
 async function readBounded(response: Response, limit: number) {
   if (!response.ok || response.redirected || Number(response.headers.get("content-length")) > limit || !response.body) {
     await response.body?.cancel()
-    throw new Error("米游社响应不可用。")
+    throw new Error($t("services.official-video.feed.text_b3d33c54ce"))
   }
   const chunks: Uint8Array[] = []
   let size = 0
   for await (const bytes of response.body) {
     size += bytes.length
-    if (size > limit) throw new Error("米游社响应超过大小限制。")
+    if (size > limit) throw new Error($t("services.official-video.feed.text_91088656b6"))
     chunks.push(bytes)
   }
   return Buffer.concat(chunks, size)
@@ -62,7 +65,7 @@ export function createOfficialVideoFeed(request: typeof fetch = fetch, now = Dat
     const raw = record(JSON.parse((await readBounded(await request(page, { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
       redirect: "error", credentials: "omit", headers: { Accept: "application/json" } }), maxResponse)).toString("utf8")))
     const rows = record(raw.data).list
-    if (raw.retcode !== 0 || !Array.isArray(rows)) throw new Error("米游社官号没有返回正常的视频列表。")
+    if (raw.retcode !== 0 || !Array.isArray(rows)) throw new Error($t("services.official-video.feed.text_75fa5af078"))
     const video: OfficialVideo[] = []
     for (const item of rows.slice(0, 20)) {
       const row = record(item)
@@ -80,7 +83,7 @@ export function createOfficialVideoFeed(request: typeof fetch = fetch, now = Dat
       if (!url) continue
       const cover = externalUrl(post.cover)
       const size = Number(resolution.size)
-      video.push({ game, id, published, title: clean(post.subject, 160) || "官方视频", text: content(post.structured_content),
+      video.push({ game, id, published, title: clean(post.subject, 160) || $t("services.official-video.feed.text_8f7fd8e5d5"), text: content(post.structured_content),
         url: url.href, quality: clean(resolution.label, 24), size: Number.isSafeInteger(size) && size > 0 ? size : undefined,
         cover: cover && covers.has(cover.hostname) ? cover : undefined })
     }
@@ -90,8 +93,8 @@ export function createOfficialVideoFeed(request: typeof fetch = fetch, now = Dat
   async function messages(video: OfficialVideo, originalCover: boolean, signal: AbortSignal): Promise<readonly MessageReply[]> {
     const game = officialVideoGames[video.game].name
     const header = [
-      `游戏：${game}`, `标题：${video.title}`, `发布时间：${date.format(new Date(video.published * 1000))}`,
-      `画质大小：${[video.quality, video.size && `约 ${Math.ceil(video.size / 1024 / 1024)} MB`].filter(Boolean).join(" · ") || "未提供"}`,
+      $t("services.official-video.feed.text_ef849705c2", { "game": game }), $t("services.official-video.feed.text_d3c3936c57", { "title": video.title }), $t("services.official-video.feed.text_141525e614", { "value1": date.format(new Date(video.published * 1000)) }),
+      $t("services.official-video.feed.text_f42c5ec3c0", { "value1": [video.quality, video.size && $t("services.official-video.feed.text_4746d8976a", { "value1": Math.ceil(video.size / 1024 / 1024) })].filter(Boolean).join(" · ") || $t("services.official-video.feed.text_756762e293") }),
     ].join("\n")
     let picture: Uint8Array | undefined
     if (video.cover) {
@@ -104,11 +107,11 @@ export function createOfficialVideoFeed(request: typeof fetch = fetch, now = Dat
       } catch { /* Keep the available metadata if the cover service is offline. */ }
     }
     signal.throwIfAborted()
-    const link = `\n视频链接：${video.url}`
+    const link = $t("services.official-video.feed.text_3f70220ab2", { "url": video.url })
     const short = Array.from(video.text).length < 600
-    const first: MessageReply = [header, ...(picture ? ["\n封面：\n", { type: "image" as const, file: picture }] : []), link,
-      ...(short && video.text ? [`\n文本内容：\n${video.text}`] : [])]
-    return short ? [first] : [first, `${game}文本内容：\n${video.text}`]
+    const first: MessageReply = [header, ...(picture ? [$t("services.official-video.feed.text_3b1901fe19"), { type: "image" as const, file: picture }] : []), link,
+      ...(short && video.text ? [$t("services.official-video.feed.text_43ae1edc0e", { "text": video.text })] : [])]
+    return short ? [first] : [first, $t("services.official-video.feed.text_7d69228331", { "game": game, "text": video.text })]
   }
 
   return { fetchGame, messages }

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
 import type { DouyinLiveTarget } from "./links.ts"
 
@@ -46,15 +49,15 @@ export async function readDouyinLive(target: DouyinLiveTarget,
   { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions = {}) {
   const { response, text } = await requestText(fetchImpl, target.url, { redirect: "error", credentials: "omit", signal },
     { timeoutMs, maxBytes: 2 * 1024 * 1024 })
-  if (!response.ok) throw new DouyinError("live_page_http", `抖音直播页面 HTTP ${response.status}`)
+  if (!response.ok) throw new DouyinError("live_page_http", $t("services.douyin.live.text_792d1cf43b", { "status": response.status }))
   const room = findRoom(text, target.id)
   const title = plain(room?.title, 120)
-  if (!room || !title) throw new DouyinError("live_room_unverified", "未能核实抖音直播间的公开资料")
+  if (!room || !title) throw new DouyinError("live_room_unverified", $t("services.douyin.live.text_41247c0443"))
   const finish = room.finishTime ?? 0
   const now = Date.now() / 1000
   const ended = room.status === 4 && Number.isSafeInteger(finish) && finish > 0 && finish >= (room.startTime ?? 0) && finish <= now
   const live = room.status === 2 && finish === 0
   const { userCount } = room
-  return { title, host: plain(room.owner?.nickname, 60), status: ended ? "直播已结束" : live ? "直播中" : "直播状态待确认",
+  return { title, host: plain(room.owner?.nickname, 60), status: ended ? $t("services.douyin.live.text_924840fb84") : live ? $t("services.douyin.live.text_6c50a8522a") : $t("services.douyin.live.text_f3feaa37c1"),
     viewers: typeof userCount === "number" && Number.isSafeInteger(userCount) && userCount >= 0 ? userCount : undefined }
 }

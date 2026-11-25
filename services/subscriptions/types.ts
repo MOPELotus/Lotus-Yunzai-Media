@@ -55,6 +55,7 @@ export interface SubscriptionProvider {
   readonly id: SubscriptionPlatform
   readonly label: string
   readonly typeNames: Readonly<Record<string, string>>
+  readonly commandTypeNames?: Readonly<Record<string, string>>
   fetchPosts(uid: string, options?: { signal?: AbortSignal; oldest?: number }): Promise<DynamicPost[]>
   fetchLatestAuthorVideo?(uid: string, signal?: AbortSignal): Promise<DynamicPost | undefined>
   profile(uid: string, options?: { signal?: AbortSignal; allowUnverified?: boolean }): Promise<SubscriptionProfile | undefined>

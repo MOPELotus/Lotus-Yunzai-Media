@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { FileHandle } from "node:fs/promises"
 
 export function discardBody(response: Response) {
@@ -27,7 +30,7 @@ export async function writeChunk(file: FileHandle, chunk: Uint8Array, offset: nu
   let written = 0
   while (written < chunk.length) {
     const result = await file.write(chunk, written, chunk.length - written, offset + written)
-    if (!result.bytesWritten) throw new Error("写入媒体分段失败")
+    if (!result.bytesWritten) throw new Error($t("services.media.transfer.text_bb53817e85"))
     written += result.bytesWritten
   }
 }

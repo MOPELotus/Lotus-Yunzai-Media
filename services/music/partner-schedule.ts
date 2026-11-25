@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageReply } from "../../../../lib/messages.ts"
 import { setTimeout as delay } from "node:timers/promises"
 import { loadGlobalConfig } from "../../core/config/global.ts"
@@ -31,11 +34,11 @@ const defaultSchedule = "0 30 1 * * ? *"
 
 export function partnerCron(value: unknown) {
   if (value == null || value === "") value = defaultSchedule
-  if (typeof value !== "string") throw new Error("合伙人定时配置须为 cron 表达式")
+  if (typeof value !== "string") throw new Error($t("services.music.partner-schedule.text_02711f2ad9"))
   const fields = value.trim().split(/\s+/u)
   if (fields.length === 7 && fields[6] === "*") fields.pop()
   if (fields.length === 5) fields.unshift("0")
-  if (fields.length !== 6) throw new Error("合伙人定时配置需要五段或六段 cron 表达式")
+  if (fields.length !== 6) throw new Error($t("services.music.partner-schedule.text_7c4f81000e"))
   for (const index of [3,5]) if (fields[index] === "?") fields[index] = "*"
   return fields.join(" ")
 }
@@ -67,7 +70,7 @@ export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRun
   let startup: Promise<void> | undefined
   let ready = false
   const logFailure = () => {
-    if (!active.aborted) console.warn("[media] 合伙人自动任务未完成，请检查 TuneWeave 状态和最近日志。")
+    if (!active.aborted) console.warn($t("services.music.partner-schedule.text_9c2208b8ea"))
   }
 
   function run(trigger: string, startupDay?: string) {
@@ -91,12 +94,12 @@ export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRun
         if (active.aborted) return
         logFailure()
         report = { trigger, time:formatLocalIso(now()), accounts:[{
-          nickname:"合伙人任务执行失败", total:0, success:0, skip:0, fail:1, attempts:0,
-          details:["请检查 TuneWeave 状态和最近日志。"], evaluations:[],
+          nickname:$t("services.music.partner-schedule.text_87ca0837b6"), total:0, success:0, skip:0, fail:1, attempts:0,
+          details:[$t("services.music.partner-schedule.text_45bd1eade3")], evaluations:[],
         }] }
       }
       if (active.aborted || "skipped" in report || partner.notify_master === false || !mediaRuntime?.notifyMasters) return report
-      const { image, text } = await render("合伙人自动任务", report)
+      const { image, text } = await render($t("services.music.partner-schedule.text_c5b385a3e1"), report)
       if (!active.aborted) await mediaRuntime.notifyMasters(image ? { type:"image", file:image } : text, active)
       return report
     })().catch(logFailure).finally(() => { pending = undefined })
@@ -106,7 +109,7 @@ export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRun
   try {
     const config = await load()
     if (active.aborted) return
-    unregister = mediaRuntime.registerTask(partnerCron((config.netease_partner as PartnerConfig | undefined)?.schedule), async () => run("自动任务"))
+    unregister = mediaRuntime.registerTask(partnerCron((config.netease_partner as PartnerConfig | undefined)?.schedule), async () => run($t("services.music.partner-schedule.text_44dc0ac37a")))
     cancelReady = mediaRuntime.whenReady(() => {
       if (active.aborted || ready) return
       ready = true
@@ -119,15 +122,15 @@ export async function createPartnerSchedule({ mediaRuntime, signal }: { mediaRun
         const maintenance = await waitForMaintenance?.(active)
         if (active.aborted || maintenance === "cancelled") return
         if (maintenance === "failed") {
-          console.warn("[media] 开机环境维护未就绪，跳过合伙人启动补跑。")
+          console.warn($t("services.music.partner-schedule.text_cec2b7d252"))
           return
         }
-        await run("启动补跑", formatLocalIso(currentTime).slice(0,10))
+        await run($t("services.music.partner-schedule.text_3b5cc424ca"), formatLocalIso(currentTime).slice(0,10))
       })().catch(logFailure)
     })
   } catch {
     await unregister?.()
-    if (!active.aborted) console.warn("[media] 合伙人定时配置无法读取或注册。")
+    if (!active.aborted) console.warn($t("services.music.partner-schedule.text_d8a34bb5ae"))
     return
   }
 

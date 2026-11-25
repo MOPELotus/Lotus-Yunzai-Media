@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MusicStream, MusicTrack } from "./service.ts"
 
 type EpisodeId = string | number
@@ -56,7 +59,7 @@ export function voiceSearchSelection(item: VoiceSearchItem | undefined) {
   if (data.ref != null && data.ref !== `netease:${episode}` || data.audio?.ref != null && data.audio.ref !== `netease:${audio}`) return
   return {
     id: episode, ref: `netease:${episode}`, audioRef: `netease:${audio}`, audioId: audio,
-    name: payload?.mainSong?.name || data.name || "网易云播客",
+    name: payload?.mainSong?.name || data.name || $t("services.music.episode.text_9b139653d2"),
     creator: payload?.dj?.nickname || data.creator?.name,
     cover: payload?.coverUrl || data.cover_url,
     duration: payload?.duration || data.duration_ms,
@@ -84,7 +87,7 @@ export function verifiedEpisodePlayback(selection: VoiceSearchSelection, respons
       episode.audio?.ref !== selection.audioRef || stream?.resolved_platform !== "netease" ||
       stream.origin_track !== selection.audioRef || stream.resolved_track !== selection.audioRef ||
       typeof stream.url !== "string" || !stream.url || stream.trial) {
-    throw new Error("没有可用的完整播客音源，或平台返回的节目身份不一致。")
+    throw new Error($t("services.music.episode.text_2450402b37"))
   }
   const creator = episode.creator?.name || selection.creator
   const track: MusicTrack = {
@@ -104,15 +107,15 @@ export function verifiedEpisodeTranscript(selection: VoiceSearchSelection, respo
   if (response?.ref !== selection.ref || response.audio_ref !== selection.audioRef || episode?.ref !== selection.ref ||
       episode.platform !== "netease" || id(episode.id) !== selection.id || episode.audio?.ref !== selection.audioRef ||
       episode.audio.platform !== "netease" || id(episode.audio.id) !== selection.audioId || lyrics?.track_ref !== selection.audioRef) {
-    throw new Error("平台返回的播客字幕与所选节目或音轨不一致。")
+    throw new Error($t("services.music.episode.text_dfc1da4af4"))
   }
   if (episode.paid === true || lyrics.extensions?.available === false) return
   if (lyrics.extensions?.available !== true || lyrics.format !== "netease_voice_json" || typeof lyrics.plain !== "string") {
-    throw new Error("平台返回的播客字幕无法核实。")
+    throw new Error($t("services.music.episode.text_35efc6acf7"))
   }
   const text = lyrics.plain.trim()
   if (!text) return
-  if (text.length > 97_000) throw new Error("播客字幕过长，请打开原节目查看。\n" + neteaseEpisodePage(selection.id))
+  if (text.length > 97_000) throw new Error($t("services.music.episode.text_c39319f4e3") + neteaseEpisodePage(selection.id))
   return text
 }
 

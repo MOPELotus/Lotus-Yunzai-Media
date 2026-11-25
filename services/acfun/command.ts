@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -50,7 +53,7 @@ async function playableSegments(video: AcfunVideo, fetch: MediaFetch, signal: Ab
     try { return await acfunPlaylist(source, fetch, signal) }
     catch { signal.throwIfAborted() }
   }
-  throw new Error("AcFun 没有可用的公开播放源。")
+  throw new Error($t("services.acfun.command.text_c885c5f9d8"))
 }
 
 async function muxVideo(video: AcfunVideo, paths: readonly string[], dir: string, ffmpeg: string, signal: AbortSignal, limit: number) {
@@ -62,7 +65,7 @@ async function muxVideo(video: AcfunVideo, paths: readonly string[], dir: string
     "-i", list, "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-movflags", "+faststart", output,
   ], { cwd: dir, timeoutMs: 45_000, signal })
   const result = await stat(output)
-  if (!result.size || result.size > limit) throw new Error("AcFun 视频超过发送限制。")
+  if (!result.size || result.size > limit) throw new Error($t("services.acfun.command.text_c71e378567"))
   return { file: output, name: safeMediaName(video.title) + ".mp4" }
 }
 
@@ -75,7 +78,7 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
   const deliveries = new Map<string, number>()
   let recovery: Promise<unknown> | undefined
   const cancelRecovery = mediaRuntime?.whenReady(() => {
-    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn("[media] AcFun 任务恢复失败。"))
+    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn($t("services.acfun.command.text_8d461d00da")))
   })
 
   function reserve(context: MessageFallbackContext) {
@@ -100,7 +103,7 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
       await recovery
       active.throwIfAborted()
       const ffmpeg = await findMediaTool("ffmpeg")
-      if (!ffmpeg) return "AcFun 播放需要 FFmpeg，请由主人先初始化媒体环境。"
+      if (!ffmpeg) return $t("services.acfun.command.text_5956373d13")
       const video = await acfunInfo(target, fetch, active)
       const segments = await playableSegments(video, fetch, active)
       task = await createMediaTask(tasksDir)
@@ -109,12 +112,12 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
       const files: string[] = []
       for (const [index, url] of segments.entries()) {
         active.throwIfAborted()
-        if (remaining <= 0) throw new Error("AcFun 视频超过发送限制。")
+        if (remaining <= 0) throw new Error($t("services.acfun.command.text_c71e378567"))
         const basename = `segment-${index}`
         const result = await downloadMedia(url, join(task.dir, basename), {
           fetch, signal: active, kind: "video", cdn: "acfun-video", timeoutMs: 25_000, maxBytes: remaining,
         })
-        if (result.file !== join(task.dir, basename + ".ts")) throw new Error("AcFun 分片格式无效。")
+        if (result.file !== join(task.dir, basename + ".ts")) throw new Error($t("services.acfun.command.text_d440da26f7"))
         remaining -= result.sizeBytes
         files.push(basename + ".ts")
       }
@@ -124,11 +127,11 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
     } catch (error) {
       if (connection.aborted) return []
       if (error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown) {
-        return "AcFun 视频送达未确认，请核对当前会话。"
+        return $t("services.acfun.command.text_d067c369b9")
       }
-      return "AcFun 视频暂时无法播放，请打开原链接观看。\n" + acfunPage(target)
+      return $t("services.acfun.command.text_e0c288703a") + acfunPage(target)
     } finally {
-      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn("[media] AcFun 任务清理失败。"))
+      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn($t("services.acfun.command.text_588e89b2a3")))
     }
   }
 
@@ -137,7 +140,7 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
       const video = await acfunInfo(target, fetch, active)
       const { id, part, title, owner, duration, createdAt, desc, cover, stat, url, sources } = video
       const source = sources.at(-1)
-      const hint = source ? "播放：#播放 " + url : url
+      const hint = source ? $t("services.acfun.command.text_33a4b034bb") + url : url
       const model = { title, owner, duration, createdAt, desc, cover, stat, type: "video", id: `AcFun · ac${id}${part === undefined ? "" : " · P" + part}`,
         sources: source ? [{ quality: source.quality, width: source.width, height: source.height }] : [] }
       const maxBytes = context.inlineImageByteLimit ?? inlineLimit
@@ -150,7 +153,7 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
       return [`AcFun · ${title}`, owner, desc, hint].filter(Boolean).join("\n")
     } catch {
       if (active.aborted) return []
-      return "暂时无法读取 AcFun 公开作品。\n" + acfunPage(target)
+      return $t("services.acfun.command.text_5a090eb5f6") + acfunPage(target)
     }
   }
 
@@ -164,7 +167,7 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
     if (active.aborted) return []
     const scope = request.play ? "acfun.play" : "acfun.preview"
     const allowed = cfg.enable && new PermissionService({ permissions: cfg.permissions }).can(context, scope)
-    if (!allowed) return request.play ? "当前会话未启用 AcFun 播放。" : undefined
+    if (!allowed) return request.play ? $t("services.acfun.command.text_b251651dfe") : undefined
     if (!request.play) {
       if (context.message_type === "private" && !cfg.privatePreview) return
       return preview(request.target, context, active)

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../../packages/i18n/index.ts";
+import messageCatalog from "../../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { articleContent } from "./article.ts"
 import { publicCount } from "../profile.ts"
 import { ExpiredSubscriptionSession, readWithSubscriptionSession, type SubscriptionSession } from "../session.ts"
@@ -70,6 +73,10 @@ export const biliTypes = Object.freeze({
   DYNAMIC_TYPE_AV: "视频", DYNAMIC_TYPE_WORD: "图文", DYNAMIC_TYPE_DRAW: "图文",
   DYNAMIC_TYPE_ARTICLE: "文章", DYNAMIC_TYPE_FORWARD: "转发", DYNAMIC_TYPE_LIVE_RCMD: "直播",
 })
+export const biliTypesLabels = Object.freeze({
+  DYNAMIC_TYPE_AV: $t("services.subscriptions.bilibili.index.text_c20f7618d3"), DYNAMIC_TYPE_WORD: $t("services.subscriptions.bilibili.index.text_fd7137eb5c"), DYNAMIC_TYPE_DRAW: $t("services.subscriptions.bilibili.index.text_fd7137eb5c"),
+  DYNAMIC_TYPE_ARTICLE: $t("services.subscriptions.bilibili.index.text_7d5a89f6b1"), DYNAMIC_TYPE_FORWARD: $t("services.subscriptions.bilibili.index.text_02107ba378"), DYNAMIC_TYPE_LIVE_RCMD: $t("services.subscriptions.bilibili.index.text_e472b37cf9"),
+})
 
 function accountId(value: unknown) {
   const id = String(value ?? "")
@@ -131,7 +138,7 @@ function profileLive(value: NonNullable<BiliPublicData["card"]>["live_room"]): S
   return {
     roomId,
     title: typeof value.title === "string" ? value.title.slice(0, 120).toWellFormed() : undefined,
-    status: status === 1 || status === "1" ? "直播中" : status === 0 || status === "0" ? "未开播" : undefined,
+    status: status === 1 || status === "1" ? $t("services.subscriptions.bilibili.index.text_6c50a8522a") : status === 0 || status === "0" ? $t("services.subscriptions.bilibili.index.text_56210666b5") : undefined,
     viewers: publicCount(value.watched_show?.num),
   }
 }
@@ -201,16 +208,16 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
     }, async (response) => {
       if (!response.ok) {
         await response.body?.cancel()
-        const message = "B 站公开接口 HTTP " + response.status
+        const message = $t("services.subscriptions.bilibili.index.text_b0dd3854cd") + response.status
         if (response.status === 401) throw new ExpiredSubscriptionSession(message)
         if (response.status === 403 || response.status === 412) throw new PublicAccessDenied(message)
         throw new Error(message)
       }
       const json = await response.json() as { code?: unknown; data?: T }
       if (json.code === -404) return
-      if (json.code === -101) throw new ExpiredSubscriptionSession("B 站登录已失效")
-      if (json.code === -352 || json.code === -403) throw new PublicAccessDenied("B 站公开接口返回 " + json.code)
-      if (json.code !== 0 || !json.data) throw new Error("B 站公开接口返回 " + String(json.code))
+      if (json.code === -101) throw new ExpiredSubscriptionSession($t("services.subscriptions.bilibili.index.text_2996a44344"))
+      if (json.code === -352 || json.code === -403) throw new PublicAccessDenied($t("services.subscriptions.bilibili.index.text_02f8be192b") + json.code)
+      if (json.code !== 0 || !json.data) throw new Error($t("services.subscriptions.bilibili.index.text_02f8be192b") + String(json.code))
       return json.data
     }, beforeAnonymous)
   }
@@ -246,7 +253,7 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
   }
 
   return {
-    id: "bilibili", label: "B站", typeNames: biliTypes, fetchLatestAuthorVideo,
+    id: "bilibili", label: $t("services.subscriptions.bilibili.index.text_acfb839ad1"), typeNames: biliTypesLabels, commandTypeNames: biliTypes, fetchLatestAuthorVideo,
     async fetchPost(id, signal) {
       if (!accountId(id)) return
       const data = await get("/x/polymer/web-dynamic/v1/detail", { id, platform: "web", features: "itemOpusStyle,opusBigCover,ugcDelete" }, signal)
@@ -257,7 +264,7 @@ export function createBiliProvider({ fetch: request = globalThis.fetch, session,
       if (!accountId(uid)) return []
       const data = await get("/x/polymer/web-dynamic/v1/feed/space", {host_mid:uid, offset:""}, signal,
         shared && (active => shared.fetchPosts(uid, active)))
-      if (!data || !Array.isArray(data.items)) throw new Error("B 站动态列表结构无效")
+      if (!data || !Array.isArray(data.items)) throw new Error($t("services.subscriptions.bilibili.index.text_1d6ebf4394"))
       const posts=data.items.map(raw=>normalizeBiliDynamic(raw,uid)).filter(value => value !== undefined)
       for (const [index,post] of posts.entries()) if (post.createdAt>=oldest) posts[index]=await expand(post,signal)
       return posts

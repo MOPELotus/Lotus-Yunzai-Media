@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { createHash } from "node:crypto"
 import type { DynamicPost } from "./types.ts"
 import { authorVideoType } from "./xhh-author-store.ts"
@@ -39,7 +42,7 @@ export function createAuthorArchive(read: ReadBili, now = Date.now) {
       const nav = await read<Nav>("/x/web-interface/nav", {}, signal)
       const first = keyPart(nav?.wbi_img?.img_url)
       const second = keyPart(nav?.wbi_img?.sub_url)
-      if (!first || !second) throw new Error("B 站投稿检索所需的公开签名字段不可用。")
+      if (!first || !second) throw new Error($t("services.subscriptions.xhh-author-source.text_5b7155e7e2"))
       const value = first + second
       key = { value: mixin.slice(0, 32).map(index => value[index]).join(""), expires: now() + 20 * 60_000 }
     }
@@ -49,7 +52,7 @@ export function createAuthorArchive(read: ReadBili, now = Date.now) {
     const signature = createHash("md5").update(query + key.value).digest("hex")
     const archive = await read<Archive>("/x/space/wbi/arc/search", { ...params, w_rid: signature }, signal)
     const items = archive?.list?.vlist
-    if (!Array.isArray(items)) throw new Error("B 站投稿列表结构无效。")
+    if (!Array.isArray(items)) throw new Error($t("services.subscriptions.xhh-author-source.text_44f356ca18"))
     if (!items.length) return
     const latest = items[0] as Record<string, unknown> | undefined
     const bvid = latest?.bvid
@@ -58,7 +61,7 @@ export function createAuthorArchive(read: ReadBili, now = Date.now) {
     if (!latest || typeof bvid !== "string" || !/^BV[1-9A-Za-z]{10}$/u.test(bvid) ||
         (typeof latest.mid !== "string" && typeof latest.mid !== "number") || String(latest.mid) !== uid ||
         typeof createdAt !== "number" || !Number.isSafeInteger(createdAt) || createdAt <= 0 || createdAt > wall) {
-      throw new Error("最新投稿与查询作者不匹配。")
+      throw new Error($t("services.subscriptions.xhh-author-source.text_1757009dd9"))
     }
     return { id: bvid, uid, author, createdAt, type: authorVideoType, title: text(latest.title, 240),
       content: text(latest.description, 2000), url: "https://www.bilibili.com/video/" + bvid,

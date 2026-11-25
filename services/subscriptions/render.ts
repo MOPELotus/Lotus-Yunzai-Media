@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import { loadImage, type CanvasRenderingContext2D, type Image } from "skia-canvas"
 import QRCode from "qrcode"
@@ -101,48 +104,48 @@ function mediaFor(provider: RenderProvider, item: DynamicPost, settings: Subscri
 
 function compactCount(value?: string) {
   const count = Number(value)
-  return Number.isSafeInteger(count) && count >= 10_000 ? `${(count/10_000).toFixed(1)}万` : value
+  return Number.isSafeInteger(count) && count >= 10_000 ? $t("services.subscriptions.render.text_b2e8dfa288", { "value1": (count/10_000).toFixed(1) }) : value
 }
 
 function textDetails(post: DynamicPost) {
   const details = post.activity
   if (!details) return []
   if (post.type === "DYNAMIC_TYPE_LIVE_RCMD") {
-    return [details.area && `分区：${details.area}`, details.viewers !== undefined && `${compactCount(details.viewers)}人看过`]
+    return [details.area && $t("services.subscriptions.render.text_b2aa4face3", { "area": details.area }), details.viewers !== undefined && $t("services.subscriptions.render.text_1a0f079828", { "value1": compactCount(details.viewers) })]
   }
   const stats = [
-    ["弹幕", details.bullets], ["播放", details.views], ["点赞", compactCount(details.likes)],
-    ["评论", compactCount(details.comments)], ["转发", compactCount(details.shares)],
+    [$t("services.subscriptions.render.text_2591ec6870"), details.bullets], [$t("services.subscriptions.render.text_c3396195e9"), details.views], [$t("services.subscriptions.render.text_aced5d7f9f"), compactCount(details.likes)],
+    [$t("services.subscriptions.render.text_6849b8254d"), compactCount(details.comments)], [$t("services.subscriptions.render.text_02107ba378"), compactCount(details.shares)],
   ]
   return [stats.filter(([,value]) => value !== undefined).map(([label,value]) => `${value}${label}`).join(" • ")]
 }
 
 function category(provider: RenderProvider, post: DynamicPost) {
-  return provider.typeNames[post.type] || "动态"
+  return provider.typeNames[post.type] || $t("services.subscriptions.render.text_780353e5a5")
 }
 
 function published(post: DynamicPost) {
-  return post.activity?.openedAt ? "开播：" + time.format(post.activity.openedAt*1000) : time.format(post.createdAt*1000)
+  return post.activity?.openedAt ? $t("services.subscriptions.render.text_05c425ef08") + time.format(post.activity.openedAt*1000) : time.format(post.createdAt*1000)
 }
 
 function textPublished(post: DynamicPost) {
   const openedAt = post.activity?.openedAt
   const parts = time.formatToParts((openedAt || post.createdAt) * 1000)
   const {year,month,day,hour,minute,second} = Object.fromEntries(parts.map(({type,value})=>[type,value]))
-  return (openedAt ? "开播：" : "投稿：") + `${year}年${month}月${day}日 ${hour}:${minute}:${second}`
+  return (openedAt ? $t("services.subscriptions.render.text_05c425ef08") : $t("services.subscriptions.render.text_4f2525a7fc")) + $t("services.subscriptions.render.text_760f22f2c1", { "year": year, "month": month, "day": day, "hour": hour, "minute": minute, "second": second })
 }
 
 function textMessages(provider: RenderProvider, post: DynamicPost, settings: SubscriptionSettings): MessageReply[] {
   const heading = `【${provider.label}${category(provider,post)}】${post.author}`
   const repost = post.type === "DYNAMIC_TYPE_FORWARD"
-  const linkLabel = post.activity?.roomUrl ? "直播链接" : repost ? "转发链接" : "链接"
+  const linkLabel = post.activity?.roomUrl ? $t("services.subscriptions.render.text_b752593234") : repost ? $t("services.subscriptions.render.text_a312aec30d") : $t("services.subscriptions.render.text_305378ddd2")
   const elements = [heading,textPublished(post),textBlock(post,limitTextContent(post,settings)),...textDetails(post),`${linkLabel}：${post.url}`]
   const original = post.forwarded
   if (original) {
-    elements.push(`原帖 · ${category(provider,original)} · ${original.author}`,textPublished(original),
+    elements.push($t("services.subscriptions.render.text_268ed3a935", { "value1": category(provider,original), "author": original.author }),textPublished(original),
       textBlock(original,limitTextContent(original,settings)),...textDetails(original))
     if (original.url !== post.url) {
-      const label = original.activity?.roomUrl ? "原帖直播链接" : "原帖链接"
+      const label = original.activity?.roomUrl ? $t("services.subscriptions.render.text_fd1c0bd720") : $t("services.subscriptions.render.text_69bdc69f9c")
       elements.push(`${label}：${original.url}`)
     }
   }
@@ -209,7 +212,7 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
     appendImages(images)
     const original = post.forwarded
     if (original) {
-      appendText(`原帖 · ${category(provider, original)} · ${original.author}`, 22, 2, mediaNewsColors.gold)
+      appendText($t("services.subscriptions.render.text_268ed3a935", { "value1": category(provider, original), "author": original.author }), 22, 2, mediaNewsColors.gold)
       appendText(published(original), 16, 10, mediaNewsColors.muted)
       const content = textBlock(original, clipContent(original.content, settings))
       if (content) appendText(content, 22, 12)
@@ -231,9 +234,9 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
       ctx.fillStyle = mediaNewsColors.rule
       ctx.fillRect(x, footerTop + 4, contentWidth, 1)
       drawMediaNewsImage(ctx, qr, x, footerTop + 18, 114, 114, { radius:4 })
-      const caption = post.type === "DYNAMIC_TYPE_FORWARD" ? "扫码查看这条转发" : "扫码查看原动态"
+      const caption = post.type === "DYNAMIC_TYPE_FORWARD" ? $t("services.subscriptions.render.text_6d4ae90a94") : $t("services.subscriptions.render.text_b58fef1530")
       drawMediaNewsText(ctx, [caption], x + 139, footerTop + 48, contentWidth - 139, 20, mediaNewsColors.gold)
-      drawMediaNewsText(ctx, [`${provider.label}动态${preview ? "" : "订阅"}`], x + 139, footerTop + 79, contentWidth - 139, 20, mediaNewsColors.muted)
+      drawMediaNewsText(ctx, [$t("services.subscriptions.render.text_a0512814b8", { "label": provider.label, "value2": preview ? "" : $t("services.subscriptions.render.text_cf8efc450f") })], x + 139, footerTop + 79, contentWidth - 139, 20, mediaNewsColors.muted)
     } }
   }, {
     pageHeight: settings.split ? settings.splitHeight : undefined,
@@ -250,7 +253,7 @@ async function drawDynamic(provider: RenderProvider, post: DynamicPost, settings
     signal?.throwIfAborted()
     pages = await render(2)
   }
-  if (!pages || pages.some(oversized)) throw new ImageSizeLimitError("动态图片超过当前会话大小上限。")
+  if (!pages || pages.some(oversized)) throw new ImageSizeLimitError($t("services.subscriptions.render.text_3d67ef7445"))
   return pages.map(page => {
     onRender?.(page.engine)
     return page.png

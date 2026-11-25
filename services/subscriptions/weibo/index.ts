@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../../packages/i18n/index.ts";
+import messageCatalog from "../../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../../public-read.ts"
 // Source format: snowtafir/yuki-plugin main3, b1d8fecf41d03f92746bb2404b0b0381a24103a5 (MIT).
 import { ExpiredSubscriptionSession, readWithSubscriptionSession, type SubscriptionSession } from "../session.ts"
@@ -71,6 +74,10 @@ export const weiboTypes = Object.freeze({
   DYNAMIC_TYPE_AV: "视频", DYNAMIC_TYPE_WORD: "图文", DYNAMIC_TYPE_DRAW: "图文",
   DYNAMIC_TYPE_ARTICLE: "文章", DYNAMIC_TYPE_FORWARD: "转发",
 })
+export const weiboTypesLabels = Object.freeze({
+  DYNAMIC_TYPE_AV: $t("services.subscriptions.weibo.index.text_c20f7618d3"), DYNAMIC_TYPE_WORD: $t("services.subscriptions.weibo.index.text_fd7137eb5c"), DYNAMIC_TYPE_DRAW: $t("services.subscriptions.weibo.index.text_fd7137eb5c"),
+  DYNAMIC_TYPE_ARTICLE: $t("services.subscriptions.weibo.index.text_7d5a89f6b1"), DYNAMIC_TYPE_FORWARD: $t("services.subscriptions.weibo.index.text_02107ba378"),
+})
 
 function record(value: unknown): boolean {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -124,8 +131,8 @@ function profileOf(value: WeiboUser | undefined): SubscriptionProfile | undefine
   if (!uid || !name) return
   return {
     uid, name, summary: clean(value.description, 250) || undefined,
-    gender: value.gender === "f" ? "女" : value.gender === "m" ? "男" : undefined,
-    verification: clean(value.verified_reason, 160) || (value.verified === false ? "未认证" : undefined),
+    gender: value.gender === "f" ? $t("services.subscriptions.weibo.index.text_0ab4610b92") : value.gender === "m" ? $t("services.subscriptions.weibo.index.text_4e79758a99") : undefined,
+    verification: clean(value.verified_reason, 160) || (value.verified === false ? $t("services.subscriptions.weibo.index.text_d9c133f233") : undefined),
     followers: publicCount(value.followers_count) ?? publicCount(value.followers_count_str),
     following: publicCount(value.follow_count),
   }
@@ -319,7 +326,7 @@ function completePost(post: DynamicPost, raw: WeiboPost | undefined, needs: Deta
 
 async function readText(response: Response, maxBytes = 4 * 1024 * 1024) {
   const reader = response.body?.getReader()
-  if (!reader) throw new Error("微博接口没有返回内容。")
+  if (!reader) throw new Error($t("services.subscriptions.weibo.index.text_40f379a461"))
   try {
     const decoder = new TextDecoder("utf-8", { fatal: true })
     let raw = ""
@@ -328,7 +335,7 @@ async function readText(response: Response, maxBytes = 4 * 1024 * 1024) {
       const { value, done } = await reader.read()
       if (done) return raw + decoder.decode()
       bytes += value.byteLength
-      if (bytes > maxBytes) throw new Error("微博公开接口响应过大。")
+      if (bytes > maxBytes) throw new Error($t("services.subscriptions.weibo.index.text_4cfeb34dd5"))
       raw += decoder.decode(value, { stream: true })
     }
   } finally {
@@ -349,7 +356,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
         return await readPublicResponse((target, init) => fetch(new URL(target), init), input, options)
       } catch {
         deadline.throwIfAborted()
-        throw new Error("无法读取微博公开数据。")
+        throw new Error($t("services.subscriptions.weibo.index.text_d7afa223fb"))
       }
     }
     return readWithSubscriptionSession(request, session, url, {
@@ -360,9 +367,9 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
         const loginHost = URL.parse(response.headers.get("Location") ?? "")?.hostname
         void response.body?.cancel().catch(() => {})
         if (response.status === 401 || (response.status >= 300 && response.status < 400 && loginHost === "passport.weibo.com")) {
-          throw new ExpiredSubscriptionSession("微博登录无效或已过期。")
+          throw new ExpiredSubscriptionSession($t("services.subscriptions.weibo.index.text_039ade3dc2"))
         }
-        throw new Error("微博公开接口拒绝访问或暂不可用。")
+        throw new Error($t("services.subscriptions.weibo.index.text_dbb3d5fb4f"))
       }
       // Login pages and risk-control responses must remain distinguishable from an empty public feed.
       let envelope: { ok?: unknown; data?: WeiboFeed; msg?: unknown } | undefined
@@ -370,15 +377,15 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
         envelope = JSON.parse(await readText(response))
       } catch {
         deadline.throwIfAborted()
-        throw new Error("微博公开接口未返回可读的数据。")
+        throw new Error($t("services.subscriptions.weibo.index.text_ecd1735eb8"))
       }
       deadline.throwIfAborted()
       if (envelope?.ok === 1 && record(envelope.data)) return envelope.data
       if (envelope?.ok === 0 && typeof envelope.msg === "string" && emptyMessages.has(envelope.msg)) return
-      if (envelope?.ok === 0 && typeof envelope.msg === "string" && ["需要登录", "请先登录", "未登录"].includes(envelope.msg)) {
-        throw new ExpiredSubscriptionSession("微博登录无效或已过期。")
+      if (envelope?.ok === 0 && typeof envelope.msg === "string" && [$t("services.subscriptions.weibo.index.text_6eb1b64e26"), $t("services.subscriptions.weibo.index.text_48144f96c1"), $t("services.subscriptions.weibo.index.text_c1f6583730")].includes(envelope.msg)) {
+        throw new ExpiredSubscriptionSession($t("services.subscriptions.weibo.index.text_039ade3dc2"))
       }
-      throw new Error("微博公开数据不可用。")
+      throw new Error($t("services.subscriptions.weibo.index.text_58f4582f6a"))
     })
   }
 
@@ -407,13 +414,13 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
   }
 
   return {
-    id: "weibo", label: "微博", typeNames: weiboTypes,
+    id: "weibo", label: $t("services.subscriptions.weibo.index.text_0fc69798d8"), typeNames: weiboTypesLabels, commandTypeNames: weiboTypes,
     async fetchPosts(account, { signal, oldest = 0 } = {}) {
       const uid = decimalId(account)
-      if (!uid) throw new Error("微博 UID 无效。")
+      if (!uid) throw new Error($t("services.subscriptions.weibo.index.text_b966d005fb"))
       const data = await get({ containerid: `107603${uid}` }, signal)
       if (!data) return []
-      if (!Array.isArray(data.cards)) throw new Error("微博动态列表格式无效。")
+      if (!Array.isArray(data.cards)) throw new Error($t("services.subscriptions.weibo.index.text_438d751d54"))
       const posts = new Map<string, DynamicPost>()
       const detailTimeout = AbortSignal.timeout(5000)
       const deadline = signal ? AbortSignal.any([signal, detailTimeout]) : detailTimeout
@@ -429,11 +436,11 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
     },
     async profile(account, { signal } = {}) {
       const uid = decimalId(account)
-      if (!uid) throw new Error("微博 UID 无效。")
+      if (!uid) throw new Error($t("services.subscriptions.weibo.index.text_b966d005fb"))
       const data = await get({ type: "uid", value: uid, containerid: `100505${uid}` }, signal)
       if (!data) return
       const profile = profileOf(data.userInfo)
-      if (!profile || profile.uid !== uid) throw new Error("微博主页账号信息不匹配。")
+      if (!profile || profile.uid !== uid) throw new Error($t("services.subscriptions.weibo.index.text_8955522c44"))
       return profile
     },
     async search(keyword, { signal } = {}) {
@@ -441,7 +448,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
       if (!query) return []
       const data = await get({ containerid: "100103", type: "1", q: query, page_type: "searchall" }, signal)
       if (!data) return []
-      if (!Array.isArray(data.cards)) throw new Error("微博搜索结果格式无效。")
+      if (!Array.isArray(data.cards)) throw new Error($t("services.subscriptions.weibo.index.text_33c802a122"))
       const profiles = new Map<string, SubscriptionProfile>()
       const cards: (WeiboCard | undefined)[] = data.cards
       for (const card of cards.slice(0, 30)) {

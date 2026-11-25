@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { hasNeteasePartnerAccount } from "../../../../lib/netease-partner-defaults.ts"
 import { compatibleBilibiliDownload } from "../../../../lib/bilibili-download-compat.ts"
 import { readOptionalConfigFile, readOptionalLocalConfig } from "../../../../lib/config.ts"
@@ -28,7 +31,7 @@ export async function loadGlobalConfig(root = deployment) {
       if (key === "tuneweave") {
         const configured = values.filter(value => endpoint(value))
         const endpoints = new Set(configured.map(value => endpoint(value).replace(/\/+$/, "")))
-        if (endpoints.size > 1) throw new Error("两处旧 TuneWeave 服务地址不一致，请在现用媒体配置中指定地址。")
+        if (endpoints.size > 1) throw new Error($t("core.config.global.text_667528e790"))
         global[key] = configured[0] ?? values[0]
       } else global[key] = values[0]
     }
@@ -60,8 +63,9 @@ export async function loadGlobalConfig(root = deployment) {
   }
 }
 
-export const publicShareSiteNames = { acfun: "AcFun", weishi: "微视", zuiyou: "最右", wxchannels: "视频号", xhs: "小红书", xhh: "小黑盒" } as const
+export const publicShareSiteNames = { acfun: "AcFun", weishi: $t("core.config.global.text_e7b7b38f38"), zuiyou: $t("core.config.global.text_ff74373e3f"), wxchannels: $t("core.config.global.text_e34ce28b5a"), xhs: $t("core.config.global.text_d26c6a08a5"), xhh: $t("core.config.global.text_2d9ed741c0") } as const
 export type PublicShareSite = keyof typeof publicShareSiteNames
+const legacyPublicShareSiteNames: Readonly<Record<PublicShareSite,string>> = {acfun:"Acfun",weishi:"微视",zuiyou:"最右",wxchannels:"视频号",xhs:"小红书",xhh:"小黑盒"}
 
 export async function loadPublicShareConfig(site: PublicShareSite, root = deployment) {
   const global = await readLotusGlobalConfig(root)
@@ -72,7 +76,7 @@ export async function loadPublicShareConfig(site: PublicShareSite, root = deploy
     ? await readOptionalConfigFile(root, "plugins/rconsole-plugin/config/tools.yaml") ??
       await readOptionalConfigFile(root, "backup/plugins/rconsole-plugin/config/tools.yaml")
     : undefined
-  const blocked = Array.isArray(legacy?.globalBlackList) && legacy.globalBlackList.includes(site === "acfun" ? "Acfun" : publicShareSiteNames[site])
+  const blocked = Array.isArray(legacy?.globalBlackList) && legacy.globalBlackList.includes(legacyPublicShareSiteNames[site])
   return { enable: enable ?? !blocked, privatePreview: privatePreview ?? (legacy?.privateResolve === true),
     permissions: global.permissions }
 }

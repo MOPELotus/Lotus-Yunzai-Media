@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import { acfunImageUrl, acfunVideoUrl, fetchCdn, type MediaFetch } from "../media/cdn.ts"
 
@@ -73,7 +76,7 @@ function jsonObjectAt(source: string, offset: number): unknown {
 async function readText(response: Response, maxBytes: number, signal: AbortSignal) {
   try {
     if (response.status !== 200 || !response.body || Number(response.headers.get("content-length")) > maxBytes) {
-      throw new Error("AcFun 响应不可用或超过大小限制。")
+      throw new Error($t("services.acfun.source.text_168b887a28"))
     }
     let size = 0
     let text = ""
@@ -81,7 +84,7 @@ async function readText(response: Response, maxBytes: number, signal: AbortSigna
     for await (const chunk of response.body.values()) {
       signal.throwIfAborted()
       size += chunk.byteLength
-      if (size > maxBytes) throw new Error("AcFun 响应超过大小限制。")
+      if (size > maxBytes) throw new Error($t("services.acfun.source.text_40e0848181"))
       text += decoder.decode(chunk, { stream: true })
     }
     return text + decoder.decode()
@@ -114,16 +117,16 @@ export async function acfunInfo(target: AcfunTarget, fetch: MediaFetch, signal: 
     headers: { Accept: "text/html,application/xhtml+xml" } })
   const html = await readText(response, 2 * 1024 ** 2, active)
   const start = /(?:^|[>;\s])window\.pageInfo\s*=\s*window\.videoInfo\s*=\s*(?=\{)/u.exec(html)
-  if (!start) throw new Error("AcFun 未返回公开作品。")
+  if (!start) throw new Error($t("services.acfun.source.text_3396398f8f"))
   const data = record(jsonObjectAt(html, start.index + start[0].length))
   const title = plain(data.title, 180)
-  if (String(data.dougaId) !== id || !title) throw new Error("AcFun 未返回匹配的公开作品。")
+  if (String(data.dougaId) !== id || !title) throw new Error($t("services.acfun.source.text_dc14c2d01c"))
   const current = record(data.currentVideoInfo)
   if (part !== undefined) {
     const expected = record(Array.isArray(data.videoList) ? data.videoList[part - 1] : undefined)
     const videoId = String(current.id ?? "")
     if (!/^[1-9]\d{0,17}$/u.test(videoId) || String(expected.id) !== videoId || String(data.currentVideoId) !== videoId ||
-        current.priority !== part - 1) throw new Error("AcFun 未返回指定分段。")
+        current.priority !== part - 1) throw new Error($t("services.acfun.source.text_5cfdf788b0"))
   }
   const partTitle = part === undefined ? "" : plain(current.title, 100)
   const cover = typeof data.coverUrl === "string" && data.coverUrl.length <= 4096 ? acfunImageUrl(data.coverUrl)?.href : undefined
@@ -142,9 +145,9 @@ export async function acfunPlaylist(value: string, fetch: MediaFetch, signal: Ab
   const response = await fetchCdn(fetch, value, { signal: active }, "acfun-video")
   const body = await readText(response, 256 * 1024, active)
   const rows = body.trim().split(/\r?\n/u).map(row => row.trim()).filter(Boolean)
-  if (rows[0] !== "#EXTM3U" || rows.at(-1) !== "#EXT-X-ENDLIST") throw new Error("AcFun 视频未返回完整的点播清单。")
+  if (rows[0] !== "#EXTM3U" || rows.at(-1) !== "#EXT-X-ENDLIST") throw new Error($t("services.acfun.source.text_fd7bd1cdd4"))
   const finalUrl = acfunVideoUrl(response.url || value)
-  if (!finalUrl?.pathname.endsWith(".m3u8")) throw new Error("AcFun 点播清单地址无效。")
+  if (!finalUrl?.pathname.endsWith(".m3u8")) throw new Error($t("services.acfun.source.text_b758f323fe"))
   const segments: string[] = []
   let duration = 0, hasDuration = false
   for (const line of rows.slice(1, -1)) {
@@ -152,19 +155,19 @@ export async function acfunPlaylist(value: string, fetch: MediaFetch, signal: Ab
     if (tag && !hasDuration) {
       const length = Number(tag[1])
       duration += length
-      if (!length || duration > maxPlaylistTime) throw new Error("AcFun 视频超出时长限制。")
+      if (!length || duration > maxPlaylistTime) throw new Error($t("services.acfun.source.text_f1a1778721"))
       hasDuration = true
     } else if (allowedTags.test(line) && !hasDuration) continue
     else {
       const address = !line.startsWith("#") && line.length <= 4096 ? URL.parse(line, finalUrl) : undefined
       const segment = address && acfunVideoUrl(address)
       if (!hasDuration || !segment?.pathname.endsWith(".ts") || segments.length >= 512) {
-        throw new Error("AcFun 点播清单含有不支持的分片或加密流。")
+        throw new Error($t("services.acfun.source.text_499f25151f"))
       }
       segments.push(segment.href)
       hasDuration = false
     }
   }
-  if (hasDuration || !segments.length) throw new Error("AcFun 点播清单没有完整分片。")
+  if (hasDuration || !segments.length) throw new Error($t("services.acfun.source.text_7654851554"))
   return segments
 }

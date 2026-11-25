@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 const douyinDomains = ["douyin.com", "iesdouyin.com", "douyinpic.com", "douyincdn.com", "douyinvod.com", "byteimg.com", "bytefcdn.com", "bytedance.com", "bytecdn.cn", "ixigua.com"]
 const imageDomains = [...douyinDomains, "hdslb.com", "bilibili.com", "biliimg.com", "upload-bbs.miyoushe.com", "upload-bbs.mihoyo.com",
   "pic.weishi.qq.com", "xp.qpic.cn", "web-f01.izuiyou.com"]
@@ -116,7 +119,7 @@ function mediaUrl(value: string | URL, domains: readonly string[]) {
   const url = new URL(value)
   if (!["https:", "http:"].includes(url.protocol) || url.port || url.username || url.password ||
       !domains.some(domain => url.hostname === domain || url.hostname.endsWith("." + domain))) {
-    throw new Error("媒体地址不属于平台 CDN。")
+    throw new Error($t("services.media.cdn.text_f871848c3b"))
   }
   url.protocol = "https:"
   return url
@@ -136,25 +139,25 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
   function target(value: string | URL) {
     if (kind?.startsWith("music-cover-")) {
       const cover = musicCoverSource(String(value), kind.slice("music-cover-".length))
-      if (!cover) throw new Error("图片地址不属于原平台封面 CDN。")
+      if (!cover) throw new Error($t("services.media.cdn.text_f5b8d9ef9f"))
       return cover.url
     }
     if (kind === "acfun-video" || kind === "acfun-image") {
       const url = kind === "acfun-video" ? acfunVideoUrl(value) : acfunImageUrl(value)
-      if (!url || kind === "acfun-video" && !/\.(?:m3u8|ts)$/u.test(url.pathname)) throw new Error("媒体地址不属于 AcFun CDN。")
+      if (!url || kind === "acfun-video" && !/\.(?:m3u8|ts)$/u.test(url.pathname)) throw new Error($t("services.media.cdn.text_6b472e9981"))
       return url
     }
     if (kind === "netease-mv" || kind === "kuwo-mv" || kind === "qq-mv" || kind === "kugou-mv") {
       const url = musicVideoCdnUrl(value, kind)
       if (!url) {
-        const platform = kind === "netease-mv" ? "网易云" : kind === "kuwo-mv" ? "酷我" : kind === "kugou-mv" ? "酷狗" : "QQ 音乐"
-        throw new Error(`媒体地址不属于${platform} MV CDN。`)
+        const platform = kind === "netease-mv" ? $t("services.media.cdn.text_06afc99e7d") : kind === "kuwo-mv" ? $t("services.media.cdn.text_2a6eaaa1f3") : kind === "kugou-mv" ? $t("services.media.cdn.text_6f5fe8042a") : $t("services.media.cdn.text_2d3eca24a0")
+        throw new Error($t("services.media.cdn.text_7e10a3fa50", { "platform": platform }))
       }
       return url
     }
     if (kind === "weixin-channels-image") {
       const url = weixinChannelsImageUrl(value)
-      if (!url) throw new Error("图片地址不属于视频号预览 CDN。")
+      if (!url) throw new Error($t("services.media.cdn.text_fd96ebbc44"))
       return url
     }
     if (kind === "image") {
@@ -163,22 +166,22 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
     }
     if (kind === "kuaishou-video") {
       const url = kuaishouVideoUrl(value)
-      if (!url) throw new Error("媒体地址不属于快手视频 CDN。")
+      if (!url) throw new Error($t("services.media.cdn.text_7d0de47f27"))
       return url
     }
     if (kind === "pipixia-video") {
       const url = new URL(value)
-      if (!isPipixiaVideoUrl(url)) throw new Error("媒体地址不属于皮皮虾视频 CDN。")
+      if (!isPipixiaVideoUrl(url)) throw new Error($t("services.media.cdn.text_757b2c8cc8"))
       return url
     }
     if (kind === "weishi-video" || kind === "zuiyou-video") {
       const url = publicShareVideoUrl(value, kind)
-      if (!url) throw new Error("视频地址不属于分享来源的 CDN。")
+      if (!url) throw new Error($t("services.media.cdn.text_4a63bad560"))
       return url
     }
     if (kind !== "miyoushe-video") return mediaUrl(value, domains)
     const url = new URL(value)
-    if (!isMiyousheVideoUrl(url)) throw new Error("媒体地址不属于米游社视频 CDN。")
+    if (!isMiyousheVideoUrl(url)) throw new Error($t("services.media.cdn.text_bb34ba72ab"))
     return url
   }
   let url = target(value)
@@ -191,5 +194,5 @@ export async function fetchCdn(fetchImpl: MediaFetch, value: string | URL, optio
     if (!location) break
     url = target(new URL(location, url))
   }
-  throw new Error("媒体地址重定向无效。")
+  throw new Error($t("services.media.cdn.text_6ea9a66014"))
 }

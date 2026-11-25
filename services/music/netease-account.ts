@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { TuneWeaveQrProfile } from "../tuneweave/auth.ts"
 import { readMusicAccounts, type MusicAccount } from "./accounts.ts"
 import { musicAuthenticationRequired, refreshOwnMusicAccount } from "./personal.ts"
@@ -30,7 +33,7 @@ export async function findOwnedNeteaseAccount(api: Pick<MusicService, "accountsF
     const binding = checked(owner, account.tuneweave_account, account.uid)
     if (!binding || foreignAliases.has(binding.alias)) continue
     const other = byAlias.get(binding.alias)
-    if (other && other.uid !== binding.uid) throw new Error("网易云账号绑定相互冲突，请重新登录。")
+    if (other && other.uid !== binding.uid) throw new Error($t("services.music.netease-account.text_e794fc70cd"))
     byAlias.set(binding.alias, binding)
   }
   if (music && recordedNeteaseOwner(music, owner)) {
@@ -38,7 +41,7 @@ export async function findOwnedNeteaseAccount(api: Pick<MusicService, "accountsF
     if (binding) {
       const other = byAlias.get(binding.alias)
       if (foreignAliases.has(binding.alias) || other && other.uid !== binding.uid) {
-        throw new Error("网易云账号绑定相互冲突，请重新登录。")
+        throw new Error($t("services.music.netease-account.text_e794fc70cd"))
       }
       return binding
     }
@@ -58,13 +61,13 @@ export async function verifyNeteaseAccount(api: Pick<MusicService, "tuneweave">,
 
 function checkedProfile(profile: TuneWeaveQrProfile | undefined, accountSelected: boolean, alias: string, uid: string) {
   if (!accountSelected || profile?.platform !== "netease" || profile.account !== alias) {
-    throw new Error("TuneWeave 未确认选用的网易云账号。")
+    throw new Error($t("services.music.netease-account.text_8201d4a8c3"))
   }
-  if (profile.user_id != null && String(profile.user_id) !== uid) throw new Error("网易云账号不一致，请使用 #音乐重新登录 核实。")
+  if (profile.user_id != null && String(profile.user_id) !== uid) throw new Error($t("services.music.netease-account.text_c0aa58ed80"))
   if (profile.authenticated === false) {
-    throw Object.assign(new Error("网易云登录已过期，请在当前好友私聊重新扫码。"), { code: "authentication_required" })
+    throw Object.assign(new Error($t("services.music.netease-account.text_176754bafe")), { code: "authentication_required" })
   }
-  if (profile.authenticated !== true || String(profile.user_id) !== uid) throw new Error("网易云账号不一致，请使用 #音乐重新登录 核实。")
+  if (profile.authenticated !== true || String(profile.user_id) !== uid) throw new Error($t("services.music.netease-account.text_c0aa58ed80"))
   return profile
 }
 
@@ -83,7 +86,7 @@ export async function verifyOrRenewNeteaseAccount(api: MusicService, account: Ow
   }
   const { owner, alias, uid } = account
   const current = await findOwnedNeteaseAccount(api, owner, signal)
-  if (current?.alias !== alias || current.uid !== uid) throw new Error("网易云绑定已变更，请重试。")
+  if (current?.alias !== alias || current.uid !== uid) throw new Error($t("services.music.netease-account.text_8dfb3c880c"))
   const saved = (await readMusicAccounts(api.accountsFile)).netease
   if (saved && recordedNeteaseOwner(saved, owner) && saved.alias === alias && String(saved.uid) === uid &&
       saved.credential?.startsWith("twc1_")) await refreshOwnMusicAccount(api, "netease", owner, signal, account)

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import fs from "node:fs/promises"
 import path from "node:path"
 import { resolveData, rootPath } from "../../core/path.ts"
@@ -40,7 +43,7 @@ export async function prepareVideo(file: string, { tools_path, timeout_ms = 6000
     const raw = report && typeof report === "object" && "streams" in report ? report.streams : undefined
     const streams = Array.isArray(raw) ? raw.filter(isStream) : []
     const video = streams.find(stream => stream.codec_type === "video")
-    if (!video) throw new Error("下载的文件没有可用视频流")
+    if (!video) throw new Error($t("services.media.video.text_ee74606961"))
     videoCodec = video.codec_name
     audioOptions = streams.filter(stream => stream.codec_type === "audio").flatMap(({ codec_name }, index) =>
       codec_name && codec_name !== "aac" && codec_name !== "mp3" ? [`-c:a:${index}`, "aac"] : [])
@@ -48,12 +51,12 @@ export async function prepareVideo(file: string, { tools_path, timeout_ms = 6000
   const conversion = path.extname(file).toLowerCase() !== ".mp4" || (videoCodec && videoCodec !== "h264") || audioOptions.length > 0
   if (!conversion) return { file, warnings }
   const ffmpeg = await findMediaTool("ffmpeg", tools_path)
-  if (!ffmpeg) return { file, warnings: ["未找到 FFmpeg，保留原视频文件，兼容性取决于客户端"] }
+  if (!ffmpeg) return { file, warnings: [$t("services.media.video.text_158e667930")] }
   const target = file.replace(/\.[^.]+$/, "-compatible.mp4")
   await runMediaProcess(ffmpeg, ["-nostdin", "-v", "error", "-i", file, "-map", "0:v:0", "-map", "0:a?",
     "-c:v", videoCodec === "h264" ? "copy" : "libx264", "-c:a", "copy", ...audioOptions, "-movflags", "+faststart", target],
   { cwd: path.dirname(file), timeoutMs: timeout_ms, signal })
   const stat = await fs.stat(target)
-  if (!stat.size) throw new Error("FFmpeg 未生成有效视频")
+  if (!stat.size) throw new Error($t("services.media.video.text_4b266f0827"))
   return { file: target, warnings }
 }

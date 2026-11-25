@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { loadPublicShareConfig } from "../../core/config/global.ts"
@@ -75,8 +78,8 @@ export function createHeyboxPreview({ signal, fetch = globalThis.fetch, loadConf
       const deadline = AbortSignal.any([active, AbortSignal.timeout(8_000)])
       const title = await readGameTitle(source.id, fetch, deadline).catch(() => undefined)
       if (active.aborted) return []
-      if (!title) return "暂无法读取小黑盒游戏名称。\n" + source.link
-      const card = { title, type: "public-link", owner: "小黑盒", id: "PC 游戏", showStats: false }
+      if (!title) return $t("services.heybox.preview.text_0d9cb24f84") + source.link
+      const card = { title, type: "public-link", owner: $t("services.heybox.preview.text_2d9ed741c0"), id: "PC 游戏", showStats: false }
       const limit = context.inlineImageByteLimit ?? 16 * 1024 * 1024
       let image = await render("bilibili-info", card).catch(() => undefined)
       if (image && image.byteLength > limit && !active.aborted) image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)

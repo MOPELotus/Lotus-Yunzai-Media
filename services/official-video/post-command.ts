@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 import { join } from "node:path"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -97,7 +100,7 @@ export function createMiyoushePostCommands({ signal: lifecycle, mediaRuntime, re
   const work = new Set<Promise<void>>()
   let recovery: Promise<unknown> | undefined
   const cancelRecovery = mediaRuntime?.whenReady(() => {
-    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn("[media] 米游社视频任务恢复失败。"))
+    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn($t("services.official-video.post-command.text_b4ceef2312")))
   })
 
   function identify(message: string, context: MessageFallbackContext) {
@@ -146,11 +149,11 @@ export function createMiyoushePostCommands({ signal: lifecycle, mediaRuntime, re
     } catch (error) {
       if (!active.aborted) {
         const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
-        try { await context.reply(unknown ? "米游社视频送达未确认，请核对当前会话。" : "米游社视频发送失败，可打开上面的原帖或视频链接。") }
+        try { await context.reply(unknown ? $t("services.official-video.post-command.text_a70a783e34") : $t("services.official-video.post-command.text_419dfd1d18")) }
         catch { /* The original connection may have closed after delivery. */ }
       }
     } finally {
-      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn("[media] 米游社视频任务清理失败。"))
+      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn($t("services.official-video.post-command.text_43bb146fc1")))
     }
   }
 
@@ -166,9 +169,9 @@ export function createMiyoushePostCommands({ signal: lifecycle, mediaRuntime, re
       const response = record(await request(target, { signal, headers: { Accept: "application/json", Referer: "https://www.miyoushe.com/" } }))
       const entry = record(record(response.data).post)
       const post = record(entry.post)
-      if (response.retcode !== 0 || String(post.post_id) !== id) return "米游社没有返回匹配的公开帖子。"
+      if (response.retcode !== 0 || String(post.post_id) !== id) return $t("services.official-video.post-command.text_0767e25797")
       const owner = text(record(entry.user).nickname, 80)
-      const title = text(post.subject, 160) || "米游社帖子"
+      const title = text(post.subject, 160) || $t("services.official-video.post-command.text_01561ca799")
       const blocks = contentBlocks(post)
       const cover = picture(post.cover)
       if (cover && !blocks.some(block => block.urls?.includes(cover))) blocks.unshift({ type: "image", urls: [cover] })
@@ -184,17 +187,17 @@ export function createMiyoushePostCommands({ signal: lifecycle, mediaRuntime, re
         if (image && image.byteLength > inlineLimit && Number(Bun.env.LOTUS_RENDER_SCALE ?? 4) > 2) {
           image = await render("article", card, { renderScale: 2 }).catch(() => undefined)
         }
-        if (image && image.byteLength <= inlineLimit) nodes.push(original ? [{ type: "image", file: image }, `原图：${original}`] : { type: "image", file: image })
+        if (image && image.byteLength <= inlineLimit) nodes.push(original ? [{ type: "image", file: image }, $t("services.official-video.post-command.text_fd04ac0732", { "original": original })] : { type: "image", file: image })
         else nodes.push(page.map(block => block.text ?? block.urls?.join("\n")).filter(Boolean).join("\n"))
       }
       const videos = Array.isArray(entry.vod_list) ? entry.vod_list : []
       const resolutions = record(videos[0]).resolutions
       const video = Array.isArray(resolutions) ? resolutions.map(row => sourceUrl(record(row).url)).find(url => url && isMiyousheVideoUrl(url)) : undefined
-      if (video) nodes.push(`视频地址：${video.href}`)
+      if (video) nodes.push($t("services.official-video.post-command.text_22f5fe65cc", { "href": video.href }))
       signal?.throwIfAborted()
       const onDelivered = video && videoDelivery(video, title, context)
       return nodes.length > 1 ? { type: "forward" as const, nodes, ...(onDelivered && { onDelivered }) } : intro
-    } catch { if (!signal?.aborted) return "暂时无法读取米游社公开帖子。" }
+    } catch { if (!signal?.aborted) return $t("services.official-video.post-command.text_e4bd695ca0") }
   }
 
   return {

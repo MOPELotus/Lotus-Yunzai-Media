@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { requestText, DouyinError, type DouyinFetch, type RequestOptions } from "./http.ts"
 import { WEB_UA } from "./signature.ts"
 import { generateNonceSignature } from "./guest-signature.ts"
@@ -50,7 +53,7 @@ export class DouyinVisitor {
     const deadline = Date.now() + timeoutMs
     const remaining = () => {
       const budget = deadline - Date.now()
-      if (budget <= 0) throw new DouyinError("timeout", "抖音游客校验超时")
+      if (budget <= 0) throw new DouyinError("timeout", $t("services.douyin.visitor.text_02b77b9098"))
       return budget
     }
     const value = await this.get({ refresh, previous: typeof previous === "object" ? previous.ttwid : previous, timeoutMs: remaining() })
@@ -76,18 +79,18 @@ export class DouyinVisitor {
       const { response } = await requestText(this.fetch, url, {
         redirect: "error", headers: { "User-Agent": WEB_UA, Cookie: Object.entries(cookies).map(([name, value]) => `${name}=${value}`).join("; ") },
       }, { timeoutMs: remaining(), headersOnly: true })
-      if (!response.ok) throw new DouyinError("visitor", `抖音游客校验 HTTP ${response.status}`)
+      if (!response.ok) throw new DouyinError("visitor", $t("services.douyin.visitor.text_63bebb4a59", { "status": response.status }))
       Object.assign(cookies, guestCookies(response))
     }
     await request()
     if (!cookies.UIFID && !cookies.UIFID_TEMP) {
-      if (!cookies.__ac_nonce) throw new DouyinError("visitor", "抖音页面未签发游客校验 nonce")
+      if (!cookies.__ac_nonce) throw new DouyinError("visitor", $t("services.douyin.visitor.text_9110b0a674"))
       cookies.__ac_signature = generateNonceSignature(cookies.__ac_nonce, { url, now: this.now() })
       cookies.__ac_referer = "__ac_blank"
       await request()
     }
     const uifid = cookies.UIFID || cookies.UIFID_TEMP
-    if (!uifid) throw new DouyinError("visitor", "抖音页面未签发可用游客 UIFID")
+    if (!uifid) throw new DouyinError("visitor", $t("services.douyin.visitor.text_d16a96b59b"))
     return { ttwid: cookies.ttwid, uifid }
   }
 
@@ -104,11 +107,11 @@ export class DouyinVisitor {
       method: "POST", redirect: "manual", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ region: "cn", aid: 1768, needFid: false, service: "www.ixigua.com", migrate_info: { ticket: "", source: "node" }, cbUrlProtocol: "https", union: true }),
     }, { timeoutMs })
-    if (!response.ok) throw new DouyinError("visitor", `游客身份获取失败 HTTP ${response.status}`)
+    if (!response.ok) throw new DouyinError("visitor", $t("services.douyin.visitor.text_254a09fad3", { "status": response.status }))
     const cookies = response.headers.getSetCookie?.() || [response.headers.get("set-cookie") || ""]
     const cookie = cookies.find(value => /(?:^|[;,]\s*)ttwid=/.test(value)) || ""
     const value = cookie.match(/(?:^|[;,]\s*)ttwid=([^;]+)/)?.[1]
-    if (!value) throw new DouyinError("visitor", "游客接口未返回 ttwid")
+    if (!value) throw new DouyinError("visitor", $t("services.douyin.visitor.text_97ff6221df"))
     const seconds = Number(cookie.match(/max-age=(\d+)/i)?.[1] || 86400)
     this.identity = { value, expires: this.now() + Math.min(seconds, 86400) * 1000 }
     return value

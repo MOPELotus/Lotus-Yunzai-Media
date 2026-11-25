@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { buildMediaMessageText } from "../media/message.ts"
@@ -117,14 +120,14 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
     const limit = 512 * 1024
     if (!response.ok || !response.body || Number(response.headers.get("content-length")) > limit) {
       await response.body?.cancel().catch(() => {})
-      throw new Error("酷狗公开分享页暂时不可用。")
+      throw new Error($t("services.music.share-link.text_2eaa9fcc04"))
     }
     let size = 0, html = ""
     const decoder = new TextDecoder()
     for await (const chunk of response.body) {
       active.throwIfAborted()
       size += chunk.byteLength
-      if (size > limit) throw new Error("酷狗分享页超过读取限制。")
+      if (size > limit) throw new Error($t("services.music.share-link.text_dc09221aba"))
       html += decoder.decode(chunk, { stream: true })
     }
     html += decoder.decode()
@@ -132,12 +135,12 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
       const id = /\bvar\s+mv_id\s*=\s*"([1-9]\d{0,19})"\s*;/u.exec(html)?.[1]
       const code = /\bvar\s+encode_mvid\s*=\s*"([a-z0-9]+)"\s*;/u.exec(html)?.[1]
       if (id && code === target.mvCode) return { platform: "kugou", kind: "mv", id, url: target.url }
-      throw new Error("未能核实酷狗分享页中的 MV 编号。")
+      throw new Error($t("services.music.share-link.text_671a355629"))
     }
     const match = kugouSharePattern.exec(html)
     let items: unknown
     try { if (match?.[1]) items = JSON.parse(match[1]) }
-    catch { throw new Error("酷狗公开分享页返回了无法识别的单曲资料。") }
+    catch { throw new Error($t("services.music.share-link.text_82cd2c975e")) }
     const item = Array.isArray(items) && items.length === 1 ? items[0] : undefined
     const mixId: unknown = item?.mixsongid
     const hash: unknown = item?.hash
@@ -145,7 +148,7 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
         neteaseId.test(String(mixId)) && typeof hash === "string" && /^[a-f0-9]{32}$/iu.test(hash)) {
       return { platform: "kugou", kind: "track", id: String(mixId), hash: hash.toLowerCase(), url: target.url }
     }
-    throw new Error("未能核实酷狗分享页中的单曲资料。")
+    throw new Error($t("services.music.share-link.text_2d77b3150e"))
   }
   let url = new URL(target.url)
   for (let hop = 0; hop < 3; hop++) {
@@ -160,5 +163,5 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
     if (parsed.kind !== "short") return parsed
     url = new URL(parsed.url)
   }
-  throw new Error(target.platform === "soda" ? "汽水短链未指向可核实的单曲。" : "网易云短链未跳转到可识别的歌曲或节目。")
+  throw new Error(target.platform === "soda" ? $t("services.music.share-link.text_e11ef272fc") : $t("services.music.share-link.text_2d15c6ba90"))
 }

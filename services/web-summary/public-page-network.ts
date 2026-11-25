@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { lookup } from "node:dns/promises"
 import { BlockList, isIP } from "node:net"
 import { hostname, networkInterfaces } from "node:os"
@@ -42,7 +45,7 @@ function blocks(ranges: readonly string[]) {
     const family = address && ipFamily(isIP(address))
     const max = family === "ipv4" ? 32 : 128
     if (!address || !family || extra !== undefined || (size !== undefined && (!/^\d{1,3}$/u.test(size) || Number(size) > max))) {
-      throw new Error("网页摘要的本地出站地址配置无效。")
+      throw new Error($t("services.web-summary.public-page-network.text_28b0926fac"))
     }
     list.addSubnet(address, size === undefined ? max : Number(size), family)
   }
@@ -108,7 +111,7 @@ export async function deploymentPublicPageControls(modelUrl?: string, root = ins
   const extra = mapping(global.web_summary)
   const denyHosts = extra.deny_hosts === undefined ? [] : parsePublicPageDenyHosts(extra.deny_hosts)
   const denyNetworks = extra.deny_networks === undefined ? [] : parsePublicPageDenyNetworks(extra.deny_networks)
-  if (!denyHosts || !denyNetworks) throw new Error("网页摘要的出站排除配置无效。")
+  if (!denyHosts || !denyNetworks) throw new Error($t("services.web-summary.public-page-network.text_946f024955"))
   return { hosts: [...hosts, normalizeHost(server.hostname), normalizeHost(hostname()), ...denyHosts.map(normalizeHost)],
     networks: [...Object.values(networkInterfaces()).flatMap(entries => (entries ?? []).map(entry => entry.cidr ?? entry.address)),
       ...denyNetworks] }
@@ -142,7 +145,7 @@ async function outboundAddressPolicy(controls: PublicPageControls, resolve: Look
         throw error
       })
       for (const { address, family } of matches) {
-        if (!ipFamily(family) || isIP(address) !== family || address.includes("%")) throw new Error("受管地址的 DNS 答复无效。")
+        if (!ipFamily(family) || isIP(address) !== family || address.includes("%")) throw new Error($t("services.web-summary.public-page-network.text_112bb4f058"))
         block.addAddress(address, ipFamily(family))
       }
     }
@@ -167,7 +170,7 @@ export function createPublicPageNetwork({ fetcher = fetch, resolve = host => loo
         return await fetcher(wire, { method: "GET", headers: { Host: url.hostname, Accept: "text/html" },
           redirect: "manual", proxy: false, keepalive: false, credentials: "omit", signal: requestSignal,
           tls: { serverName: url.hostname, rejectUnauthorized: true, checkServerIdentity(name: string, certificate: PeerCertificate) {
-            return name === url.hostname ? checkServerIdentity(name, certificate) : new Error("网页证书的域名不匹配。")
+            return name === url.hostname ? checkServerIdentity(name, certificate) : new Error($t("services.web-summary.public-page-network.text_2fc606b4d1"))
           } },
         })
       } catch (error) {

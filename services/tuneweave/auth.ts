@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { TuneWeaveRequestOptions } from "./service.ts"
 
 export interface TuneWeaveQrProfile {
@@ -25,11 +28,11 @@ interface QrProfileOptions {
 // Login uses credential_mode=both, so the same alias can resolve that identity.
 export async function resolveQrProfile(tuneweave: QrProfileRequest, { platform, alias, profile, signal }: QrProfileOptions) {
   const checkCancelled = () => {
-    if (signal?.aborted) throw new Error("扫码登录已取消")
+    if (signal?.aborted) throw new Error($t("services.tuneweave.auth.text_f6c21b7575"))
   }
   const checkBinding = (value: TuneWeaveQrProfile | undefined | null) => {
     if ((value?.platform != null && value.platform !== platform) || (value?.account != null && value.account !== alias)) {
-      throw new Error("平台登录账号不匹配，请重新登录")
+      throw new Error($t("services.tuneweave.auth.text_941160bb52"))
     }
   }
   const verified = (value: TuneWeaveQrProfile | undefined | null): value is VerifiedQrProfile => {
@@ -45,6 +48,6 @@ export async function resolveQrProfile(tuneweave: QrProfileRequest, { platform, 
   }
   checkCancelled()
   checkBinding(profile)
-  if (!verified(profile)) throw new Error("平台登录身份未核验，请重新登录")
+  if (!verified(profile)) throw new Error($t("services.tuneweave.auth.text_73070f5f12"))
   return profile
 }

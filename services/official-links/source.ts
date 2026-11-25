@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 import { parseXLink, xPreview, type OfficialXLink } from "./x.ts"
 
@@ -72,10 +75,10 @@ export async function readOfficialLink(fetcher: OfficialLinkFetch, url: URL, sig
   const response = await fetcher(url, { redirect: "error", credentials: "omit", signal, headers: { Accept: accept } })
   const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
   const reader = response.body?.getReader()
-  if (!reader) throw new Error("来源没有返回公开内容。")
+  if (!reader) throw new Error($t("services.official-links.source.text_b02e2646b4"))
   try {
     if (!response.ok || response.redirected || !accept.split(",").includes(mime) ||
-        Number(response.headers.get("content-length")) > limit) throw new Error("来源没有返回可用的公开内容。")
+        Number(response.headers.get("content-length")) > limit) throw new Error($t("services.official-links.source.text_8c9d933fee"))
     const chunks: Uint8Array[] = []
     let size = 0
     for (;;) {
@@ -83,7 +86,7 @@ export async function readOfficialLink(fetcher: OfficialLinkFetch, url: URL, sig
       const { value } = await reader.read()
       if (!value) return Buffer.concat(chunks, size)
       size += value.byteLength
-      if (size > limit) throw new Error("来源响应超过预览大小限制。")
+      if (size > limit) throw new Error($t("services.official-links.source.text_25bb6253fb"))
       chunks.push(value)
     }
   } finally {
@@ -150,7 +153,7 @@ async function telegram(input: Extract<OfficialLink, { platform: "telegram" }>, 
     url?.protocol === "https:" && /^cdn\d{1,2}\.telesco\.pe$/u.test(url.hostname) && url.pathname.startsWith("/file/") ? url : undefined
   const photoCover = await cover(fetcher, image, signal)
   if (!desc && !photoCover) return
-  return { title: "Telegram 公开消息", owner, desc, cover: photoCover }
+  return { title: $t("services.official-links.source.text_0f4757f095"), owner, desc, cover: photoCover }
 }
 
 export async function getV2exArticle(input: Extract<OfficialLink, { platform: "v2ex" }>,

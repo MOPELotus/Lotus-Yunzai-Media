@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import { join } from "node:path"
@@ -78,7 +81,7 @@ async function fetchPost(start: URL, fetch: MediaFetch, signal: AbortSignal) {
     let length = 0
     for await (const part of response.body) {
       length += part.byteLength
-      if (length > maxHtml) throw new Error("皮皮虾页面过大。")
+      if (length > maxHtml) throw new Error($t("services.pipixia.command.text_0ad78ca872"))
       chunks.push(part)
     }
     const document = load(Buffer.concat(chunks, length).toString("utf8"))
@@ -87,7 +90,7 @@ async function fetchPost(start: URL, fetch: MediaFetch, signal: AbortSignal) {
     const item = row(row(data.ppxItemDetail).item)
     if (item.item_id_str !== id || item.status !== 0) break
     const source = new URL(url.pathname, origin).href
-    const title = clean(item.content, 160) || clean(row(item.share).title, 160) || "皮皮虾作品"
+    const title = clean(item.content, 160) || clean(row(item.share).title, 160) || $t("services.pipixia.command.text_4ad3421bfa")
     const owner = clean(row(item.author).name, 80)
     const cover = sources(item.cover, coverUrl)[0]?.href
     const video = row(item.video)
@@ -102,11 +105,11 @@ async function fetchPost(start: URL, fetch: MediaFetch, signal: AbortSignal) {
       const comment = row(row(cell).comment_info)
       const text = clean(comment.text, 500)
       if (!text) return []
-      const author = clean(row(comment.user).name, 80) || clean(row(comment.user).nickname, 80) || "匿名用户"
+      const author = clean(row(comment.user).name, 80) || clean(row(comment.user).nickname, 80) || $t("services.pipixia.command.text_dbb8915955")
       const created = httpNumber(comment.create_time)
       const time = created && created < 4_102_444_800
         ? new Date(created * 1_000).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }) : ""
-      return [`${author}\n${text}\n${time ? time + " · " : ""}点赞 ${httpNumber(comment.like_count) ?? 0} · 回复 ${httpNumber(comment.reply_count) ?? 0}`]
+      return [$t("services.pipixia.command.text_6e5d8d52af", { "author": author, "text": text, "value3": time ? time + " · " : "", "value4": httpNumber(comment.like_count) ?? 0, "value5": httpNumber(comment.reply_count) ?? 0 })]
     }) : []
     return { id, source, title, owner, cover, downloadable, stat, comments, duration: httpNumber(item.duration), createdAt: httpNumber(item.create_time) }
   }
@@ -127,7 +130,7 @@ export function createPipixiaCommands({ signal: lifecycle, mediaRuntime, fetch =
   const deliveries = new Set<Promise<void>>()
   let recovery: Promise<unknown> | undefined
   const cancelRecovery = mediaRuntime?.whenReady(() => {
-    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn("[media] 皮皮虾任务恢复失败。"))
+    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn($t("services.pipixia.command.text_81557dd240")))
   })
 
   function identify(message: string, context: MessageFallbackContext) {
@@ -150,10 +153,10 @@ export function createPipixiaCommands({ signal: lifecycle, mediaRuntime, fetch =
       const options = await settings.settings(cfg.tools)
       if (!options.enable || (context.message_type === "private" && !options.private)) return
       const post = await fetchPost(target, fetch, AbortSignal.any([active, AbortSignal.timeout(12_000)]))
-      if (!post) return "皮皮虾未返回该公开作品。"
+      if (!post) return $t("services.pipixia.command.text_ebd873ab10")
       const { like, reply, share, view } = post.stat
-      const counts = [`点赞 ${like ?? "未记录"}`, `评论 ${reply ?? "未记录"}`, `分享 ${share ?? "未记录"}`, `播放 ${view ?? "未记录"}`].join(" · ")
-      const witness = [`皮皮虾 · ${post.title}`, post.owner ? `作者：${post.owner}` : undefined, counts, post.source].filter(Boolean)
+      const counts = [$t("services.pipixia.command.text_2dc8280c99", { "value1": like ?? $t("services.pipixia.command.text_7450cc5b16") }), $t("services.pipixia.command.text_6a11edf008", { "value1": reply ?? $t("services.pipixia.command.text_7450cc5b16") }), $t("services.pipixia.command.text_f1e29490a6", { "value1": share ?? $t("services.pipixia.command.text_7450cc5b16") }), $t("services.pipixia.command.text_a0c6561200", { "value1": view ?? $t("services.pipixia.command.text_7450cc5b16") })].join(" · ")
+      const witness = [$t("services.pipixia.command.text_c91e9942fb", { "title": post.title }), post.owner ? $t("services.pipixia.command.text_4c59ffb174", { "owner": post.owner }) : undefined, counts, post.source].filter(Boolean)
       const card = await render("pipixia-info", { ...post, id: `皮皮虾 · ${post.id}` }).catch(() => undefined)
       active.throwIfAborted()
       const head = card && card.byteLength <= (context.inlineImageByteLimit ?? 16 * 1024 * 1024)
@@ -182,19 +185,19 @@ export function createPipixiaCommands({ signal: lifecycle, mediaRuntime, fetch =
               } catch (error) {
                 if (!active.aborted) {
                   const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
-                  await context.reply(unknown ? "视频送达未确认，请核对当前会话。" : "皮皮虾视频暂未送达，可打开上面的原帖。")
+                  await context.reply(unknown ? $t("services.pipixia.command.text_63b89edd23") : $t("services.pipixia.command.text_8679d28932"))
                 }
               } finally {
-                if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn("[media] 皮皮虾任务清理失败。"))
+                if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn($t("services.pipixia.command.text_de8df796ea")))
               }
             }
-            if (!active.aborted && context.forward && post.comments.length) await context.forward(post.comments, "皮皮虾评论")
+            if (!active.aborted && context.forward && post.comments.length) await context.forward(post.comments, $t("services.pipixia.command.text_bd70240f54"))
           })()
           deliveries.add(pending)
           try { await pending } finally { deliveries.delete(pending) }
         },
       }
-    } catch { if (!active.aborted) return "暂时无法读取皮皮虾公开作品。" }
+    } catch { if (!active.aborted) return $t("services.pipixia.command.text_c594b7819d") }
   }
 
   return {

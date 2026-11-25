@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -15,7 +18,7 @@ const shortHost = "https://v.ixigua.com"
 const feature = "[media] 西瓜视频解析"
 const redirect = new Set([301, 302, 303, 307, 308])
 const linkPattern = /(?<=^|[\s\p{Ps}\p{Pi}"'：，、；])(?:https?:\/\/|(?=(?:www|v|m)\.ixigua\.com\/))[^\s<>"'\p{Pe}\p{Pf}。，、！？；：]+/giu
-export const xiguaFields = [["enable", "解析西瓜视频链接"], ["private", "西瓜视频私聊自动解析"]] as const
+export const xiguaFields = [["enable", $t("services.xigua.preview.text_4ca75a1607")], ["private", $t("services.xigua.preview.text_d06cba7a25")]] as const
 
 type Share = { readonly id: string; readonly link: string } | { readonly id?: undefined; readonly link: string }
 
@@ -115,17 +118,17 @@ async function readCover(cover: URL | undefined, fetch: MediaFetch, signal: Abor
   if (!cover) return
   try {
     return await fetchImageBytes(cover.href, { signal, maxBytes: 2 * 1024 * 1024, fetch: async (value, options) => {
-      if (value !== cover.href) throw new Error("西瓜视频封面地址已变化。")
+      if (value !== cover.href) throw new Error($t("services.xigua.preview.text_560ddacef1"))
       const response = await fetch(value, { ...options, credentials: "omit", redirect: "error" })
       if (response.status === 200 && !response.redirected && /^image\/(?:jpeg|png|webp)(?:;|$)/iu.test(response.headers.get("content-type") ?? "")) return response
       await response.body?.cancel().catch(() => undefined)
-      throw new Error("西瓜视频封面不可用。")
+      throw new Error($t("services.xigua.preview.text_866aa30a0f"))
     } })
   } catch { signal.throwIfAborted() }
 }
 
 export function createXiguaPreview({ signal, fetch = globalThis.fetch, loadConfig = loadGlobalConfig,
-  render = renderSourceCard, settings = createPublicShareSettings("xigua", "西瓜视频") }: {
+  render = renderSourceCard, settings = createPublicShareSettings("xigua", $t("services.xigua.preview.text_939dc2066a")) }: {
   readonly signal?: AbortSignal
   readonly fetch?: MediaFetch
   readonly loadConfig?: typeof loadGlobalConfig
@@ -141,7 +144,7 @@ export function createXiguaPreview({ signal, fetch = globalThis.fetch, loadConfi
       if (context.message_type === "private" && !connection) return
       const active = AbortSignal.any([signal, connection].filter((value): value is AbortSignal => value !== undefined))
       if (active.aborted) return []
-      const unavailable = "暂无法读取西瓜视频公开预览。\n" + source.link
+      const unavailable = $t("services.xigua.preview.text_57c12efee6") + source.link
       let enabled = false
       try {
         const config = await loadConfig()
@@ -161,7 +164,7 @@ export function createXiguaPreview({ signal, fetch = globalThis.fetch, loadConfi
         if (active.aborted) return []
         const card = { title: post.title, owner: post.owner, id: `西瓜视频 · ${resolved.id}`, type: "video", cover,
           duration: post.duration, createdAt: post.createdAt, showStats: false,
-          desc: post.view === undefined ? undefined : `播放 ${post.view.toLocaleString("zh-CN")}` }
+          desc: post.view === undefined ? undefined : $t("services.xigua.preview.text_a0c6561200", { "value1": post.view.toLocaleString("zh-CN") }) }
         const limit = context.inlineImageByteLimit ?? 16 * 1024 * 1024
         let image = await render("bilibili-info", card).catch(() => undefined)
         if (image && image.byteLength > limit && !active.aborted) image = await render("bilibili-info", card, { renderScale: 2 }).catch(() => undefined)

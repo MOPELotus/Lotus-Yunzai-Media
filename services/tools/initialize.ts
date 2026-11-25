@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadGlobalConfig } from "../../core/config/global.ts";
@@ -17,5 +20,5 @@ export async function prepareMediaEnvironment(root: URL, signal: AbortSignal, on
   signal.throwIfAborted();
   const tune = new TuneWeaveService({ root: resolve(directory, "data/tuneweave"), config: config.tuneweave });
   const result = await tune.initialize({ signal, platform: "netease", onTaskProgress });
-  if (!result.ok) throw new Error(result.message || "TuneWeave 初始化未完成");
+  if (!result.ok) throw new Error(result.message || $t("services.tools.initialize.text_ee13a6993e"));
 }

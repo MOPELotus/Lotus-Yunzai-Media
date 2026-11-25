@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { createHash } from "node:crypto"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { createBiliProvider } from "../subscriptions/bilibili/index.ts"
@@ -8,10 +11,10 @@ import { BilibiliService, biliDynamicId, isBiliVideoPage } from "./service.ts"
 
 type Request = BilibiliService["fetch"]
 const api = "https://api.bilibili.com"
-const expired = "独立的 B 站动态登录已失效，请由主人在好友私聊重新扫码。"
-const missing = "发评论需要独立的 B 站动态登录。请由主人在好友私聊发送 #扫码B站动态登录。"
-const unknown = "B 站评论提交结果未确认，请先到原帖核对。"
-const replay = "这条请求已经处理，请到原帖核对。"
+const expired = $t("services.bilibili.comment-write.text_b4a8db42d4")
+const missing = $t("services.bilibili.comment-write.text_04e4385b62")
+const unknown = $t("services.bilibili.comment-write.text_725c2620c1")
+const replay = $t("services.bilibili.comment-write.text_1cec89927a")
 
 function record(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -28,13 +31,13 @@ async function json(response: Response) {
   const limit = 2 * 1024 * 1024
   if (!response.ok || response.redirected || !response.body || Number(response.headers.get("content-length")) > limit) {
     await response.body?.cancel()
-    throw new Error("B 站接口没有返回可确认的数据。")
+    throw new Error($t("services.bilibili.comment-write.text_c2f55af816"))
   }
   const chunks = []
   let size = 0
   for await (const bytes of response.body) {
     size += bytes.byteLength
-    if (size > limit) throw new Error("B 站响应超出大小限制。")
+    if (size > limit) throw new Error($t("services.bilibili.comment-write.text_579eff7c7e"))
     chunks.push(bytes)
   }
   return record(JSON.parse(Buffer.concat(chunks, size).toString("utf8")))
@@ -76,9 +79,9 @@ export function createBiliCommentWriter(fetch: Request = globalThis.fetch, getRe
       if (await redis.get(key)) return replay
       const target = await targetOf(url, active)
       if (!allowed()) return
-      if (!target) return "无法确认这条 B 站视频或动态的评论区。"
+      if (!target) return $t("services.bilibili.comment-write.text_cca123f6ee")
       lock = await lockBiliLogin(redis)
-      if (!lock) return "B 站会话正在使用，请稍后再试。"
+      if (!lock) return $t("services.bilibili.comment-write.text_d256e8e810")
       if (await redis.get(key)) return replay
       const state = await readBiliCommentLogin(redis)
       const sess = state?.fields.get("SESSDATA")
@@ -91,13 +94,13 @@ export function createBiliCommentWriter(fetch: Request = globalThis.fetch, getRe
       const identity = record(profile.data)
       if (!allowed()) return
       if (profile.code === -101 || identity.isLogin === false) return expired
-      if (profile.code !== 0 || identity.isLogin !== true || biliDecimalId(identity.mid_str ?? identity.mid) !== uid) return "B 站登录身份无法确认，评论未发送。"
+      if (profile.code !== 0 || identity.isLogin !== true || biliDecimalId(identity.mid_str ?? identity.mid) !== uid) return $t("services.bilibili.comment-write.text_a8fc5ed63c")
       if (!allowed()) return
       if (await redis.set(key, "claimed", { NX: true, EX: 86_400 }) !== "OK") return replay
       const current = await readBiliCommentLogin(redis)
       if (!allowed()) return
       if (current?.fields.get("DedeUserID") !== uid || current.fields.get("SESSDATA") !== sess || current.fields.get("bili_jct") !== csrf) {
-        return "B 站登录已变更，评论未发送。"
+        return $t("services.bilibili.comment-write.text_7869275168")
       }
       dispatched = true
       const response = await request(fetch, new URL("/x/v2/reply/add", api), active, { method: "POST",
@@ -118,14 +121,14 @@ export function createBiliCommentWriter(fetch: Request = globalThis.fetch, getRe
         const reply = record(record(result.data).reply)
         const rpid = biliDecimalId(reply.rpid_str ?? reply.rpid)
         if (rpid && biliDecimalId(reply.oid_str ?? reply.oid) === target.oid && reply.type === target.type &&
-            biliDecimalId(reply.mid_str ?? reply.mid ?? record(reply.member).mid) === uid) return `B 站评论已发送，评论编号 ${rpid}。`
+            biliDecimalId(reply.mid_str ?? reply.mid ?? record(reply.member).mid) === uid) return $t("services.bilibili.comment-write.text_3b75199d3c", { "rpid": rpid })
         return unknown
       }
       if (result.code === -101 || result.code === -111) return expired
-      if (result.code === 12025) return "B 站未接受该评论，内容过长。"
-      if (result.code === 12002 || result.code === 12003 || result.code === 12052) return "B 站已关闭这条内容的评论区。"
-      return Number.isInteger(result.code) ? "B 站未接受这条评论。" : unknown
-    } catch { if (allowed()) return dispatched ? unknown : "无法核实 B 站评论区或登录身份，评论未发送。" }
+      if (result.code === 12025) return $t("services.bilibili.comment-write.text_81ef4fe4f5")
+      if (result.code === 12002 || result.code === 12003 || result.code === 12052) return $t("services.bilibili.comment-write.text_cd3cf0ad7f")
+      return Number.isInteger(result.code) ? $t("services.bilibili.comment-write.text_4ca7c04ebf") : unknown
+    } catch { if (allowed()) return dispatched ? unknown : $t("services.bilibili.comment-write.text_3a87e1deda") }
     finally { await lock?.close().catch(() => {}) }
   }
 }

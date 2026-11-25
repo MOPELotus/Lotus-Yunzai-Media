@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 
 const origin = "https://zh.minecraft.wiki"
@@ -66,10 +69,10 @@ async function request(parameters: Record<string, string>, transport: NonNullabl
       !/^application\/json(?:;|$)/iu.test(response.headers.get("content-type") ?? "") ||
       Number(response.headers.get("content-length")) > maxBytes) {
     void response.body?.cancel().catch(() => {})
-    throw new Error("Minecraft Wiki 响应异常")
+    throw new Error($t("services.mcwiki.article.text_68d450452f"))
   }
   const reader = response.body?.getReader()
-  if (!reader) throw new Error("Minecraft Wiki 响应为空")
+  if (!reader) throw new Error($t("services.mcwiki.article.text_0aaf5975f8"))
   const decoder = new TextDecoder("utf-8", { fatal: true })
   const cancel = () => { void reader.cancel().catch(() => {}) }
   signal.addEventListener("abort", cancel, { once: true })
@@ -81,7 +84,7 @@ async function request(parameters: Record<string, string>, transport: NonNullabl
       const { value, done } = await reader.read()
       if (done) break
       bytes += value.byteLength
-      if (bytes > maxBytes) throw new Error("Minecraft Wiki 响应过长")
+      if (bytes > maxBytes) throw new Error($t("services.mcwiki.article.text_a797551c5a"))
       text += decoder.decode(value, { stream: true })
     }
     signal.throwIfAborted()
@@ -118,7 +121,7 @@ function projectLead(html: string) {
 }
 
 export async function readMcWikiArticle(title: string, { transport = fetch, signal }: McWikiReadOptions = {}): Promise<McWikiResult> {
-  if (mcWikiTitle(title) !== title) throw new TypeError("Minecraft Wiki 条目名称无效")
+  if (mcWikiTitle(title) !== title) throw new TypeError($t("services.mcwiki.article.text_28c663e872"))
   const deadline = signal ? AbortSignal.any([signal, AbortSignal.timeout(9_000)]) : AbortSignal.timeout(9_000)
   let url = mcWikiLink(title)
   try {

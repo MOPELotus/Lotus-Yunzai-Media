@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { dirname } from "node:path"
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import { isBiliVideoPage } from "../bilibili/service.ts"
@@ -6,7 +9,7 @@ import { createSubscriptionDelivery } from "./delivery.ts"
 import type { DynamicPost, LockSubscriptionFile, SubscriptionProvider } from "./types.ts"
 import { authorVideoType, createAuthorVideoStore, readLegacyAuthorVideos, type AuthorRoute } from "./xhh-author-store.ts"
 
-const platform = "(?:哔哩哔哩|b站|bilibili|bili)"
+const platform = $t("services.subscriptions.xhh-author-command.text_fc35ec66d4")
 const edit = new RegExp("^[#/]?(添加|订阅|开启|取消|删除|关闭)" + platform + "视频推送\\s*(?:UID\\s*)?([1-9]\\d{0,19})?$", "iu")
 const legacyEdit = new RegExp("^[#/]?(添加|开启|取消|删除|关闭)" + platform + "推送([1-9]\\d{0,19})?$", "iu")
 const list = new RegExp("^[#/]" + platform + "视频推送列表$", "iu")
@@ -91,36 +94,36 @@ export function createAuthorVideoModule({ directory, lockFile, provider, setting
     try {
       if (command.kind === "list") {
         const routes = (await store.routes()).filter(route => route.chat === chat && route.bot === bot)
-        return routes.length ? ["本群 B 站投稿订阅", ...routes.map(row => `${row.name} · UID ${row.uid}`)].join("\n")
-          : "本群没有 B 站投稿订阅。"
+        return routes.length ? [$t("services.subscriptions.xhh-author-command.text_df70bcd9fb"), ...routes.map(row => `${row.name} · UID ${row.uid}`)].join("\n")
+          : $t("services.subscriptions.xhh-author-command.text_5f28895039")
       }
       if (!context.member?.is_admin && !context.member?.is_owner &&
           !(typeof context.user_id === "number" && context.isBotMaster?.(context.user_id))) {
-        return "只有本群群主、管理员或当前机器人主人可以修改投稿订阅。"
+        return $t("services.subscriptions.xhh-author-command.text_71e0fa0875")
       }
       const signal = context.groupActivitySignal ? AbortSignal.any([active, context.groupActivitySignal]) : active
       if (command.kind === "migrate") {
         if (command.bot && command.bot !== bot) return
         if (!command.bot && !(typeof context.user_id === "number" && context.isBotMaster?.(context.user_id))) {
-          return "请在指令末尾明确填写接收旧订阅的机器人 QQ。"
+          return $t("services.subscriptions.xhh-author-command.text_a6a196efdc")
         }
         const legacy = await readLegacyAuthorVideos(dirname(directory), chat, wall, signal)
-        if (!legacy.length) return "未发现当前群的旧 B 站投稿订阅。"
+        if (!legacy.length) return $t("services.subscriptions.xhh-author-command.text_a9c945b62e")
         const count = await store.add(group, legacy, signal)
-        return `已为当前群迁移 ${count} 条 B 站投稿订阅，已存在的记录保留。`
+        return $t("services.subscriptions.xhh-author-command.text_21accfecd3", { "count": count })
       }
       const uid = command.uid || numericId(await quotedAuthor?.(context))
-      if (!uid) return "请提供作者 UID 或引用可识别的 B 站视频。"
+      if (!uid) return $t("services.subscriptions.xhh-author-command.text_5e712e6ce4")
       if (command.kind === "remove") {
-        return await store.remove(group, uid, signal) ? `已取消 UID ${uid} 的 B 站投稿订阅。` : "本群没有订阅该作者的投稿。"
+        return await store.remove(group, uid, signal) ? $t("services.subscriptions.xhh-author-command.text_fbc4a4e39b", { "uid": uid }) : $t("services.subscriptions.xhh-author-command.text_b2cae40c95")
       }
       const profile = await provider.profile(uid, { signal, allowUnverified: true })
-      if (!profile || profile.uid !== uid) return "未找到这位 B 站作者。"
+      if (!profile || profile.uid !== uid) return $t("services.subscriptions.xhh-author-command.text_68262f0b55")
       const name = profile.name.replace(/[\p{Cc}\p{Cf}]/gu, " ").trim().slice(0, 80) || uid
       const count = await store.add(group, [{ uid, name, createdAfter: wall }], signal)
-      return count ? `已订阅 ${name}（UID ${uid}）的新投稿。` : `本群已经订阅 ${name} 的投稿。`
+      return count ? $t("services.subscriptions.xhh-author-command.text_a9b832edb7", { "name": name, "uid": uid }) : $t("services.subscriptions.xhh-author-command.text_82d785f89f", { "name": name })
     } catch {
-      if (!active.aborted) return "B 站投稿订阅暂时无法处理，请稍后重试。"
+      if (!active.aborted) return $t("services.subscriptions.xhh-author-command.text_cff7c2e646")
     }
   }
 

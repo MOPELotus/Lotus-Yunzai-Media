@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { prepareBuiltinFonts, builtinFontFallback } from "../../../../packages/skia/builtin-fonts.ts";
 import { existsSync } from "node:fs";
 import { builtinResourceDirectory } from "../../../../lib/builtin-resources.ts";
@@ -267,9 +270,9 @@ async function newsImage(p: SourceCanvas,src: string | Buffer | undefined){
  p.image(typeof src==="string"?src:img,30,p.y,w,h,{radius:14});p.y+=h+20
 }
 function mediaStats(data: SourceCard,template: SourceTemplate){
- const s=data.stat||{},format=(n: number | string | undefined)=>typeof n==='string'?n:n===undefined?'未记录':damageNumber(n)
- const stats=data.type==='live'?[['直播状态',data.liveStatus],['在线人数',format(data.online)]]:[['点赞',format(s.like)],['评论',format(s.reply)],...((template==='pipixia-info'||template==='kuaishou-info')?[['播放',format(s.view)]]:[['收藏',format(s.favorite)]]),...(template==='bilibili-info'?[['投币',format(s.coin)],['播放',format(s.view)],['弹幕',format(s.danmaku)]]:template==='acfun-info'?[['播放',format(s.view)],['弹幕',format(s.danmaku)],['香蕉',format(s.coin)]]:[['分享',format(s.share)]])]
- return stats.map(([label,value])=>`${label} ${value||'未记录'}`).join('    ')
+ const s=data.stat||{},format=(n: number | string | undefined)=>typeof n==='string'?n:n===undefined?$t("core.render.source-cards.text_7450cc5b16"):damageNumber(n)
+ const stats=data.type==='live'?[[$t("core.render.source-cards.text_85e6e0f6ec"),data.liveStatus],[$t("core.render.source-cards.text_e8ecf4c3da"),format(data.online)]]:[[$t("core.render.source-cards.text_aced5d7f9f"),format(s.like)],[$t("core.render.source-cards.text_6849b8254d"),format(s.reply)],...((template==='pipixia-info'||template==='kuaishou-info')?[[$t("core.render.source-cards.text_c3396195e9"),format(s.view)]]:[[$t("core.render.source-cards.text_60a53514eb"),format(s.favorite)]]),...(template==='bilibili-info'?[[$t("core.render.source-cards.text_9e7e005e15"),format(s.coin)],[$t("core.render.source-cards.text_c3396195e9"),format(s.view)],[$t("core.render.source-cards.text_2591ec6870"),format(s.danmaku)]]:template==='acfun-info'?[[$t("core.render.source-cards.text_c3396195e9"),format(s.view)],[$t("core.render.source-cards.text_2591ec6870"),format(s.danmaku)],[$t("core.render.source-cards.text_dbf9f9c94f"),format(s.coin)]]:[[$t("core.render.source-cards.text_7e564575eb"),format(s.share)]])]
+ return stats.map(([label,value])=>`${label} ${value||$t("core.render.source-cards.text_7450cc5b16")}`).join('    ')
 }
 interface MediaNewsHeader {
  readonly owner: string
@@ -327,11 +330,11 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
  // genshin mysNews content order inside Miao help/index's elemental group container.
  const article=template==='article'
  const close=openNews(p,{
-  owner:data.owner||'作者资料未记录',
-  title:data.title||'作品信息',
-  byline:article?`第 ${data.page||1} 页`:data.id||'',
+  owner:data.owner||$t("core.render.source-cards.text_5ac9b4ea35"),
+  title:data.title||$t("core.render.source-cards.text_9c91ccc4c4"),
+  byline:article?$t("core.render.source-cards.text_bee11b0726", { "value1": data.page||1 }):data.id||'',
   avatar:data.avatar,
-  metadata:article||data.type==="public-link"?undefined:[data.type==='live'?'直播':data.type==='gallery'?'图集':data.type==='live_photo'?'动态图片':data.type==='article'?'文章':data.type==='share'?'分享':'视频',data.duration?`${Math.floor(data.duration/60)}分${Math.floor(data.duration%60)}秒`:'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?`${data.media.length} 个媒体项`:''].filter(Boolean).join(' · '),
+  metadata:article||data.type==="public-link"?undefined:[data.type==='live'?$t("core.render.source-cards.text_e472b37cf9"):data.type==='gallery'?$t("core.render.source-cards.text_0981f587b3"):data.type==='live_photo'?$t("core.render.source-cards.text_1f2902d7d1"):data.type==='article'?$t("core.render.source-cards.text_7d5a89f6b1"):data.type==='share'?$t("core.render.source-cards.text_7e564575eb"):$t("core.render.source-cards.text_c20f7618d3"),data.duration?$t("core.render.source-cards.text_b330f86837", { "value1": Math.floor(data.duration/60), "value2": Math.floor(data.duration%60) }):'',data.createdAt?new Date(data.createdAt*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'',data.media?.length?$t("core.render.source-cards.text_a1b3c9418d", { "length": data.media.length }):''].filter(Boolean).join(' · '),
  })
  if(article){
   for(const block of data.blocks||[]){
@@ -341,9 +344,9 @@ async function news(p: SourceCanvas,data: SourceCard,template: SourceTemplate){
  }else{
   await newsImage(p,data.cover||data.image)
   if(data.desc)p.y+=p.text(data.desc,30,p.y,p.width-60,22,WHITE,{leading:36})+20
-  if(data.music?.title)p.y+=p.text(`音乐：${data.music.title} · ${data.music.author||''}`,30,p.y,p.width-60,18,'#c2c5cb')+20
-  if(data.collection?.title)p.y+=p.text(`合集：${data.collection.title}`,30,p.y,p.width-60,18,'#c2c5cb')+20
-  if(data.sources?.length)p.y+=p.text(`可用视频源：${data.sources.map(source=>[source.quality||'清晰度未记录',source.width&&source.height?`${source.width}×${source.height}`:'',source.codec||''].filter(Boolean).join(' ')).join(' / ')}`,30,p.y,p.width-60,18,'#c2c5cb')+20
+  if(data.music?.title)p.y+=p.text($t("core.render.source-cards.text_36dfb48472", { "title": data.music.title, "value2": data.music.author||'' }),30,p.y,p.width-60,18,'#c2c5cb')+20
+  if(data.collection?.title)p.y+=p.text($t("core.render.source-cards.text_7744c5636a", { "title": data.collection.title }),30,p.y,p.width-60,18,'#c2c5cb')+20
+  if(data.sources?.length)p.y+=p.text($t("core.render.source-cards.text_ddf0310f12", { "value1": data.sources.map(source=>[source.quality||$t("core.render.source-cards.text_c7ccdd0149"),source.width&&source.height?`${source.width}×${source.height}`:'',source.codec||''].filter(Boolean).join(' ')).join(' / ') }),30,p.y,p.width-60,18,'#c2c5cb')+20
   for(const warning of data.warnings||[])p.y+=p.text(warning,30,p.y,p.width-60,18,'#c2c5cb')+16
   if(data.showStats!==false){
    p.rule(30,p.y,p.width-60,'rgba(211,188,142,.35)');p.y+=22

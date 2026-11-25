@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises"
 import { dirname, join, sep } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -45,7 +48,7 @@ export function numericId(value: unknown) {
 
 function map(value: unknown, path: string): Mapping {
   if (isMapping(value)) return value
-  throw new Error(path + " 须为 YAML 映射。")
+  throw new Error(path + $t("services.subscriptions.config.text_b7f3114986"))
 }
 
 async function read(path: string) {
@@ -60,7 +63,7 @@ async function writeDocument(path: string, document: Document, signal?: AbortSig
   let mode = 0o600
   try {
     const current = await lstat(path)
-    if (!current.isFile()) throw new Error("订阅配置须为普通文件。")
+    if (!current.isFile()) throw new Error($t("services.subscriptions.config.text_af9bb714b9"))
     mode = current.mode & 0o777
   } catch (error) {
     if (!missingFile(error)) throw error
@@ -218,7 +221,7 @@ export function ownerRoutes(routes: readonly SubscriptionRoute[], bot: string): 
 
 function editOwnerRoute(document: Document, bot: string, route: EditableSubscriptionRoute, remove: boolean,
   names: ReadonlyMap<string, string>) {
-  const data = map(document.toJS() ?? {}, "订阅配置")
+  const data = map(document.toJS() ?? {}, $t("services.subscriptions.config.text_6c5eaf1c43"))
   const current = data[route.kind]
   const destinations = current === undefined ? {} : { ...map(current, route.kind) }
   const existing = destinations[route.chat] ?? []
@@ -286,7 +289,7 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
       assertAuthorized()
       await mkdir(folder, { recursive: true, mode: 0o700 })
       // The chat commands and the browser share the same lock and effective file.
-      const lock = await lockFile(join(folder, ".push-lock.sqlite"), "订阅配置")
+      const lock = await lockFile(join(folder, ".push-lock.sqlite"), $t("services.subscriptions.config.text_6c5eaf1c43"))
       try {
         assertAuthorized()
         const current = await effective(id, "push")
@@ -313,7 +316,7 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
       const path = file(id, "config.guoba.support")
       const folder = dirname(path)
       await mkdir(folder, { recursive: true, mode: 0o700 })
-      const lock = await lockFile(join(folder, ".config-lock.sqlite"), "动态推送设置")
+      const lock = await lockFile(join(folder, ".config-lock.sqlite"), $t("services.subscriptions.config.text_9277103c38"))
       try {
         signal?.throwIfAborted()
         const current = await effective(id, "config")
@@ -332,13 +335,13 @@ export function createSubscriptionConfig(dataDirectory: string, lockFile: LockSu
       selected: readonly string[], allTypes: readonly string[], name: string) {
       const folder = dirname(file(id,"push"))
       await mkdir(folder,{recursive:true,mode:0o700})
-      const lock = await lockFile(join(folder,".push-lock.sqlite"),"订阅配置")
+      const lock = await lockFile(join(folder,".push-lock.sqlite"),$t("services.subscriptions.config.text_6c5eaf1c43"))
       try {
         const {path,raw,data} = await effective(id,"push")
         data[destination.kind] ??= {}
         const destinations = map(data[destination.kind],destination.kind)
         const entries = destinations[destination.chat] ?? []
-        if (!isList(entries)) throw new Error("订阅会话须为列表。")
+        if (!isList(entries)) throw new Error($t("services.subscriptions.config.text_8ef45215d5"))
         const index = entries.findIndex(item => isMapping(item) &&
           numericId(item.uid) === uid && numericId(item.bot_id) === destination.bot)
         const item: unknown = entries[index]

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { readOptionalConfigFile } from "../../../../lib/config.ts"
 import { lockFile } from "../../../../lib/file-lock.ts"
@@ -86,7 +89,7 @@ function episode(raw: Fields): BiliPgcEpisode | undefined {
   const label = text(raw.title, 50)
   const title = text(raw.long_title, 200)
   const duration = number(raw.duration)
-  const name = /^\d+(?:\.\d+)?$/u.test(label) ? `第 ${label} 集` : label
+  const name = /^\d+(?:\.\d+)?$/u.test(label) ? $t("services.bilibili.pgc.text_c6ec302104", { "label": label }) : label
   return { id: ep, cid: id(raw.cid), title: [name, title].filter(Boolean).join(" · "),
     cover: image(raw.cover), duration: duration && duration / 1000, badge: text(raw.badge, 24),
     status: raw.status, rights: fields(raw.rights) }
@@ -113,7 +116,7 @@ export function parseBiliPgcResponse(raw: unknown, target: BiliPgcTarget): BiliP
   const voters = number(rating.count)
   return { id: season, title, cover: image(result.cover), desc: text(result.evaluate, 800),
     update: [text(progress.desc, 100), text(progress.title, 100)].filter(Boolean).join(" · "),
-    rating: score === undefined ? "" : `评分 ${score}${voters ? ` · ${voters} 人评分` : ""}`,
+    rating: score === undefined ? "" : $t("services.bilibili.pgc.text_e702680871", { "score": score, "value2": voters ? $t("services.bilibili.pgc.text_d1616ff0c9", { "voters": voters }) : "" }),
     stats: fields(result.stat), rights: fields(result.rights), episode: match }
 }
 
@@ -123,14 +126,14 @@ export async function readBiliPgcJson(fetcher: BiliPgcFetch, endpoint: URL, refe
   if (!response.ok || response.redirected || !/^application\/json(?:;|$)/iu.test(response.headers.get("content-type") ?? "") ||
       Number(response.headers.get("content-length")) > maxResponse || !response.body) {
     await response.body?.cancel().catch(() => undefined)
-    throw new Error("B 站番剧接口没有返回可用的公开数据。")
+    throw new Error($t("services.bilibili.pgc.text_51c3e9cb86"))
   }
   const chunks: Uint8Array[] = []
   let size = 0
   for await (const chunk of response.body) {
     signal.throwIfAborted()
     size += chunk.length
-    if (size > maxResponse) throw new Error("B 站番剧响应超过大小限制。")
+    if (size > maxResponse) throw new Error($t("services.bilibili.pgc.text_3f9caad3bf"))
     chunks.push(chunk)
   }
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size))) as unknown
@@ -185,20 +188,20 @@ export function createBiliPgcPreview({ signal, fetcher = fetch, options = loadBi
     if (active.aborted) return
     const rules = await options().catch(() => undefined)
     if (!rules?.enable || (!explicit && context.message_type === "private" && !rules.private) || active.aborted) return
-    const unavailable = `暂无法读取 B 站番剧公开信息。\n${input.url}`
+    const unavailable = $t("services.bilibili.pgc.text_96000506d3", { "url": input.url })
     try {
       const data = await fetchBiliPgc(input, fetcher, AbortSignal.any([active, AbortSignal.timeout(8000)]))
       if (active.aborted) return
       if (!data) return unavailable
       if (explicit) return play(input, data, context, rules, active, readBiliPgcJson)
       const selected = input.kind === "ep" ? data.episode : undefined
-      const duration = selected?.duration ? `时长 ${Math.floor(selected.duration / 60)} 分 ${Math.floor(selected.duration % 60)} 秒` : ""
+      const duration = selected?.duration ? $t("services.bilibili.pgc.text_21708e0fc7", { "value1": Math.floor(selected.duration / 60), "value2": Math.floor(selected.duration % 60) }) : ""
       const stat = data.stats
       const follows = number(stat.favorites)
-      const followText = text(stat.follow_text, 50) || (follows === undefined ? "" : `追番 ${follows}`)
-      const info = [selected?.title, selected?.badge && `平台标记 · ${selected.badge}`, duration,
+      const followText = text(stat.follow_text, 50) || (follows === undefined ? "" : $t("services.bilibili.pgc.text_7061c760fc", { "follows": follows }))
+      const info = [selected?.title, selected?.badge && $t("services.bilibili.pgc.text_f7322d6842", { "badge": selected.badge }), duration,
         data.rating, data.update, followText, data.desc].filter(Boolean).join("\n")
-      const card = { title: data.title, owner: "B 站番剧", id: `${input.kind}${input.id} · 全季统计`,
+      const card = { title: data.title, owner: $t("services.bilibili.pgc.text_5914196fa3"), id: `${input.kind}${input.id} · 全季统计`,
         type: "public-link", cover: selected?.cover ?? data.cover, desc: info,
         stat: { like: number(stat.likes), reply: number(stat.reply), favorite: number(stat.favorite),
           coin: number(stat.coins), view: number(stat.views), danmaku: number(stat.danmakus) } }

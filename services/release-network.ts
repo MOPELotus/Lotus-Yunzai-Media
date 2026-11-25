@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../packages/i18n/index.ts";
+import messageCatalog from "../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { setTimeout as sleep } from "node:timers/promises"
 import { emitTaskProgress, type TaskProgressHandler } from "./progress.ts"
 
@@ -29,14 +32,14 @@ export async function retryReleaseRequest<T>(work: () => Promise<T>, { label, ur
   const host = new URL(url).host
   for (let attempt = 1; ; attempt++) {
     signal?.throwIfAborted()
-    emitTaskProgress(onTaskProgress, { stage: "release-request", message: `${label}（${host}，尝试 ${attempt}/${attempts}）` })
+    emitTaskProgress(onTaskProgress, { stage: "release-request", message: $t("services.release-network.text_7768ab0027", { "label": label, "host": host, "attempt": attempt, "attempts": attempts }) })
     try { return await work() } catch (error) {
       signal?.throwIfAborted()
       const reason = releaseFailure(error)
       if (!temporaryReleaseFailure(error) || attempt >= attempts) {
-        throw new Error(`${label}失败（${host}，已尝试 ${attempt} 次）：${reason}`, { cause: error })
+        throw new Error($t("services.release-network.text_a03f618232", { "label": label, "host": host, "attempt": attempt, "reason": reason }), { cause: error })
       }
-      emitTaskProgress(onTaskProgress, { stage: "release-retry", message: `${label}暂时失败（${host}）：${reason}；即将重试 ${attempt + 1}/${attempts}` })
+      emitTaskProgress(onTaskProgress, { stage: "release-retry", message: $t("services.release-network.text_bb41250fd0", { "label": label, "host": host, "reason": reason, "value4": attempt + 1, "attempts": attempts }) })
       await sleep(500 * attempt, undefined, { signal })
     }
   }

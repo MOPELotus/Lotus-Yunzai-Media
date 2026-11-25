@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { setTimeout as delay } from "node:timers/promises"
 import { Job } from "node-schedule"
 import type { BotNotifications, CheckinNotifyDelivery } from "../../../../lib/checkin-notify.ts"
@@ -62,14 +65,14 @@ export function createOfficialVideoCommands(services: Services, {
   const matches = (message: string) => /^#最新视频(?:\s|$)/u.test(message)
   async function fallback(message: string, context: CommandContext) {
     if (!matches(message)) return
-    if (message.slice(5).trim()) return "用法：#最新视频"
+    if (message.slice(5).trim()) return $t("services.official-video.index.text_f660be47d4")
     if (signal.aborted) return []
     try {
       const settings = await config.settings()
       const muted = context.message_type === "group" ? settings.muted.get(context.group_id ?? 0) : undefined
       const { items, failed } = await collect(settings.games.filter(game => !muted?.has(game)))
       signal.throwIfAborted()
-      if (!items.length) return failed ? "暂时无法读取米游社官号视频。" : "没有查到可显示的米游社官号视频。"
+      if (!items.length) return failed ? $t("services.official-video.index.text_5212fa144a") : $t("services.official-video.index.text_9a0e95ac08")
       const nodes = (await Promise.all(items.map(item => feed.messages(item, settings.cover, signal)))).flat()
       if (settings.forward || !context.reply) return { type: "forward" as const, nodes }
       for (const [index, node] of nodes.entries()) {
@@ -78,13 +81,13 @@ export function createOfficialVideoCommands(services: Services, {
         await context.reply(node)
       }
       return []
-    } catch { return signal.aborted ? [] : "暂时无法读取米游社官号视频。" }
+    } catch { return signal.aborted ? [] : $t("services.official-video.index.text_5212fa144a") }
   }
 
   function run() {
     if (signal.aborted) return
     running ??= poll().catch(error => {
-      if (!signal.aborted) console.warn("[media] 米游社官号视频任务失败：", error instanceof Error ? error.message : String(error))
+      if (!signal.aborted) console.warn($t("services.official-video.index.text_aa1292c0a1"), error instanceof Error ? error.message : String(error))
     }).finally(() => { running = undefined })
     return running
   }

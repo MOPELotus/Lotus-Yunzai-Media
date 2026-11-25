@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 import { join } from "node:path"
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -54,7 +57,7 @@ export function parseKuaishouH5(html: string, id: string) {
   const video = photo.type === 1 && photo.photoType === "VIDEO" && Array.isArray(photo.mainMvUrls)
     ? photo.mainMvUrls.flatMap(item => kuaishouVideoUrl(text(row(item).url, 4096)) ?? [])[0]
     : undefined
-  return { title: text(photo.caption, 160) || "快手作品", owner: text(photo.userName, 80), cover, video,
+  return { title: text(photo.caption, 160) || $t("services.kuaishou.command.text_1322a0ba8a"), owner: text(photo.userName, 80), cover, video,
     type: photo.photoType === "VIDEO" ? "video" : "gallery",
     duration: (count(photo.duration) ?? 0) / 1000, createdAt: (count(photo.timestamp) ?? 0) / 1000,
     stat: { like: count(photo.likeCount), reply: count(photo.commentCount), share: count(photo.shareCount), view: count(photo.viewCount) } }
@@ -75,7 +78,7 @@ export function createKuaishouCommands({ signal: lifecycle, mediaRuntime, fetch 
   const running = new Set<Promise<void>>()
   let recovery: Promise<unknown> | undefined
   const cancelRecovery = mediaRuntime?.whenReady(() => {
-    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn("[media] 快手任务恢复失败。"))
+    if (!signal.aborted) recovery = recoverMediaTasks(tasksDir).catch(() => console.warn($t("services.kuaishou.command.text_41fae3bd27")))
   })
 
   function identify(message: string, context: MessageFallbackContext) {
@@ -100,10 +103,10 @@ export function createKuaishouCommands({ signal: lifecycle, mediaRuntime, fetch 
     } catch (error) {
       if (!active.aborted) {
         const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
-        await context.reply(unknown ? "视频送达未确认，请核对当前会话。" : "快手视频暂未送达，可打开上面的原帖。")
+        await context.reply(unknown ? $t("services.kuaishou.command.text_63b89edd23") : $t("services.kuaishou.command.text_ed74eb8a23"))
       }
     } finally {
-      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn("[media] 快手任务清理失败。"))
+      if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn($t("services.kuaishou.command.text_80d115ce60")))
     }
   }
 
@@ -121,13 +124,13 @@ export function createKuaishouCommands({ signal: lifecycle, mediaRuntime, fetch 
       const page = await readPublicSharePage(start, allowed, fetch, AbortSignal.any([active, AbortSignal.timeout(12_000)]), { "User-Agent": agent })
       const resolved = page && sourceId(page.url)
       const post = page && resolved && (!id || resolved === id) ? parseKuaishouH5(page.html, resolved) : undefined
-      if (!post) return "快手未返回该公开短视频。"
+      if (!post) return $t("services.kuaishou.command.text_5c1e5784fa")
       const canonical = new URL(`/fw/photo/${resolved}`, origin).href
       const card = await render("kuaishou-info", { ...post, id: `快手 · ${resolved}` }).catch(() => undefined)
       active.throwIfAborted()
       const head = card && card.byteLength <= (context.inlineImageByteLimit ?? 16 * 1024 * 1024)
         ? [{ type: "image" as const, file: card }, canonical]
-        : [`快手 · ${post.title}`, post.owner && `作者：${post.owner}`, canonical].filter(Boolean).join("\n")
+        : [$t("services.kuaishou.command.text_3c4aa1e0e2", { "title": post.title }), post.owner && $t("services.kuaishou.command.text_4c59ffb174", { "owner": post.owner }), canonical].filter(Boolean).join("\n")
       const video = post.video
       if (!video || !new PermissionService({ permissions: cfg.permissions }).can(context, "kuaishou.download")) return head
       let started = false
@@ -138,7 +141,7 @@ export function createKuaishouCommands({ signal: lifecycle, mediaRuntime, fetch 
         running.add(pending)
         try { await pending } finally { running.delete(pending) }
       } }
-    } catch { if (!active.aborted) return "暂时无法读取快手公开短视频。" }
+    } catch { if (!active.aborted) return $t("services.kuaishou.command.text_74d0257cf1") }
   }
 
   return {

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
 
 export const MOBILE_UA = "Mozilla/5.0 (Linux; Android 10; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
@@ -20,10 +23,10 @@ export interface DouyinTarget {
 
 export function validateDouyinUrl(input: string) {
   let url
-  try { url = new URL(input) } catch { throw new DouyinError("invalid_link", "抖音链接格式无效") }
+  try { url = new URL(input) } catch { throw new DouyinError("invalid_link", $t("services.douyin.links.text_90ef234013")) }
   const allowedHost = HOSTS.has(url.hostname) || url.hostname === reflowHost && reflowRoute.test(url.pathname)
   if (!allowedHost || !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.port) {
-    throw new DouyinError("invalid_link", "不支持的抖音链接域名")
+    throw new DouyinError("invalid_link", $t("services.douyin.links.text_0e4fa90e7b"))
   }
   url.protocol = "https:"
   return url
@@ -60,7 +63,7 @@ export function targetFromUrl(input: string): DouyinTarget | null {
 export async function resolveDouyinShare(input: unknown, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions = {}):
   Promise<DouyinLiveTarget | { kind: "work"; target: DouyinTarget }> {
   const extracted = extractDouyinTarget(input)
-  if (!extracted) throw new DouyinError("invalid_link", "未找到有效的抖音作品链接")
+  if (!extracted) throw new DouyinError("invalid_link", $t("services.douyin.links.text_159b776bb1"))
   let url = validateDouyinUrl(extracted)
   for (let hop = 0; hop <= 5; hop++) {
     if (url.hostname === reflowHost) {
@@ -77,11 +80,11 @@ export async function resolveDouyinShare(input: unknown, { fetch: fetchImpl = gl
       url = validateDouyinUrl(new URL(location, url).href)
     } else break
   }
-  throw new DouyinError("invalid_link", "短链接未跳转到可识别的抖音作品或直播间")
+  throw new DouyinError("invalid_link", $t("services.douyin.links.text_9a18b40b70"))
 }
 
 export async function resolveDouyinTarget(input: unknown, options: RequestOptions = {}): Promise<DouyinTarget> {
   const share = await resolveDouyinShare(input, options)
-  if (share.kind === "live") throw new DouyinError("invalid_link", "抖音直播分享只提供房间预览")
+  if (share.kind === "live") throw new DouyinError("invalid_link", $t("services.douyin.links.text_e79374025a"))
   return share.target
 }

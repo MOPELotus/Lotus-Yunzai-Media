@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { withoutReadRetries, withReadRetries } from "@lotus-yunzai/http"
 import { readPublicResponse } from "../public-read.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -10,7 +13,7 @@ import { weixinChannelsImageUrl } from "../media/cdn.ts"
 const origin = "https://channels.weixin.qq.com"
 const page = origin + "/finder-preview/pages/sph"
 const endpoint = origin + "/finder-preview/api/feed/get_feed_info"
-const label = "视频号"
+const label = $t("services.weixin-channels.preview.text_e34ce28b5a")
 const maxResponseBytes = 128 * 1024
 
 function shareId(value: string) {
@@ -54,7 +57,7 @@ async function readJson(response: Response) {
   const decoder = new TextDecoder()
   for await (const chunk of response.body) {
     size += chunk.byteLength
-    if (size > maxResponseBytes) throw new Error("视频号预览响应大小超过限制")
+    if (size > maxResponseBytes) throw new Error($t("services.weixin-channels.preview.text_1282242ea1"))
     json += decoder.decode(chunk, { stream: true })
   }
   return fields(JSON.parse(json + decoder.decode()))
@@ -84,7 +87,7 @@ async function readPreview(id: string, url: string, active: AbortSignal, fetch: 
       !/^export\/[A-Za-z0-9_-]{20,128}$/u.test(identity)) return
   const feed = fields(data.feedInfo)
   const author = fields(data.authorInfo)
-  const title = text(feed.description, 200) || "视频号分享"
+  const title = text(feed.description, 200) || $t("services.weixin-channels.preview.text_781678fa1d")
   const owner = text(author.nickname, 80)
   if (!owner || typeof feed.description !== "string" || feed.isHardAd !== false) return
   const cover = typeof feed.coverUrl === "string" ? weixinChannelsImageUrl(feed.coverUrl, "cover")?.href : undefined
@@ -118,7 +121,7 @@ export function createWeixinChannelsPreview({ signal, fetch = globalThis.fetch, 
       const active = AbortSignal.any(signals)
       if (active.aborted) return []
       const url = "https://weixin.qq.com/sph/" + id
-      const unavailable = "暂时无法读取视频号公开预览，请打开原链接。\n" + url
+      const unavailable = $t("services.weixin-channels.preview.text_fbd988c0a7") + url
       try {
         const config = await loadConfig("wxchannels")
         if (active.aborted) return []
@@ -134,7 +137,7 @@ export function createWeixinChannelsPreview({ signal, fetch = globalThis.fetch, 
           image = await render("weixin-channels-info", card, { renderScale: 2 }).catch(() => undefined)
         }
         if (active.aborted) return []
-        const source = "在微信中观看\n" + url
+        const source = $t("services.weixin-channels.preview.text_1ad65ec1f8") + url
         return image && image.byteLength <= limit ? [{ type: "image" as const, file: image }, source]
           : [label + " · " + result.title, result.owner, source].join("\n")
       } catch {

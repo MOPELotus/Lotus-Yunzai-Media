@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../../packages/i18n/index.ts";
+import messageCatalog from "../../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { prepareBuiltinFonts, builtinFontFallback } from "../../../../../packages/skia/builtin-fonts.ts";
 import { builtinResourceDirectory } from "../../../../../lib/builtin-resources.ts";
 import { join } from "node:path"
@@ -46,7 +49,7 @@ export async function renderBiliSubscriptionLogin(url: string) {
     ctx.textBaseline = "middle"
     ctx.font = `18px ${font}`
     ctx.fillStyle = "#3b82f6"
-    ctx.fillText("B站动态订阅扫码登录", width / 2, 56)
+    ctx.fillText($t("services.subscriptions.bilibili.login-card.text_31640441ca"), width / 2, 56)
     ctx.beginPath()
     ctx.roundRect(87.5, 83.5, 288, 288, 8)
     ctx.setLineDash([4, 4])
@@ -63,7 +66,7 @@ export async function renderBiliSubscriptionLogin(url: string) {
       }
     }
     ctx.fillStyle = "#dc2626"
-    ctx.fillText("请在 3 分钟内使用哔哩哔哩 App 确认", width / 2, 405)
+    ctx.fillText($t("services.subscriptions.bilibili.login-card.text_c211ba79f2"), width / 2, 405)
   }, mode)
   return png
 }

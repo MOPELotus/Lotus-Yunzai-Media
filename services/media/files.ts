@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import fs from "node:fs/promises"
 import { createReadStream } from "node:fs"
 import path from "node:path"
@@ -92,27 +95,27 @@ async function sendIsolatedMediaFile(e: MediaSendContext, file: string, config: 
   if (e.deliverMedia) {
     const result = await e.deliverMedia({ path: file, name, type })
     if (result === "confirmed") return true
-    if (result === "unknown") throw deliveryUnknown("媒体发送结果未确认，请在会话中核对。")
+    if (result === "unknown") throw deliveryUnknown($t("services.media.files.text_6078793bd3"))
   }
 
   // The byte transport remains available for hosts without file-backed delivery.
   if (stat.size > 16 * 1024 * 1024) {
-    throw Object.assign(new Error("当前会话无法发送此大小的媒体文件。"), { code: mediaDeliveryTooLarge })
+    throw Object.assign(new Error($t("services.media.files.text_7dff6d53ec")), { code: mediaDeliveryTooLarge })
   }
   const bytes = await fs.readFile(file, { signal: config.signal })
   config.signal?.throwIfAborted()
   if (type === "file" && e.uploadFile) {
     const result = await e.uploadFile({ name, bytes })
     if (result === "confirmed") return true
-    if (result === "unknown") throw deliveryUnknown("文件发送结果未确认，请在会话中核对。")
+    if (result === "unknown") throw deliveryUnknown($t("services.media.files.text_bb13cb0a43"))
   } else if (type !== "file" && await e.reply({ type, data: { file: bytes, name } })) {
     return true
   }
-  throw new Error("当前会话发送媒体失败。")
+  throw new Error($t("services.media.files.text_1231f74dbe"))
 }
 
 export async function runMediaProcess(command: string, args: readonly string[], { cwd, env, timeoutMs = 600000, spawnImpl = spawn, signal }: ProcessOptions = {}) {
-  if (signal?.aborted) throw new Error("媒体处理已取消")
+  if (signal?.aborted) throw new Error($t("services.media.files.text_6ac933a48d"))
   const owned = cwd && await fs.access(path.join(cwd, ".lotus-media-task.json")).then(() => true, () => false)
   const marker = owned ? path.join(cwd, ".lotus-media-process.json") : null
   if (marker) await fs.writeFile(marker, JSON.stringify({ state: "starting" }))
@@ -126,7 +129,7 @@ export async function runMediaProcess(command: string, args: readonly string[], 
     } catch { child.kill(signal) }
   }
   const completion = new Promise<{ code: 0; output: string }>((resolve, reject) => {
-    if (signal?.aborted) throw new Error("媒体处理已取消")
+    if (signal?.aborted) throw new Error($t("services.media.files.text_6ac933a48d"))
     child = spawnImpl(command, args, { cwd, env, windowsHide: true, detached: grouped })
     let output = ""
     let timedOut = false
@@ -154,9 +157,9 @@ export async function runMediaProcess(command: string, args: readonly string[], 
     child.on("close", code => {
       cleanup()
       if (!aborted && !timedOut && code !== 0 && /No space left on device|ENOSPC|Disk quota exceeded/i.test(output)) {
-        const error = Object.assign(new Error("服务器磁盘空间不足，媒体处理失败。请联系机器人主人清理空间后重试。"), { code: "ENOSPC" })
+        const error = Object.assign(new Error($t("services.media.files.text_25a0f5d533")), { code: "ENOSPC" })
         reject(error)
-      } else if (aborted || timedOut || code !== 0) reject(new Error(aborted ? "媒体处理已取消" : timedOut ? `${command} 执行超时` : `${command} 执行失败：${output}`))
+      } else if (aborted || timedOut || code !== 0) reject(new Error(aborted ? $t("services.media.files.text_6ac933a48d") : timedOut ? $t("services.media.files.text_45addd3e5a", { "command": command }) : $t("services.media.files.text_72af269aa1", { "command": command, "output": output })))
       else resolve({ code, output })
     })
   })
@@ -215,10 +218,10 @@ interface MediaFailure {
 export function mediaFailureMessage(result: MediaFailure = {}) {
   if (result.reason === "duration_limit") {
     const seconds = result.limitSeconds
-    if (seconds === undefined) return "视频时长超过限制。"
-    const limit = seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`
-    return `视频时长超过 ${limit}限制。`
+    if (seconds === undefined) return $t("services.media.files.text_aac2c9351a")
+    const limit = seconds % 60 === 0 ? $t("services.media.files.text_d28542b54a", { "value1": seconds / 60 }) : $t("services.media.files.text_622b117f29", { "seconds": seconds })
+    return $t("services.media.files.text_39812731a0", { "limit": limit })
   }
-  if (result.reason === "estimated_size_limit") return `视频预估大小 ${result.estimatedSizeMb} MB 超过 ${result.limitMb} MB 限制。`
-  return result.reason || "下载失败"
+  if (result.reason === "estimated_size_limit") return $t("services.media.files.text_4c24420f1c", { "estimatedSizeMb": result.estimatedSizeMb, "limitMb": result.limitMb })
+  return result.reason || $t("services.media.files.text_8a03e35ad3")
 }

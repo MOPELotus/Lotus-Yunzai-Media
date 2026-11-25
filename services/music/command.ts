@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { RecallOwnReply, ReplyOptions } from "../../../../lib/messages.ts"
 import { nativeImageRasterScale } from "@lotus-yunzai/skia"
@@ -43,17 +46,17 @@ const unrelatedMedia = /^(?:[#/]|https?:\/\/|[a-z]:[\\/]|(?:B站|哔哩哔哩|�
 const choiceCommand = /^(?:[0-9]+|#听[0-9]+|#(?:音乐)?下一页|#(?:取消|音乐取消))$/u
 const reissueCommand = /^#?(歌词|语音|高清语音)(?:\s*([1-9][0-9]{0,2}))?$/u
 const partnerManualCommand = /^#合伙人测试(?:[（(]执行[）)])?$/u
-const playHelp = "#播放 关键词 1 直接播放首条歌曲，网易云可用 #播放 关键词 2 直接播放首期播客，或 #点歌 关键词 2 列出节目后选择。\n#多选点歌 关键词 保留跨页编号，回复一个数字选一首，可反复选择。选曲后可发 #歌词 或 #语音。在列表中可加序号。"
-const help = "点歌：#网易点歌 歌名 / #QQ点歌 歌名 / #酷狗点歌 歌名\n也支持酷我、咪咕、汽水；#B站点歌 关键词 搜索公开视频的音轨。#点歌 默认网易云。搜索后输入数字选歌，#下一页 翻页，#取消 结束。默认发送音乐卡片和完整语音。建议主人 #音乐登录 扫码；网易云与 #合伙人登录 共用账号。\n" + playHelp
+const playHelp = $t("services.music.command.text_d126aad504")
+const help = $t("services.music.command.text_b4d32554ee") + playHelp
 const recommendation = /^#?(?:来|放)(?:一)?首歌$/u
 const favorite = /^#?(?:我的收藏|我喜欢的歌)(?:\s*([0-9]{1,4}))?$/u
 const accountStatus = /^#?(?:音乐登录状态|(?:点歌|音乐)(?:ck|cookie)(?:检查|状态))$/iu
 const refreshMusic = /^#刷新(网易云|QQ|酷狗|汽水|酷我|咪咕)音乐登录$/iu
-const collectionName = { radio: "QQ 音乐个性电台", daily: "QQ 音乐每日推荐", favorites: "QQ 音乐收藏" } as const
+const collectionName = { radio: $t("services.music.command.text_69ac3e0dbb"), daily: $t("services.music.command.text_befbde1df6"), favorites: $t("services.music.command.text_ecb599961f") } as const
 const searchNotes: Readonly<Record<string, string>> = {
-  selected: "本次搜索已选用公共音乐账号。",
-  unverified: "公共音乐账号的登录状态待确认。",
-  unconfigured: "当前平台未配置公共音乐账号。主人可用 #音乐登录 查看支持扫码的平台。",
+  selected: $t("services.music.command.text_d5eb7c3bb4"),
+  unverified: $t("services.music.command.text_5e5f1104d0"),
+  unconfigured: $t("services.music.command.text_2502a798a8"),
 }
 
 type Global = Awaited<ReturnType<typeof loadGlobalConfig>>
@@ -110,10 +113,10 @@ interface Services {
   readonly renderMusicMenu?: typeof renderMusicList
 }
 
-const musicNames: Readonly<Record<string, string>> = { ...MUSIC_PLATFORMS, bilibili: "B 站" }
+const musicNames: Readonly<Record<string, string>> = { ...MUSIC_PLATFORMS, bilibili: $t("services.music.command.text_fb982fc3c0") }
 const root = new URL("../../../../", import.meta.url)
 const scanTypes: Readonly<Record<string, readonly ScanType[]>> = MUSIC_QR_TYPES
-const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请稍后重试。"
+const errorText = (error: unknown) => error instanceof Error ? error.message : $t("services.music.command.text_8977b79aa8")
 const loginTime = (value: number | undefined, fallback: number) =>
   value !== undefined && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : fallback
 
@@ -147,7 +150,7 @@ function personalAction(message: string) {
 
 function apiOrigin(address: unknown) {
   const url = typeof address === "string" && URL.parse(address)
-  return url && ["http:", "https:"].includes(url.protocol) ? url.origin : "地址未配置"
+  return url && ["http:", "https:"].includes(url.protocol) ? url.origin : $t("services.music.command.text_f99b4f94d7")
 }
 
 function reissueTarget(message: string, context: Context) {
@@ -169,7 +172,7 @@ async function defaultOpenMusic() {
   const config = await loadGlobalConfig()
   const music = config.music as Partial<MusicConfig>
   const tools = config.tools as { bin_dir?: string }
-  if (music.enable === false) throw new MusicFeatureDisabled("点歌功能已关闭")
+  if (music.enable === false) throw new MusicFeatureDisabled($t("services.music.command.text_151936d69e"))
   return { api: new MusicService({ tuneweaveConfig: config.tuneweave, config: music, toolsPath: tools.bin_dir }),
     defaultPlatform: music.default_platform || "netease", timeoutMs: music.session_timeout_ms || 120000 }
 }
@@ -177,10 +180,10 @@ async function defaultOpenMusic() {
 async function renderPartnerReport(title: string, report: PartnerReport, userId?: number) {
   const items = report.accounts.map(account => ({
     label: account.nickname,
-    value: `成功 ${account.success} · 失败 ${account.fail}`,
+    value: $t("services.music.command.text_3a3c664232", { "success": account.success, "fail": account.fail }),
   }))
-  const image = await renderStatusCard({ title, subtitle: report.trigger, badge: report.accounts.some(account => account.fail) ? "有失败" : "完成",
-    message: `生成时间：${report.time}`, userId, items,
+  const image = await renderStatusCard({ title, subtitle: report.trigger, badge: report.accounts.some(account => account.fail) ? $t("services.music.command.text_eedce9bb59") : $t("services.music.command.text_c0b3fbff51"),
+    message: $t("services.music.command.text_b417f4d805", { "time": report.time }), userId, items,
   }).catch(() => undefined)
   return { image, text: [title, ...items.map(item => `${item.label}：${item.value}`)].join("\n") }
 }
@@ -277,7 +280,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const { api } = await openMusic()
       if (!moduleSignal.aborted) await Promise.all([api.adoptPartnerAccount(), api.recoverTasks()])
     })().catch(error => {
-      if (!moduleSignal.aborted) console.debug("[media] 音乐目录初始化：" + errorText(error))
+      if (!moduleSignal.aborted) console.debug($t("services.music.command.text_f3b0da1d72") + errorText(error))
     })
   })
 
@@ -317,26 +320,26 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     if (context.deliverMedia) {
       const result = await context.deliverMedia({ path: media.voiceFile, name, type: "record" })
       if (result === "confirmed") return
-      if (result === "unknown") throw new Error("语音送达未确认，请在会话中核对。")
+      if (result === "unknown") throw new Error($t("services.music.command.text_171da13881"))
     }
     active.throwIfAborted()
     const file = Bun.file(media.voiceFile)
     if (file.size > maxInlineBytes) {
-      if (recordOnly) throw new Error("完整语音超过当前会话的发送上限。")
+      if (recordOnly) throw new Error($t("services.music.command.text_f95f070248"))
       const result = await context.deliverMedia?.({ path: media.voiceFile, name, type: "file" })
       if (result === "confirmed") return
-      if (result === "unknown") throw new Error("音乐文件送达未确认，请在会话中核对。")
-      throw new Error("完整音频超过当前会话的发送上限。")
+      if (result === "unknown") throw new Error($t("services.music.command.text_3fcdd59cfb"))
+      throw new Error($t("services.music.command.text_e9c47f1a9d"))
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
     active.throwIfAborted()
     if (await reply(context, { type: "record", file: bytes })) return
     active.throwIfAborted()
-    if (recordOnly) throw new Error("语音发送失败。")
+    if (recordOnly) throw new Error($t("services.music.command.text_17a796969c"))
     const result = await context.uploadFile?.({ name, bytes })
     if (result === "confirmed") return
-    if (result === "unknown") throw new Error("音乐文件送达未确认，请在会话中核对。")
-    throw new Error("语音发送失败。")
+    if (result === "unknown") throw new Error($t("services.music.command.text_3fcdd59cfb"))
+    throw new Error($t("services.music.command.text_17a796969c"))
   }
 
   async function sendTrackInfo(context: Context, track: MusicTrack, media: Prepared, active = moduleSignal,
@@ -349,16 +352,16 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const result = await context.sendMusicCard(share.data)
       if (result === "confirmed") return
       if (result === "unknown") {
-        if (!active.aborted) await reply(context, "音乐卡片送达未确认，继续发送完整音频。")
+        if (!active.aborted) await reply(context, $t("services.music.command.text_01b3bd79f0"))
         return
       }
     }
-    const artists = track.artists?.map(artist => artist.name).join(" / ") || "未知歌手"
+    const artists = track.artists?.map(artist => artist.name).join(" / ") || $t("services.music.command.text_f374d78a34")
     const program = track.episode_id ? neteaseEpisodePage(track.episode_id) : track.platform === "bilibili" ? track.extensions?.url : undefined
     const fallback = `《${track.name}》 · ${artists}${program ? `\n${program}` : ""}`
     const image = await renderStatusCard({ title: track.name, subtitle: artists,
-      message: `完整音频 · ${Math.round(media.duration)} 秒`,
-      items: [{ label: "实际音源", value: musicNames[media.stream.resolved_platform ?? ""] || media.stream.resolved_platform || musicNames[track.platform] }],
+      message: $t("services.music.command.text_cb843c7432", { "value1": Math.round(media.duration) }),
+      items: [{ label: $t("services.music.command.text_3e2494b386"), value: musicNames[media.stream.resolved_platform ?? ""] || media.stream.resolved_platform || musicNames[track.platform] }],
     }).catch(() => undefined)
     active.throwIfAborted()
     await verify?.()
@@ -373,7 +376,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
 
   async function playMedia(context: Context, api: MusicService, track: MusicTrack, stream?: MusicStream, active = moduleSignal) {
     active.throwIfAborted()
-    await reply(context, `正在获取《${track.name}》完整音源…`)
+    await reply(context, $t("services.music.command.text_7f0fc7fa5b", { "name": track.name }))
     active.throwIfAborted()
     const media = stream ? await api.prepareStream(track, stream, { signal: active }) : await api.prepare(track, { signal: active })
     await sendPreparedTrack(context, api, track, media, active)
@@ -427,7 +430,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (target.kind === "external-share") {
         const metadata = await readExternalMusicShare(target, active, fetchMusicShare)
         if (active.aborted) return
-        const hint = "请在原平台打开并播放。"
+        const hint = $t("services.music.command.text_9c3b99905a")
         if (play) return hint + "\n" + metadata.url
         return await musicSharePreview(context, active, metadata, externalMusicLabels[target.platform], hint)
       }
@@ -437,7 +440,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (play) {
         if (item.kind === "mv") {
           const stream = await api.publicMvStream(item.mv, active)
-          if (stream.size !== undefined && stream.size > mvByteLimit) throw new Error("MV 超过当前发送上限，请打开原链接。")
+          if (stream.size !== undefined && stream.size > mvByteLimit) throw new Error($t("services.music.command.text_288f81c2da"))
           active.throwIfAborted()
           const task = await createMediaTask(api.tasksDir)
           try {
@@ -449,19 +452,19 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
               try {
                 const result = await downloadMedia(url, join(task.dir, "mv"), {
                   fetch: (address, request) => {
-                    if (stream.matchesUrl && !stream.matchesUrl(new URL(address))) throw new Error("MV 地址身份与原平台回包不一致。")
+                    if (stream.matchesUrl && !stream.matchesUrl(new URL(address))) throw new Error($t("services.music.command.text_53613a19d0"))
                     return api.fetch(address, request)
                   },
                   kind: "video", cdn: stream.cdn, maxBytes: mvByteLimit, timeoutMs: 60_000, signal: transfer,
                 })
                 if (!result.file.endsWith(".mp4") || (stream.size && stream.size !== result.sizeBytes)) {
-                  throw new Error("MV 文件与原平台回包不一致。")
+                  throw new Error($t("services.music.command.text_b7ab940103"))
                 }
                 file = result.file
                 break
               } catch (error) { failure = error }
             }
-            if (!file) throw failure ?? new Error("没有可核实的完整公开 MV。")
+            if (!file) throw failure ?? new Error($t("services.music.command.text_165cc88a6c"))
             await sendMediaFile(context, file, { file_name: safeMediaName(item.mv.title) + ".mp4", signal: active })
           } finally { await releaseMediaTask(api.tasksDir, task.dir) }
         } else if (item.kind === "episode") {
@@ -478,14 +481,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       const title = item.kind === "mv" ? item.mv.title : item.kind === "episode" ? item.episode.name : item.track.name
       const author = item.kind === "mv" ? item.mv.creators?.map(value => value.name).filter(Boolean).join(" / ")
         : item.kind === "episode" ? item.episode.creator : item.track.artists?.map(value => value.name).join(" / ")
-      const source = selected.platform === "kuwo" && selected.url.startsWith("https://h5app.kuwo.cn/") ? "波点音乐"
-        : selected.platform === "soda" ? "汽水音乐" : MUSIC_PLATFORMS[selected.platform]
-      const platform = item.kind === "mv" ? source + " MV" : item.kind === "episode" ? "网易云播客" : source
-      const hint = item.kind === "mv" ? "发送 #播放 加原文链接可请求完整 MV。" : "发送 #播放 加原文链接可请求完整音源。"
+      const source = selected.platform === "kuwo" && selected.url.startsWith("https://h5app.kuwo.cn/") ? $t("services.music.command.text_e8bc4564b5")
+        : selected.platform === "soda" ? $t("services.music.command.text_f8cff81f62") : MUSIC_PLATFORMS[selected.platform]
+      const platform = item.kind === "mv" ? source + " MV" : item.kind === "episode" ? $t("services.music.command.text_9b139653d2") : source
+      const hint = item.kind === "mv" ? $t("services.music.command.text_fb34d8040a") : $t("services.music.command.text_2a386db9ed")
       return await musicSharePreview(context, active, { title, author, url: selected.url }, platform, hint)
     } catch (error) {
       if (!active.aborted && (play || !(error instanceof MusicFeatureDisabled))) {
-        return play ? "播放：" + errorText(error) : "暂时无法读取音乐链接，请在原平台打开。\n" + target.url
+        return play ? $t("services.music.command.text_d3a5a0bdfd") + errorText(error) : $t("services.music.command.text_159b972124") + target.url
       }
     }
   }
@@ -502,14 +505,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     let selected = selectionAt(key)
     if (request.index !== undefined) {
       if (current?.stage !== "search" || current.expires <= Date.now()) return
-      if (current.loading) return "正在搜索，请稍候。"
+      if (current.loading) return $t("services.music.command.text_c3c2f34d94")
       const source = publicSearchChoice(current, request.index)
-      if (!source) return "请选当前列表里的公开歌曲或节目。"
-      if (selected?.busy) return "正在处理这首曲目，请稍候。"
+      if (!source) return $t("services.music.command.text_941bfdc1dc")
+      if (selected?.busy) return $t("services.music.command.text_b0d3ab706d")
       selected = remember(key, source, current.timeoutMs)
     }
     if (!selected) return
-    if (selected.busy) return "正在处理这首曲目，请稍候。"
+    if (selected.busy) return $t("services.music.command.text_b0d3ab706d")
     const { source, controller } = selected
     const connection = context.message_type === "group" ? context.groupActivitySignal : context.privateCredentialSignal
     const active = AbortSignal.any([moduleSignal, controller.signal, ...(connection ? [connection] : [])])
@@ -522,19 +525,19 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         if ("episode" in source) {
           const transcript = await api.episodeTranscript(source.episode, active)
           if (active.aborted) return
-          if (!transcript) return "这期节目没有公开字幕。"
-          return { type: "forward" as const, nodes: [`《${source.episode.name}》 · 节目字幕`,
+          if (!transcript) return $t("services.music.command.text_aa70b642cb")
+          return { type: "forward" as const, nodes: [$t("services.music.command.text_19c21cb395", { "name": source.episode.name }),
             ...transcript.match(/[\s\S]{1,1000}/gu) ?? [], neteaseEpisodePage(source.episode.id)] }
         }
-        if (source.track.platform === "bilibili") return "B 站视频音轨没有曲目歌词。"
+        if (source.track.platform === "bilibili") return $t("services.music.command.text_e33a4d7ec9")
         const lyric = await api.publicLyrics(source.track, active)
         if (active.aborted) return
         const original = lyricPages(lyric.original), translated = lyricPages(lyric.translated)
-        if (!original.length && !translated.length) return "此曲目没有公开歌词。"
-        return { type: "forward" as const, nodes: [`《${source.track.name}》 · 歌词`, ...original,
-          ...(translated.length ? ["译词", ...translated] : [])] }
+        if (!original.length && !translated.length) return $t("services.music.command.text_a2cec7650e")
+        return { type: "forward" as const, nodes: [$t("services.music.command.text_b58589b85f", { "name": source.track.name }), ...original,
+          ...(translated.length ? [$t("services.music.command.text_d84c9eee14"), ...translated] : [])] }
       }
-      if (request.mode === "高清语音") await reply(context, "当前网关只支持普通语音，将尝试重发所选的完整音源。")
+      if (request.mode === "高清语音") await reply(context, $t("services.music.command.text_7e52f39cf7"))
       active.throwIfAborted()
       const { track, stream } = "episode" in source ? await api.playEpisode(source.episode, active)
         : { track: source.track, stream: await api.resolve(source.track, { exact: true, signal: active }) }
@@ -581,7 +584,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       let tracks = [...requestedCloud.map(item => item.track), ...search?.tracks ?? []]
       if (!session.multiple && session.page > 1 && !tracks.length && !episodes.length) {
         await reply(context, session.tracks?.length || session.episodes?.length
-          ? "没有更多结果，仍可选择本页的编号。" : "没有更多结果。")
+          ? $t("services.music.command.text_055b27d80e") : $t("services.music.command.text_cbb229a60e"))
         session.page--
         return
       }
@@ -605,28 +608,28 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           const length = musicLength(video ? track.extensions?.video_duration_ms : track.duration_ms)
           return {
             number: previous.length + index + 1, name: track.name,
-            artist: track.artists?.map(artist => artist.name).join(" / ") || (video ? "未知作者" : "未知歌手"),
-            source: cloud ? "网易云盘" : video ? "B 站视频" : musicNames[track.platform],
-            length: video && length ? "总长 " + length : length,
+            artist: track.artists?.map(artist => artist.name).join(" / ") || (video ? $t("services.music.command.text_c96ed7ec0b") : $t("services.music.command.text_f374d78a34")),
+            source: cloud ? $t("services.music.command.text_178f317ffa") : video ? $t("services.music.command.text_be20b1c3ef") : musicNames[track.platform],
+            length: video && length ? $t("services.music.command.text_171c66846d") + length : length,
             ...(!cloud && { coverUrl: video ? track.extensions?.video_cover_url : track.album?.cover_url, coverPlatform: track.platform }),
           }
         }),
         ...episodes.map((episode, index) => ({ number: previous.length + tracks.length + index + 1, name: episode.name,
-          artist: episode.creator || "未知主播", source: "网易云播客", length: musicLength(episode.duration),
+          artist: episode.creator || $t("services.music.command.text_bbae7d4a96"), source: $t("services.music.command.text_9b139653d2"), length: musicLength(episode.duration),
           coverUrl: episode.cover, coverPlatform: "netease" })),
       ]
-      const choiceHint = session.multiple ? "回复任一已显示的数字选一首，可反复选择。#下一页 翻页，#取消 结束。"
-        : session.podcast ? "两分钟内回复数字选择。#下一页 翻页，#取消 结束。"
-        : session.platform === "bilibili" ? "两分钟内回复数字播放所选视频的完整音轨。#下一页 翻页，#取消 结束。" :
-        "两分钟内回复数字选歌。#下一页 翻页，#取消 结束。公开曲目播放时自动尝试完整备用音源。" + (search ? searchNotes[search.accountStatus] : "")
+      const choiceHint = session.multiple ? $t("services.music.command.text_17862e0d1b")
+        : session.podcast ? $t("services.music.command.text_883fba2f6f")
+        : session.platform === "bilibili" ? $t("services.music.command.text_3c49d447a3") :
+        $t("services.music.command.text_ed10e665fa") + (search ? searchNotes[search.accountStatus] : "")
       const message = results.length ? choiceHint : session.multiple && previous.length
-        ? session.exhausted ? "没有更多歌曲，仍可选择之前的编号。" : "本页没有新的歌曲，可继续翻页或选择之前的编号。"
-        : "没有搜索结果，可更换关键词或平台。"
-      const title = session.multiple ? `${musicNames[session.platform]}多选点歌 · 第 ${session.page} 页`
-        : session.podcast ? "网易云播客" : musicNames[session.platform] + "点歌"
+        ? session.exhausted ? $t("services.music.command.text_f770e3d8b7") : $t("services.music.command.text_f2ad3dc33a")
+        : $t("services.music.command.text_1e262ef361")
+      const title = session.multiple ? $t("services.music.command.text_512d2b9f5d", { "value1": musicNames[session.platform], "page": session.page })
+        : session.podcast ? $t("services.music.command.text_9b139653d2") : musicNames[session.platform] + $t("services.music.command.text_a0c46fa3bd")
       const musicRows = await musicMenuCovers(results, active, fetchMusicCover)
       if (sessions.get(key) !== session || active.aborted) return
-      const card = { title, subtitle: session.keyword, badge: `第 ${session.page} 页`, message, musicRows }
+      const card = { title, subtitle: session.keyword, badge: $t("services.music.command.text_acac3da6c6", { "page": session.page }), message, musicRows }
       const limitBytes = context.inlineImageByteLimit ?? maxInlineBytes
       // The shared renderer already scales the requested 4× canvas for the low preset.
       const standard = nativeImageRasterScale() === 4
@@ -657,8 +660,8 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
     session.expires = Date.now() + session.timeoutMs
     const title = collectionName[collection]
     const items = result.tracks.map((track, index) => ({ label: String(index + 1),
-      value: `${track.name} · ${track.artists?.map(author => author.name).join(" / ") || "未知歌手"}` }))
-    const hint = items.length ? "回复序号播放。" + (collection === "favorites" && session.page > 0 ? " #下一页 查看下一页。" : "") : "当前没有可显示的曲目。"
+      value: `${track.name} · ${track.artists?.map(author => author.name).join(" / ") || $t("services.music.command.text_f374d78a34")}` }))
+    const hint = items.length ? $t("services.music.command.text_7773b25735") + (collection === "favorites" && session.page > 0 ? $t("services.music.command.text_fa719e270d") : "") : $t("services.music.command.text_30bc9ab75f")
     const image = await renderStatusCard({ title, message: hint, items }).catch(() => undefined)
     if (active.aborted || sessions.get(key) !== session) return
     await verifyQqSelection(session.api, result.binding, active)
@@ -670,7 +673,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
   async function handlePersonal(selection: NonNullable<ReturnType<typeof personalAction>>, context: Context, key: string) {
     if (context.isDelegated || context.message_type === "terminal") return
     const friend = credentialScope(context)
-    if (selection.kind !== "recommend" && (!friend || context.user_id === undefined)) return "请由绑定账号的主人在好友私聊查询。"
+    if (selection.kind !== "recommend" && (!friend || context.user_id === undefined)) return $t("services.music.command.text_f74360072d")
     const connection = selection.kind === "recommend" ? context.groupActivitySignal ?? context.privateCredentialSignal : friend
     const active = connection ? AbortSignal.any([moduleSignal, connection]) : moduleSignal
     try {
@@ -679,20 +682,20 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       active.throwIfAborted()
       if (selection.kind === "recommend") {
         const track = await recommendQqSong(api, active)
-        if (!track) return "QQ 音乐暂未返回推荐歌曲。"
+        if (!track) return $t("services.music.command.text_dff639e0e9")
         remember(key, { track }, timeoutMs)
         const stream = await openPublicQqStream(api, track, active).catch(() => undefined)
         if (active.aborted) return []
-        if (!stream) return `QQ 音乐推荐《${track.name}》。\n当前没有可核实的完整音源。\nhttps://y.qq.com/n/ryqq/songDetail/${encodeURIComponent(track.id)}`
+        if (!stream) return $t("services.music.command.text_bcdc62151a", { "name": track.name, "value2": encodeURIComponent(track.id) })
         await playMedia(context, api, track, stream, active)
       } else if (selection.kind === "status") {
         const platforms = ["qq", "netease"] as const
         const statuses = await Promise.allSettled(platforms.map(platform => ownMusicStatus(api, platform, context.user_id!, active)))
-        if (!active.aborted) return statuses.map((result, index) => `${musicNames[platforms[index]!]}：${result.status === "fulfilled" ? "登录有效" : "未绑定或登录待确认"}`).join("\n")
+        if (!active.aborted) return statuses.map((result, index) => `${musicNames[platforms[index]!]}：${result.status === "fulfilled" ? $t("services.music.command.text_6bab4dc3e5") : $t("services.music.command.text_ce48937714")}`).join("\n")
       } else if (selection.kind === "refresh") {
-        if (activeLogins.has(selection.platform) || selection.platform === "netease" && (partnerJob || cloud.isUploading())) return "此平台已有账号操作正在进行。"
+        if (activeLogins.has(selection.platform) || selection.platform === "netease" && (partnerJob || cloud.isUploading())) return $t("services.music.command.text_c32916b6f2")
         const status = await refreshOwnMusicAccount(api, selection.platform, context.user_id!, active)
-        if (!active.aborted) return `${musicNames[selection.platform]}${status.extensions?.refreshed === false ? "登录仍有效。" : "登录已续期。"}`
+        if (!active.aborted) return `${musicNames[selection.platform]}${status.extensions?.refreshed === false ? $t("services.music.command.text_a1c57f432a") : $t("services.music.command.text_b1bccd22bb")}`
       } else {
         const session: SearchSession = { stage: "search", api, controller: new AbortController(), platform: "qq", keyword: "", timeoutMs, podcast: false,
           page: selection.page, collection: selection.collection, expires: Date.now() + timeoutMs }
@@ -705,23 +708,23 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
   }
 
   async function partnerLoginDone(context: Context, active: AbortSignal, reused: boolean) {
-    let done = reused ? "已使用当前网易云登录，合伙人定时任务已启用。" : "网易云合伙人账号已登录，定时任务已启用。"
+    let done = reused ? $t("services.music.command.text_cbee02e3b0") : $t("services.music.command.text_e88cca0fe5")
     try {
       await enablePartnerAfterLogin(root, active, config => ownerPermission(context, config))
     } catch {
       if (active.aborted) return
-      done = "网易云合伙人账号已登录，定时任务启用未确认。请检查合伙人配置。"
+      done = $t("services.music.command.text_51c6947c34")
     }
-    const image = await renderStatusCard({ title: "合伙人登录", subtitle: "音乐合伙人", message: done }).catch(() => undefined)
+    const image = await renderStatusCard({ title: $t("services.music.command.text_10d2984e97"), subtitle: $t("services.music.command.text_54d3c7f785"), message: done }).catch(() => undefined)
     if (!active.aborted) await imageReply(context, image, done)
   }
 
   async function scan(context: Context, key: string, scanOptions: Scan, type?: string) {
     const friend = credentialScope(context)
-    if (!friend) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
+    if (!friend) throw new Error($t("services.music.command.text_61a8ff5e8f"))
     const { platform, api } = scanOptions
-    if (platform === "netease" && (partnerJob || cloud.isUploading())) throw new Error("网易云任务正在进行，请稍候。")
-    if (activeLogins.has(platform)) throw new Error("这个平台已有扫码操作，请等它结束。")
+    if (platform === "netease" && (partnerJob || cloud.isUploading())) throw new Error($t("services.music.command.text_e09e0b1a0c"))
+    if (activeLogins.has(platform)) throw new Error($t("services.music.command.text_4c4c975027"))
     const timeoutMs = scanOptions.timeoutMs ?? musicLoginTimeout(platform)
     const controller = new AbortController()
     const session: ScanSession = { ...scanOptions, stage: "polling", controller, expires: Date.now() + timeoutMs }
@@ -733,29 +736,29 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (!scanOptions.force && context.user_id !== undefined && await api.reuseMusicLogin(platform, context.user_id, active, !session.partner)) {
         active.throwIfAborted()
         if (session.partner) await partnerLoginDone(context, active, true)
-        else await reply(context, platform === "netease" ? "已使用当前网易云登录，点歌、云盘和合伙人共用此账号。换号请用 #音乐重新登录。"
-          : `已使用当前${musicNames[platform]}登录。换号请用 #音乐重新登录。`)
+        else await reply(context, platform === "netease" ? $t("services.music.command.text_dcee797dc5")
+          : $t("services.music.command.text_21251de44c", { "value1": musicNames[platform] }))
         return
       }
       if (session.partner) await api.tuneweave.requireReady("netease", active)
       const login = await api.createLogin(platform, context.user_id, type, { signal: active })
       active.throwIfAborted()
-      const image = await renderTemplate("qr-login", { title: musicNames[platform] + "登录",
-        subtitle: session.partner ? "音乐合伙人" : "公共音乐账号", badge: "SCAN",
-        notice: "建议使用对应平台 App 扫码确认。账号供机器人点歌使用，#取消 可结束等待。",
+      const image = await renderTemplate("qr-login", { title: musicNames[platform] + $t("services.music.command.text_1e2df9c307"),
+        subtitle: session.partner ? $t("services.music.command.text_54d3c7f785") : $t("services.music.command.text_d152e65e04"), badge: "SCAN",
+        notice: $t("services.music.command.text_1ebdc04744"),
         qrDataUrl: login.image, profileId: platform,
       }).catch(() => undefined)
       active.throwIfAborted()
-      if (!image) throw new Error("音乐登录二维码暂时无法生成，请稍后重试。")
+      if (!image) throw new Error($t("services.music.command.text_268dd48bf3"))
       let delivered = false
       await reply(context, { type: "image", file: image }, false, { onDelivered: () => { delivered = true } })
-      if (!delivered) throw new Error("音乐登录二维码送达未确认，请重试。")
+      if (!delivered) throw new Error($t("services.music.command.text_53be47adc3"))
       active.throwIfAborted()
       session.expires = Date.now() + timeoutMs
       await api.waitLogin(login, { signal: active, timeoutMs, pollMs: session.pollMs })
       if (active.aborted) return
       if (session.partner) await partnerLoginDone(context, active, false)
-      else await reply(context, musicNames[platform] + "公共音乐账号已登录。")
+      else await reply(context, musicNames[platform] + $t("services.music.command.text_062565e39f"))
     } catch (error) {
       if (!active.aborted) throw error
     } finally {
@@ -776,7 +779,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (session || cancelPending || (!context.isDelegated && selectionAt(key))) {
         if (session) drop(key, session)
         if (!context.isDelegated) forget(key)
-        return "已取消本次音乐操作。"
+        return $t("services.music.command.text_e51f42ed3c")
       }
       return
     }
@@ -785,10 +788,10 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
       if (session.stage === "search") {
         const friend = session.collection ? credentialScope(context) : undefined
         if (session.collection && (!friend || friend.aborted)) return
-        if (session.loading) return session.multiple ? "正在处理点歌，请稍候。" : "正在搜索，请稍候。"
+        if (session.loading) return session.multiple ? $t("services.music.command.text_63b328a68c") : $t("services.music.command.text_c3c2f34d94")
         if (nextPage.test(message)) {
-          if (session.collection && (session.collection !== "favorites" || session.page === 0)) return "当前列表没有下一页。"
-          if (session.multiple && session.exhausted) return "没有更多歌曲，仍可选择之前的编号。"
+          if (session.collection && (session.collection !== "favorites" || session.page === 0)) return $t("services.music.command.text_6211a9bb16")
+          if (session.multiple && session.exhausted) return $t("services.music.command.text_f770e3d8b7")
           retireMenu(session)
           const previous = { tracks: session.tracks, episodes: session.episodes, exhausted: session.exhausted, expires: session.expires }
           session.page++
@@ -804,14 +807,14 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         const trackCount = session.tracks?.length ?? 0
         const track = session.tracks?.[index]
         const episode = session.episodes?.[index - trackCount]
-        if (!trackCount && !session.episodes?.length) return session.multiple ? "当前没有可选择的歌曲。" : "当前没有可选择的结果。"
-        if (!track && !episode) return `请输入 1–${trackCount + (session.episodes?.length ?? 0)} 的序号。`
+        if (!trackCount && !session.episodes?.length) return session.multiple ? $t("services.music.command.text_70bedb3f49") : $t("services.music.command.text_9c867c25eb")
+        if (!track && !episode) return $t("services.music.command.text_50e029ca4e", { "value1": trackCount + (session.episodes?.length ?? 0) })
         if (session.collection && track && session.binding && friend) {
           drop(key, session)
           const active = AbortSignal.any([moduleSignal, friend])
           const { media, verifyDelivery } = await prepareOwnQqTrack(session.api, session.binding, track, active, async () => {
             active.throwIfAborted()
-            await reply(context, `正在获取《${track.name}》完整音源…`)
+            await reply(context, $t("services.music.command.text_7f0fc7fa5b", { "name": track.name }))
           })
           await sendPreparedTrack(context, session.api, track, media, active, verifyDelivery)
           return []
@@ -850,25 +853,25 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         await playSelection(context, key, { track }, session.timeoutMs,
           active => playMedia(context, session.api, track, undefined, active))
       } else {
-        if (!credentialScope(context)) throw new Error("请由机器人主人在私聊维护公共音乐账号。")
+        if (!credentialScope(context)) throw new Error($t("services.music.command.text_61a8ff5e8f"))
         const index = Number(message) - 1
         if (session.stage === "platform") {
           const selected = session.platforms[index]
-          if (!selected) throw new Error("请选择列表中的平台序号")
+          if (!selected) throw new Error($t("services.music.command.text_8652f7450d"))
           const types = scanTypes[selected.platform]
           if (types) {
             sessions.set(key, { stage: "type", api: session.api, expires: session.expires, platform: selected.platform, types, force: session.force })
-            return "请选择扫码方式：\n" + types.map((item, index) => `${index + 1}. ${item.name}`).join("\n")
+            return $t("services.music.command.text_d45c987145") + types.map((item, index) => `${index + 1}. ${item.name}`).join("\n")
           }
           await scan(context, key, { api: session.api, platform: selected.platform, force: session.force })
         } else if (session.stage === "type") {
           const type = session.types[index]
-          if (!type) throw new Error("请选择列表中的扫码方式序号")
+          if (!type) throw new Error($t("services.music.command.text_a3872c6038"))
           await scan(context, key, session, type.type)
         }
       }
     } catch (error) {
-      if (!moduleSignal.aborted) return "音乐：" + errorText(error)
+      if (!moduleSignal.aborted) return $t("services.music.command.text_50ceb8397d") + errorText(error)
     }
     return []
   }
@@ -926,9 +929,9 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         active.throwIfAborted()
         const platform = legacy?.platform ?? defaultPlatform
         if (mode === "2") {
-          if (platform !== "netease") return "当前默认音乐平台未接入播客播放。"
+          if (platform !== "netease") return $t("services.music.command.text_aad65cd1db")
           const episode = await api.firstEpisode(keyword, active)
-          if (!episode) return "未找到相关网易云播客。"
+          if (!episode) return $t("services.music.command.text_a05fcf3c04")
           const source = episodeSelectionFromTrack(episode.track)
           if (source) await playSelection(context, key, { episode: source }, timeoutMs,
             playing => playMedia(context, api, episode.track, episode.stream, playing))
@@ -936,12 +939,12 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         } else {
           const variant = platform === "netease" ? "cloud" : undefined
           const { tracks: [track] } = await api.search(platform, keyword, 1, { limit: 1, variant, signal: active })
-          if (!track) return "未找到相关歌曲。"
+          if (!track) return $t("services.music.command.text_741a17100b")
           await playSelection(context, key, { track }, timeoutMs,
             playing => playMedia(context, api, track, undefined, playing))
         }
       } catch (error) {
-        if (!active.aborted) return "播放：" + errorText(error)
+        if (!active.aborted) return $t("services.music.command.text_d3a5a0bdfd") + errorText(error)
       }
       return []
     }
@@ -963,7 +966,7 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         if (moduleSignal.aborted || pendingSearches.get(key) !== request) return []
         const platform = aliases[match?.[1] ?? ""] || legacy?.platform || defaultPlatform
         const podcast = mode?.[2] === "2"
-        if (podcast && platform !== "netease") return "当前默认音乐平台未接入播客播放。"
+        if (podcast && platform !== "netease") return $t("services.music.command.text_aad65cd1db")
         const multipleTimeout = api.config.session_timeout_ms
         const sessionTimeout = multiple
           ? (multipleTimeout && multipleTimeout > 0 && multipleTimeout <= 2_147_483_647 ? multipleTimeout : defaultMultipleTimeoutMs)
@@ -978,29 +981,29 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
           throw error
         }
       } catch (error) {
-        if (pendingSearches.get(key) === request) return "点歌：" + errorText(error)
+        if (pendingSearches.get(key) === request) return $t("services.music.command.text_a4b2190ac0") + errorText(error)
       } finally {
         if (pendingSearches.get(key) === request) pendingSearches.delete(key)
       }
       return []
     }
     if (selected === "login") {
-      if (!credentialScope(context)) return "请由机器人主人在私聊维护公共音乐账号。"
+      if (!credentialScope(context)) return $t("services.music.command.text_61a8ff5e8f")
       try {
         const { api, timeoutMs } = await openMusic()
         const platforms = (await api.platforms()).filter(item => item.capabilities.includes("qr_login"))
-        if (!platforms.length) throw new Error("当前 TuneWeave 没有可扫码的平台。")
+        if (!platforms.length) throw new Error($t("services.music.command.text_20e967e6b6"))
         const force = message === "#音乐重新登录"
         replace(key, { stage: "platform", api, platforms, force, expires: Date.now() + timeoutMs })
-        return "请选择扫码平台：\n" + platforms.map((item, index) => `${index + 1}. ${item.name}`).join("\n") +
-          "\n输入数字继续，#取消 退出。网易云与合伙人、云盘共用登录。"
-      } catch (error) { return "音乐：" + errorText(error) }
+        return $t("services.music.command.text_53fbbd0f86") + platforms.map((item, index) => `${index + 1}. ${item.name}`).join("\n") +
+          $t("services.music.command.text_2362b9aa33")
+      } catch (error) { return $t("services.music.command.text_50ceb8397d") + errorText(error) }
     }
 
     const config = await loadGlobalConfig()
     const owner = ownerPermission(context, config)
     if (selected === "partnerLogin") {
-      if (!credentialScope(context) || !owner) return "请由机器人主人在私聊登录音乐合伙人账号。"
+      if (!credentialScope(context) || !owner) return $t("services.music.command.text_b741c7c99f")
       const old = sessions.get(key)
       if (old) drop(key, old)
       const api = new MusicService({ tuneweaveConfig: config.tuneweave })
@@ -1009,50 +1012,50 @@ export function createMusicCommands({ signal, mediaRuntime, openMusic = defaultO
         await scan(context, key, { api, platform: "netease", partner: true,
           timeoutMs: loginTime(partner.login_timeout_ms, musicLoginTimeout("netease")),
           pollMs: loginTime(partner.login_poll_ms, 3000) })
-      } catch (error) { return "音乐：合伙人登录失败：" + errorText(error) }
+      } catch (error) { return $t("services.music.command.text_734a65411e") + errorText(error) }
       return []
     }
     if (selected === "partnerLog") {
-      if (!credentialScope(context) || !owner) return "请由机器人主人在私聊查看合伙人日志。"
+      if (!credentialScope(context) || !owner) return $t("services.music.command.text_294976374e")
       let report
       try { report = await readPartnerLog() }
-      catch { return "无法读取合伙人日志。" }
+      catch { return $t("services.music.command.text_6ecadbcfa6") }
       if (report) return { type: "forward", nodes: partnerLogNodes(report) }
-      const image = await renderStatusCard({ title: "合伙人日志", subtitle: "最近日志", badge: "空",
-        message: `生成时间：${formatLocalDateTime()}`, items: [{ label: "暂无日志", value: "成功 0 · 失败 0" }],
+      const image = await renderStatusCard({ title: $t("services.music.command.text_6163e6ecdd"), subtitle: $t("services.music.command.text_0dff362ab0"), badge: $t("services.music.command.text_2f8267a89a"),
+        message: $t("services.music.command.text_218220de0b", { "value1": formatLocalDateTime() }), items: [{ label: $t("services.music.command.text_10fafbeaa7"), value: $t("services.music.command.text_dcbf3a9edc") }],
       }).catch(() => undefined)
-      await imageReply(context, image, "合伙人日志 · 暂无日志")
+      await imageReply(context, image, $t("services.music.command.text_0c2899cd1a"))
       return []
     }
     if (selected === "partnerManual") {
-      if (!owner) return "仅机器人主人可执行合伙人任务。"
+      if (!owner) return $t("services.music.command.text_55235de83f")
       const request = context.privateCredentialSignal
       try {
-        const report = await runPartnerTask(config, "手动执行", {
-          signal: request, before: () => reply(context, "网易云合伙人任务开始，将按账号配置提交评分和乐评。"),
+        const report = await runPartnerTask(config, $t("services.music.command.text_f171cbec61"), {
+          signal: request, before: () => reply(context, $t("services.music.command.text_17a8620052")),
         })
         if (request?.aborted || moduleSignal.aborted) return []
-        if ("skipped" in report) return "合伙人任务或网易云登录正在进行，请稍候。"
-        const card = await renderPartnerReport("合伙人测试", report, context.user_id)
+        if ("skipped" in report) return $t("services.music.command.text_21f81bcfa4")
+        const card = await renderPartnerReport($t("services.music.command.text_ef7a54c064"), report, context.user_id)
         if (!request?.aborted) await imageReply(context, card.image, card.text)
       } catch {
-        if (!request?.aborted && !moduleSignal.aborted) return "合伙人任务未完成，请检查 TuneWeave 状态和最近日志。"
+        if (!request?.aborted && !moduleSignal.aborted) return $t("services.music.command.text_0b676b448a")
       }
       return []
     }
     if (selected === "initialize") {
-      if (!owner) return "只有机器人主人可以初始化 TuneWeave。"
+      if (!owner) return $t("services.music.command.text_0359ccd99a")
       try {
         const result = await new TuneWeaveService({ config: config.tuneweave }).initialize({
           platform: "netease", onProgress: async (text: string) => { await reply(context, text) },
         })
-        return "TuneWeave 初始化完成 · " + result.version + " · " + apiOrigin(result.apiUrl)
-      } catch (error) { return "TuneWeave 初始化失败：" + errorText(error) }
+        return $t("services.music.command.text_53522e23e5") + result.version + " · " + apiOrigin(result.apiUrl)
+      } catch (error) { return $t("services.music.command.text_663c780296") + errorText(error) }
     }
-    if (!owner) return "只有机器人主人可以查看 TuneWeave 状态。"
+    if (!owner) return $t("services.music.command.text_fe0190ecec")
     const status = await new TuneWeaveService({ config: config.tuneweave }).status("netease", moduleSignal)
-    return "TuneWeave " + (status.requiresUpdate ? "待更新" : status.ok ? "就绪" : "未就绪") +
-      " · " + (status.version || "未知版本") + "\n" + apiOrigin(status.apiUrl) + "\n" + status.message
+    return "TuneWeave " + (status.requiresUpdate ? $t("services.music.command.text_f591f3067a") : status.ok ? $t("services.music.command.text_b073db9c0b") : $t("services.music.command.text_e5c84c9aa7")) +
+      " · " + (status.version || $t("services.music.command.text_f1e7bec171")) + "\n" + apiOrigin(status.apiUrl) + "\n" + status.message
   }
 
   return {

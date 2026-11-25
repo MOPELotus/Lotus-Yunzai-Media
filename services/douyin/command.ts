@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import { randomUUID } from "node:crypto"
 import { loadGlobalConfig } from "../../core/config/global.ts"
@@ -44,7 +47,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
   const cancelRecovery = mediaRuntime?.whenReady(() => {
     if (signal.aborted) return
     recovery = makeService().recoverTasks().catch(error => {
-      console.warn("[media] 抖音任务恢复失败：" + error.message)
+      console.warn($t("services.douyin.command.text_bfcd980cf6") + error.message)
     })
   })
 
@@ -74,27 +77,27 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
         const room = await service.getLiveInfo(share, active).catch(() => undefined)
         if (active.aborted) return
         if (!room) {
-          await reply(`抖音直播间的公开资料暂时无法核实。\n${share.url}`)
+          await reply($t("services.douyin.command.text_d80b74a045", { "url": share.url }))
           return
         }
         const items = [
-          { label: "房间标题", value: room.title },
-          ...(room.host ? [{ label: "主播", value: room.host }] : []),
-          ...(room.viewers === undefined ? [] : [{ label: "页面显示观看人数", value: String(room.viewers) }]),
+          { label: $t("services.douyin.command.text_64ac8c3177"), value: room.title },
+          ...(room.host ? [{ label: $t("services.douyin.command.text_a41fab00b5"), value: room.host }] : []),
+          ...(room.viewers === undefined ? [] : [{ label: $t("services.douyin.command.text_c12b2709cb"), value: String(room.viewers) }]),
         ]
-        const cardItems = items.map(({ label, value }) => ({ label, value: liveCardText(value) || "见原页面" }))
+        const cardItems = items.map(({ label, value }) => ({ label, value: liveCardText(value) || $t("services.douyin.command.text_dcde071ae6") }))
         await replyImage(reply, active, maxBytes, renderScale => renderLiveCard({
-          title: room.status, subtitle: "抖音", items: cardItems, userId: context.user_id,
-        }, { saveId, renderScale }), [`抖音 · ${room.status}`,
+          title: room.status, subtitle: $t("services.douyin.command.text_d077d0b18e"), items: cardItems, userId: context.user_id,
+        }, { saveId, renderScale }), [$t("services.douyin.command.text_327f939d86", { "status": room.status }),
           ...items.map(({ label, value }) => `${label} ${value}`)].join("\n"))
-        await reply(showInfo ? share.url : `抖音直播仅提供房间预览。\n${share.url}`)
+        await reply(showInfo ? share.url : $t("services.douyin.command.text_c3f5a70e2f", { "url": share.url }))
         return
       }
       const allowed = new PermissionService({ permissions: config.permissions }).explain(context, "douyin.download").ok
       const download = normalizeDouyinDownloadConfig(config.douyin)
-      const denied = "你没有使用抖音下载的权限。"
+      const denied = $t("services.douyin.command.text_a16a71dc38")
       if (!showInfo && (!allowed || !download.enable)) {
-        await reply(allowed ? "抖音下载未启用。" : denied)
+        await reply(allowed ? $t("services.douyin.command.text_fa551026cc") : denied)
         return
       }
       const info = await service.getInfo(share.target, { signal: active })
@@ -102,7 +105,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       if (showInfo) {
         await replyImage(reply, active, maxBytes, renderScale => render("douyin-info", {
           ...info, avatar: info.author?.avatar, userId: context.user_id,
-        }, { saveId, renderScale }), `${info.title}\n作者：${info.owner || "未知"}\n${info.url}`)
+        }, { saveId, renderScale }), $t("services.douyin.command.text_c96c42d43f", { "title": info.title, "value2": info.owner || $t("services.douyin.command.text_4d8c1c5b42"), "url": info.url }))
         for (const [index, page] of articlePages(info.article).entries()) {
           if (active.aborted) return
           await replyImage(reply, active, maxBytes, renderScale => render("article", {
@@ -118,7 +121,7 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       if (!download.enable) return
       result = await service.download(info, download, {
         signal: active,
-        onEvent: (event: { message: string }) => console.debug("[media] 抖音下载：" + event.message),
+        onEvent: (event: { message: string }) => console.debug($t("services.douyin.command.text_35c7a1f6d4") + event.message),
       })
       if (active.aborted) return
       if (!result.ok || !("files" in result)) throw new Error(mediaFailureMessage("reason" in result ? result : undefined))
@@ -130,15 +133,15 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
     } catch (error) {
       if (active.aborted) return
       const code = error instanceof Error && "code" in error ? error.code : undefined
-      const message = error instanceof Error ? error.message : "抖音解析失败，请稍后重试。"
-      console.warn(`[media] 抖音解析 ${code || "error"}: ${message}`)
+      const message = error instanceof Error ? error.message : $t("services.douyin.command.text_373ee33f74")
+      console.warn($t("services.douyin.command.text_06f9a0caf1", { "value1": code || "error", "message": message }))
       await replyImage(reply, active, maxBytes, renderScale => renderStatusCard({
-        title: "抖音解析", subtitle: "Lotus-Yunzai · 抖音", badge: code === mediaDeliveryUnknown ? "未确认" : "失败",
+        title: $t("services.douyin.command.text_885c06c21b"), subtitle: $t("services.douyin.command.text_863ef55e48"), badge: code === mediaDeliveryUnknown ? $t("services.douyin.command.text_c098e854e6") : $t("services.douyin.command.text_28384d7afd"),
         message, userId: context.user_id,
       }, { saveId: saveId + "-error", renderScale }), message)
     } finally {
       if (result && "taskDir" in result) await service.releaseTask(result).catch(error => {
-        console.warn("[media] 抖音任务清理失败：" + error.message)
+        console.warn($t("services.douyin.command.text_1d72f4b6a0") + error.message)
       })
     }
   }
@@ -154,8 +157,8 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
 
     const config = await loadConfig()
     if (active.aborted) return
-    if (!config.douyin.enable) return explicit ? "抖音解析已关闭。" : undefined
-    if (!target) return "请输入要下载的抖音分享链接。"
+    if (!config.douyin.enable) return explicit ? $t("services.douyin.command.text_71534021e9") : undefined
+    if (!target) return $t("services.douyin.command.text_4726fa0b0e")
     const service = makeService(config.douyin.request_timeout_ms)
     const job = handleWork(service, target, config, context, !explicit, active)
     work.add(job)

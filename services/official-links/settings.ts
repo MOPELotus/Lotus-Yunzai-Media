@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -6,9 +9,9 @@ import { lockFile } from "../../../../lib/file-lock.ts"
 import { dataPath, rootPath } from "../../core/path.ts"
 
 export const officialLinkToggles = [
-  ["youtube", "YouTube 链接预览"], ["youtubeMusic", "YouTube Music 链接预览"],
-  ["telegram", "Telegram 公开消息预览"], ["x", "X 公开帖预览"], ["v2ex", "V2EX 主题预览"],
-  ["articles", "论文与文章预览"], ["private", "允许在私聊预览"],
+  ["youtube", $t("services.official-links.settings.text_eca2fd0b0e")], ["youtubeMusic", $t("services.official-links.settings.text_fd5af253f5")],
+  ["telegram", $t("services.official-links.settings.text_676cc519a1")], ["x", $t("services.official-links.settings.text_6051a512b0")], ["v2ex", $t("services.official-links.settings.text_c498bdb947")],
+  ["articles", $t("services.official-links.settings.text_090fb5e40d")], ["private", $t("services.official-links.settings.text_76c47c4e30")],
 ] as const
 export type OfficialLinkToggle = typeof officialLinkToggles[number][0]
 export const officialLinkTrustFields = { telegram: "trustedTelegramUsers", x: "trustedXUsers" } as const
@@ -39,7 +42,7 @@ export function createOfficialLinkSettings(directory = dataPath, root = pathToFi
     try {
       const raw: unknown = Bun.YAML.parse(await readFile(file, "utf8"))
       if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>
-      throw new Error("公开链接预览设置须为映射。")
+      throw new Error($t("services.official-links.settings.text_3283950fcc"))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
       throw error
@@ -78,7 +81,7 @@ export function createOfficialLinkSettings(directory = dataPath, root = pathToFi
 
   async function save(patch: OfficialLinkPatch) {
     await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-    const lock = await lockFile(file + ".sqlite", "公开链接预览设置")
+    const lock = await lockFile(file + ".sqlite", $t("services.official-links.settings.text_72a7ca42ea"))
     const temporary = file + "." + crypto.randomUUID() + ".tmp"
     try {
       await writeFile(temporary, Bun.YAML.stringify({ ...await read(), ...patch }), { mode: 0o600, flag: "wx" })

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
 import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
@@ -29,7 +32,7 @@ export function createQqWorldNotice({ signal, settings = defaultSettings }:
       if (connection?.aborted || (context.message_type === "private" && !connection)) return
       const options = await settings().catch(() => undefined)
       if (signal?.aborted || connection?.aborted || !options?.enable || (context.message_type === "private" && !options.private)) return
-      return "QQ 小世界已停止公开查看。\nhttps://s.xsj.qq.com/" + code
+      return $t("services.public-share.qq-world.text_d29756ffc2") + code
     },
   }
 }

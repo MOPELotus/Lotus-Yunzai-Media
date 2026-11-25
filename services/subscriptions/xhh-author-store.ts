@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises"
 import { join } from "node:path"
 import YAML from "yaml"
@@ -23,11 +26,11 @@ function route(entry: AuthorGroupEntry): AuthorRoute {
 }
 
 function validEntry(input: unknown): AuthorGroupEntry {
-  if (!input || typeof input !== "object") throw new Error("投稿订阅记录无效。")
+  if (!input || typeof input !== "object") throw new Error($t("services.subscriptions.xhh-author-store.text_277b5dda1b"))
   const { bot, chat, uid, name, createdAfter, generation } = input as Record<string, unknown>
   if (!numericId(bot) || !numericId(chat) || !numericId(uid) || typeof name !== "string" || name.length > 160 ||
       epoch(createdAfter) === undefined || typeof generation !== "string" || !/^[a-f0-9-]{36}$/u.test(generation)) {
-    throw new Error("投稿订阅记录无效。")
+    throw new Error($t("services.subscriptions.xhh-author-store.text_277b5dda1b"))
   }
   return { bot: String(bot), chat: String(chat), uid: String(uid), name, createdAfter: createdAfter as number, generation }
 }
@@ -41,12 +44,12 @@ export function createAuthorVideoStore(data: string, lockFile: LockSubscriptionF
   async function read(): Promise<AuthorGroupEntry[]> {
     try {
       const file = await lstat(path)
-      if (!file.isFile() || file.size > maxBytes) throw new Error("投稿订阅文件无效。")
+      if (!file.isFile() || file.size > maxBytes) throw new Error($t("services.subscriptions.xhh-author-store.text_34758b7513"))
       const input: { version?: unknown; routes?: unknown } = JSON.parse(await readFile(path, "utf8"))
-      if (input?.version !== 1 || !Array.isArray(input.routes)) throw new Error("投稿订阅文件无效。")
+      if (input?.version !== 1 || !Array.isArray(input.routes)) throw new Error($t("services.subscriptions.xhh-author-store.text_34758b7513"))
       const entries = input.routes.map(validEntry)
       if (new Set(entries.map(entry => [entry.bot, entry.chat, entry.uid].join(":"))).size !== entries.length) {
-        throw new Error("投稿订阅中存在重复记录。")
+        throw new Error($t("services.subscriptions.xhh-author-store.text_d76e68ecd8"))
       }
       return entries
     } catch (error) {
@@ -58,13 +61,13 @@ export function createAuthorVideoStore(data: string, lockFile: LockSubscriptionF
   async function change(operation: (entries: AuthorGroupEntry[]) => number, signal: AbortSignal) {
     signal.throwIfAborted()
     await mkdir(directory, { recursive: true, mode: 0o700 })
-    const lock = await lockFile(join(directory, ".author-videos-lock.sqlite"), "B 站作者投稿订阅")
+    const lock = await lockFile(join(directory, ".author-videos-lock.sqlite"), $t("services.subscriptions.xhh-author-store.text_2c9a6ede8f"))
     try {
       const entries = await read()
       const count = operation(entries)
       if (!count) return 0
       const bytes = JSON.stringify({ version: 1, routes: entries }, null, 2) + "\n"
-      if (Buffer.byteLength(bytes) > maxBytes) throw new Error("投稿订阅达到存储上限。")
+      if (Buffer.byteLength(bytes) > maxBytes) throw new Error($t("services.subscriptions.xhh-author-store.text_26772099f5"))
       const pending = path + "." + crypto.randomUUID() + ".tmp"
       try {
         const output = await open(pending, "wx", 0o600)

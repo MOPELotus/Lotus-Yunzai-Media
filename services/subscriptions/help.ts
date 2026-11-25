@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { builtinResourceDirectory } from "../../../../lib/builtin-resources.ts";
 import { join } from "node:path"
 import { loadImage, type Image } from "skia-canvas"
@@ -20,34 +23,34 @@ interface HelpTile {
   icon?: Image
 }
 
-const title = "动态订阅帮助"
+const title = $t("services.subscriptions.help.text_b423935626")
 
 function platformSection(platform: string, account: string, categories: string, extra: HelpRow[] = []): HelpSection {
   return {
-    title: `${platform}动态`,
+    title: $t("services.subscriptions.help.text_cf520db5d6", { "platform": platform }),
     rows: [
-      { label: `#添加${platform}推送 UID`, value: "主人添加订阅", icon: "diagram" },
-      { label: `#删除${platform}推送 UID`, value: "主人删除订阅", icon: "tourbillon_device" },
-      { label: `#${platform}全部订阅列表`, value: "主人查看当前机器人的全部订阅", icon: "restaurant_smoothie" },
-      { label: `#${platform}订阅列表`, value: "查看本群或私聊的订阅", icon: "archaic_stone" },
-      { label: `#执行${platform}任务`, value: "主人手动检查动态", icon: "kamera" },
-      { label: `#${platform}${account}UID:UID`, value: "查公开资料", icon: "flower_2" },
-      { label: `#${platform}${account}昵称:昵称`, value: "按昵称查询", icon: "shell" },
-      { label: "在 UID 前加类别", value: categories },
+      { label: $t("services.subscriptions.help.text_6925f0523e", { "platform": platform }), value: $t("services.subscriptions.help.text_2c3c9fdf79"), icon: "diagram" },
+      { label: $t("services.subscriptions.help.text_a99c06d554", { "platform": platform }), value: $t("services.subscriptions.help.text_bed3fd1a45"), icon: "tourbillon_device" },
+      { label: `#${platform}全部订阅列表`, value: $t("services.subscriptions.help.text_a4bbe2ff80"), icon: "restaurant_smoothie" },
+      { label: `#${platform}订阅列表`, value: $t("services.subscriptions.help.text_ff151ef8dc"), icon: "archaic_stone" },
+      { label: `#执行${platform}任务`, value: $t("services.subscriptions.help.text_54169f1ca5"), icon: "kamera" },
+      { label: `#${platform}${account}UID:UID`, value: $t("services.subscriptions.help.text_e2bba80b9b"), icon: "flower_2" },
+      { label: `#${platform}${account}昵称:昵称`, value: $t("services.subscriptions.help.text_002db6d3ce"), icon: "shell" },
+      { label: $t("services.subscriptions.help.text_69adf6e34c"), value: categories },
       ...extra,
     ],
   }
 }
 
 const sections: HelpSection[] = [
-  { title: "指令前缀", rows: [
-    { label: "#", value: "如 #B站订阅列表", icon: "diagram" },
-    { label: "/", value: "如 /微博订阅列表", icon: "diagram" },
+  { title: $t("services.subscriptions.help.text_ddb683be18"), rows: [
+    { label: "#", value: $t("services.subscriptions.help.text_a610e15d28"), icon: "diagram" },
+    { label: "/", value: $t("services.subscriptions.help.text_ec9298aa5a"), icon: "diagram" },
   ] },
-  platformSection("B站", "UP主", "视频、图文、文章、转发、直播", [
-    { label: "B站视频解析", value: "直接发送视频链接", icon: "romaritime_flower" },
+  platformSection($t("services.subscriptions.help.text_acfb839ad1"), $t("services.subscriptions.help.text_6b072def69"), $t("services.subscriptions.help.text_a7e6ad6777"), [
+    { label: $t("services.subscriptions.help.text_68d25f1b09"), value: $t("services.subscriptions.help.text_207a4d174e"), icon: "romaritime_flower" },
   ]),
-  platformSection("微博", "博主", "视频、图文、文章、转发"),
+  platformSection($t("services.subscriptions.help.text_0fc69798d8"), $t("services.subscriptions.help.text_01d1efbe73"), $t("services.subscriptions.help.text_ec7527ad3d")),
 ]
 
 const assetDirectories = [resolveData("yuki-plugin/resources"), resolveRoot("plugins/yuki-plugin/resources"), builtinResourceDirectory("social/yuki")]
@@ -71,7 +74,7 @@ let assets: ReturnType<typeof legacyHelpIcons> | undefined
 
 export async function drawSubscriptionHelp({ mode = subscriptionRenderMode() }: Pick<InfoCardOptions, "mode"> = {}) {
   const icons = await (assets ??= legacyHelpIcons())
-  return renderInfoCard({ title, eyebrow: "媒体", width }, layout => {
+  return renderInfoCard({ title, eyebrow: $t("services.subscriptions.help.text_fa33e10009"), width }, layout => {
     const gap = 10
     const tileWidth = Math.floor((layout.width - 2 * gap) / 3)
     const groups: HelpGroup[] = []

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { load } from "cheerio"
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
@@ -41,7 +44,7 @@ export function parseJikePost(html: string, id: string) {
   const videoCover = jikeImageUrl(text(row(video.image).picUrl, 4096))?.href
   const duration = typeof video.duration === "number" && Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration / 1_000) : undefined
   const body = text(post.content, 6_000)
-  return { body, title: text(body.split("\n", 1)[0], 72) || "即刻动态", owner: text(row(post.user).screenName, 80),
+  return { body, title: text(body.split("\n", 1)[0], 72) || $t("services.jike.command.text_b2c89b7625"), owner: text(row(post.user).screenName, 80),
     pictures, hasVideo: Object.keys(video).length > 0, videoCover, duration }
 }
 
@@ -79,7 +82,7 @@ export function createJikeCommands({ signal, fetch = globalThis.fetch, render = 
       } catch { /* Other publicly visible images can still be delivered. */ }
     }
     signal.throwIfAborted()
-    if (urls.length !== pictures.length) pictures.push("部分原图未能读取，可打开上面的即刻原帖。")
+    if (urls.length !== pictures.length) pictures.push($t("services.jike.command.text_e8d67f0415"))
     return { pictures, forward: pictures.length >= 4 || remaining < 12 * oneMiB }
   }
 
@@ -95,11 +98,11 @@ export function createJikeCommands({ signal, fetch = globalThis.fetch, render = 
       const id = postId(source)!
       const page = await readPublicSharePage(source, url => postId(url) === id, fetch, active)
       const post = page && parseJikePost(page.html, id)
-      if (!post) return "即刻未返回该公开动态。"
-      const video = post.hasVideo ? `视频原帖${post.duration ? ` · ${post.duration} 秒` : ""}` : ""
-      const meta = ["即刻", post.owner && `作者：${post.owner}`, video, source.href].filter(Boolean).join("\n")
+      if (!post) return $t("services.jike.command.text_ce4848a967")
+      const video = post.hasVideo ? $t("services.jike.command.text_81491de6b7", { "value1": post.duration ? $t("services.jike.command.text_51d720b11c", { "duration": post.duration }) : "" }) : ""
+      const meta = [$t("services.jike.command.text_61528bef0f"), post.owner && $t("services.jike.command.text_4c59ffb174", { "owner": post.owner }), video, source.href].filter(Boolean).join("\n")
       const full = [meta, post.body].filter(Boolean).join("\n")
-      const blocks: ArticleBlock[] = [{ type: "text", text: Array.from(post.body).slice(0, 450).join("") || video || "即刻动态" }]
+      const blocks: ArticleBlock[] = [{ type: "text", text: Array.from(post.body).slice(0, 450).join("") || video || $t("services.jike.command.text_b2c89b7625") }]
       if (post.videoCover) blocks.push({ type: "image", urls: [post.videoCover] })
       const limit = context.inlineImageByteLimit ?? 16 * oneMiB
       const card = await render("article", { title: post.title, owner: post.owner, page: 1, blocks }).catch(() => undefined)
@@ -108,7 +111,7 @@ export function createJikeCommands({ signal, fetch = globalThis.fetch, render = 
         ? [{ type: "image", file: card }, post.body.length > 450 ? full : meta] : full
       const { pictures, forward } = await originalPictures(post.pictures, limit, active)
       return forward ? { type: "forward", nodes: [intro, ...pictures] } : [intro, ...pictures].flat()
-    } catch { if (!lifetime.some(value => value.aborted)) return "暂时无法读取即刻公开动态。" }
+    } catch { if (!lifetime.some(value => value.aborted)) return $t("services.jike.command.text_e2614ad6ea") }
   }
 
   return { fallback, features: (context: MessageFallbackContext) => identify(context.normalizedMessage, context) ? [feature] : [] }

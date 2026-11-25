@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../packages/i18n/index.ts";
+import messageCatalog from "./i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import type { CommandModule } from "../../lib/commands.ts"
 import { createAcfunCommands } from "./services/acfun/command.ts"
 import { createJikeCommands } from "./services/jike/command.ts"

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { fileURLToPath } from "node:url"
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { BotNotifications } from "../../../../lib/checkin-notify.ts"
@@ -74,9 +77,10 @@ function isSubscriptionOwner(context: SubscriptionContext) {
 function editArguments(input: string,provider: SubscriptionProvider) {
   const selected = new Set<string>()
   let rest = input.trim()
+  const commandTypes = provider.commandTypeNames ?? provider.typeNames
   for (let match; (match=categories.exec(rest));) {
-    for (const [code,label] of Object.entries(provider.typeNames)) if (label === match[1]) selected.add(code)
-    if (!match[1] || !Object.values(provider.typeNames).includes(match[1])) return
+    for (const [code,label] of Object.entries(commandTypes)) if (label === match[1]) selected.add(code)
+    if (!match[1] || !Object.values(commandTypes).includes(match[1])) return
     rest = rest.slice(match[0].length)
   }
   rest = rest.replace(/^(?:uid\s*)?[:：]?\s*/iu,"")
@@ -85,10 +89,10 @@ function editArguments(input: string,provider: SubscriptionProvider) {
 }
 
 function display(provider: SubscriptionProvider, items: readonly SubscriptionRoute[], heading: string) {
-  if (!items.length) return heading+"\n当前没有订阅。"
+  if (!items.length) return heading+$t("services.subscriptions.module.text_52160b7865")
   return heading+"\n"+items.map(item=>{
     const types = [...new Set(item.types.map(type=>provider.typeNames[type]).filter(Boolean))]
-    return item.uid+"："+item.name+" ["+(types.length?types.join("、"):"全部动态")+"]"
+    return item.uid+"："+item.name+" ["+(types.length?types.join("、"):$t("services.subscriptions.module.text_e6b234fbec"))+"]"
   }).join("\n")
 }
 
@@ -118,9 +122,9 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
   let startup: Promise<void> | undefined
   const cancelReady = services.mediaRuntime?.whenReady(() => {
     startup ??= Promise.all([dispatch.start(), authorVideos?.start()]).then(() => undefined)
-      .catch(error => console.warn("[media] 订阅 · 启动定时任务失败：" + errorText(error)))
+      .catch(error => console.warn($t("services.subscriptions.module.text_2b72d177db") + errorText(error)))
   })
-  const describe = (provider: SubscriptionProvider) => provider.label + "订阅"
+  const describe = (provider: SubscriptionProvider) => provider.label + $t("services.subscriptions.module.text_cf8efc450f")
 
   const fallback: MessageFallback = async (message,context) => {
     if (help.test(message.trim())) return renderHelp()
@@ -141,10 +145,10 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
     const current=target(context)
     try {
       if (match) {
-        if (!isSubscriptionOwner(context)) return "只有机器人主人可以修改"+describe(provider)+"。"
-        if (!current) return "请在订阅要发送的群聊或私聊中设置。"
+        if (!isSubscriptionOwner(context)) return $t("services.subscriptions.module.text_2db3898cf0")+describe(provider)+"。"
+        if (!current) return $t("services.subscriptions.module.text_7df1e748c3")
         const args=editArguments(match[3] ?? "",provider)
-        if (!args) return "请在指令末尾填写有效的纯数字 UID。"
+        if (!args) return $t("services.subscriptions.module.text_e17cfe63b4")
         const operation=/^(删除|取消|del)$/iu.test(match[1] ?? "")?"remove":"add"
         let name=args.uid
         let verificationFailure: string | undefined
@@ -152,53 +156,53 @@ export async function createSubscriptionModule(services: SubscriptionServices, {
           item.uid === args.uid && item.bot === current.bot && item.chat === current.chat && item.kind === current.kind)) {
           try {
             const info=await provider.profile(args.uid,{signal:services.signal,allowUnverified:true})
-            if (!info) return "未找到 UID "+args.uid+" 的公开资料。"
+            if (!info) return $t("services.subscriptions.module.text_817b3d2c71")+args.uid+$t("services.subscriptions.module.text_402fe6da67")
             name=info.name
             verificationFailure=info.verificationFailure
           } catch (error) {
-            return provider.label+"用户校验失败："+errorText(error)
+            return provider.label+$t("services.subscriptions.module.text_35d32344d7")+errorText(error)
           }
         }
         const updated=await config.update(provider.id,current,args.uid,operation,args.selected,Object.keys(provider.typeNames),name)
         if (updated && verificationFailure) {
-          return "已更新"+describe(provider)+"\n"+args.uid+" 尚未校验（"+verificationFailure+"），已按 UID 保存，请确认 UID 正确。"
+          return $t("services.subscriptions.module.text_434203a723")+describe(provider)+"\n"+args.uid+$t("services.subscriptions.module.text_bb1bff7946")+verificationFailure+$t("services.subscriptions.module.text_46124aaeb6")
         }
-        return updated ? "已更新"+describe(provider)+"\n"+updated.name+"："+args.uid : "当前会话没有订阅该 UID。"
+        return updated ? $t("services.subscriptions.module.text_434203a723")+describe(provider)+"\n"+updated.name+"："+args.uid : $t("services.subscriptions.module.text_2d416c6b48")
       }
       if (view) {
-        if (view[2] && !isSubscriptionOwner(context)) return "只有机器人主人可以查看全部"+describe(provider)+"。"
-        if (!current && (!view[2] || context.message_type !== "terminal")) return "请在群聊或私聊中查询当前会话。"
+        if (view[2] && !isSubscriptionOwner(context)) return $t("services.subscriptions.module.text_10d7776bfd")+describe(provider)+"。"
+        if (!current && (!view[2] || context.message_type !== "terminal")) return $t("services.subscriptions.module.text_b4eb18acf3")
         const all=await config.routes(provider.id)
         if (!view[2] && current) return display(provider,all.filter(item=>item.kind===current.kind && item.chat===current.chat && item.bot===current.bot),describe(provider))
         const blocks=new Map<string, SubscriptionRoute[]>()
         for (const item of all) {
           if (current && item.bot !== current.bot) continue
-          const name=(item.kind==="group"?"群 ":"私聊 ")+item.chat+" · 机器人 "+item.bot
+          const name=(item.kind==="group"?$t("services.subscriptions.module.text_9eb20ff6ff"):$t("services.subscriptions.module.text_b571e46624"))+item.chat+$t("services.subscriptions.module.text_7a3b06c300")+item.bot
           let rows=blocks.get(name)
           if (!rows) { rows=[]; blocks.set(name,rows) }
           rows.push(item)
         }
-        return blocks.size ? {type:"forward",nodes:[...blocks].map(([name,rows])=>display(provider,rows,name))} : describe(provider)+"当前没有订阅。"
+        return blocks.size ? {type:"forward",nodes:[...blocks].map(([name,rows])=>display(provider,rows,name))} : describe(provider)+$t("services.subscriptions.module.text_a4f8a71872")
       }
       if (run) {
-        if (!isSubscriptionOwner(context)) return "只有机器人主人可以执行"+describe(provider)+"任务。"
-        if (!getRedis()) return "订阅存储未连接。"
+        if (!isSubscriptionOwner(context)) return $t("services.subscriptions.module.text_0d9d52ba44")+describe(provider)+$t("services.subscriptions.module.text_87043e5254")
+        if (!getRedis()) return $t("services.subscriptions.module.text_b0bf4783ce")
         const task=dispatch.run(provider.id)
-        if (!task) return "订阅任务正在执行或已停止。"
+        if (!task) return $t("services.subscriptions.module.text_5fe9480d59")
         const record=await task
-        return "已确认 "+record.confirmed+" 条，未发出 "+record.rejected+" 条，结果未确认 "+record.unknown+
-          " 条，跳过 "+record.skipped+" 条，异常 "+record.failed+" 次。"
+        return $t("services.subscriptions.module.text_18629a7841")+record.confirmed+$t("services.subscriptions.module.text_3d9ba31495")+record.rejected+$t("services.subscriptions.module.text_c47d1be66a")+record.unknown+
+          $t("services.subscriptions.module.text_f4e551a98c")+record.skipped+$t("services.subscriptions.module.text_5fb6df0f47")+record.failed+$t("services.subscriptions.module.text_3b0770bdec")
       }
       const mode = lookup?.[2]?.toLowerCase()
       const query = lookup?.[3] ?? ""
       const value = mode === "uid" ? numericId(query) : query.trim()
-      if (!value) return "请输入要查询的 UID 或昵称。"
+      if (!value) return $t("services.subscriptions.module.text_f51da9f08c")
       const found=mode==="uid" ? [await provider.profile(value,{signal:services.signal})] :
         await provider.search?.(value,{signal:services.signal}) ?? []
       const rows=found.filter(value => value !== undefined).slice(0,8).map(profileText)
-      return rows.length ? [{type:"text",text:rows.join("\n\n")}] : "没有找到公开用户资料。"
+      return rows.length ? [{type:"text",text:rows.join("\n\n")}] : $t("services.subscriptions.module.text_e4bca02d33")
     } catch (error) {
-      return describe(provider)+"处理失败："+errorText(error)
+      return describe(provider)+$t("services.subscriptions.module.text_ec33853944")+errorText(error)
     }
   }
   return {

@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { requestText, DouyinError, type RequestOptions } from "./http.ts"
 import { MOBILE_UA, targetFromUrl, validateDouyinUrl } from "./links.ts"
 import { douyinWorkId, type AwemeDetail } from "./model.ts"
@@ -29,7 +32,7 @@ export function extractRouterData(html: string): RouterData {
       }
     }
   }
-  throw new DouyinError("ssr_structure", "分享页面未找到有效的 _ROUTER_DATA")
+  throw new DouyinError("ssr_structure", $t("services.douyin.ssr.text_11ce2b849e"))
 }
 
 export function detailFromRouter(router: RouterData, id: string) {
@@ -45,11 +48,11 @@ export function detailFromRouter(router: RouterData, id: string) {
     }
   }
   if (detail) return detail
-  throw new DouyinError("ssr_empty", "分享页面没有可用的作品详情")
+  throw new DouyinError("ssr_empty", $t("services.douyin.ssr.text_b80c7213ef"))
 }
 
 export async function fetchSsrDetail(id: string, { fetch: fetchImpl = globalThis.fetch, timeoutMs = 15000, signal }: RequestOptions = {}) {
-  if (!/^[1-9]\d{0,19}$/u.test(id)) throw new DouyinError("invalid_link", "抖音作品 ID 无效")
+  if (!/^[1-9]\d{0,19}$/u.test(id)) throw new DouyinError("invalid_link", $t("services.douyin.ssr.text_016d9b54af"))
   const active = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
   let url = new URL(`https://www.iesdouyin.com/share/video/${id}/`)
   for (let hop = 0; hop <= 3; hop++) {
@@ -59,10 +62,10 @@ export async function fetchSsrDetail(id: string, { fetch: fetchImpl = globalThis
     }, { timeoutMs })
     if (response.ok) return detailFromRouter(extractRouterData(text), id)
     const location = response.status >= 300 && response.status < 400 && response.headers.get("location")
-    if (!location) throw new DouyinError("ssr_http", `分享页面 HTTP ${response.status}`)
+    if (!location) throw new DouyinError("ssr_http", $t("services.douyin.ssr.text_ee91544679", { "status": response.status }))
     const next = validateDouyinUrl(new URL(location, url).href)
-    if (targetFromUrl(next.href)?.id !== id) throw new DouyinError("ssr_redirect", "分享页面跳转到其他作品")
+    if (targetFromUrl(next.href)?.id !== id) throw new DouyinError("ssr_redirect", $t("services.douyin.ssr.text_dbac7309d2"))
     url = next
   }
-  throw new DouyinError("ssr_redirect", "分享页面跳转次数超出限制")
+  throw new DouyinError("ssr_redirect", $t("services.douyin.ssr.text_0f3d02d14d"))
 }

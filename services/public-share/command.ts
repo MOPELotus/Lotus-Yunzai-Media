@@ -1,3 +1,6 @@
+import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
+import messageCatalog from "../../i18n/zh-CN.json";
+const $t = createTextTranslator("media", messageCatalog.messages);
 import { join } from "node:path"
 import type { CommandReply, MessageFallbackContext } from "../../../../lib/commands.ts"
 import type { MessageReply } from "../../../../lib/messages.ts"
@@ -13,7 +16,7 @@ import { buildMediaMessageText, isMediaCommandText } from "../media/message.ts"
 import { createMediaTask, recoverMediaTasks, releaseMediaTask } from "../media/tasks.ts"
 import { parsePublicShare, readPublicShare, type PublicShare } from "./source.ts"
 
-const names = { weishi: "微视", zuiyou: "最右" }
+const names = { weishi: $t("services.public-share.command.text_e7b7b38f38"), zuiyou: $t("services.public-share.command.text_ff74373e3f") }
 const links = /https?:\/\/[^\s<>"'，。！？；）】]+/giu
 const maxVideo = 100 * 1024 * 1024
 const maxInline = 16 * 1024 * 1024
@@ -73,7 +76,7 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
   }
 
   async function sendVideo(source: PublicShare, context: MessageFallbackContext, active: AbortSignal): Promise<CommandReply> {
-    if (!source.video) return `${names[source.site]}未提供此分享的公开视频。\n${source.url}`
+    if (!source.video) return $t("services.public-share.command.text_1191a17492", { "value1": names[source.site], "url": source.url })
     if (!playbackClaim(context, source)) return []
     let task: Awaited<ReturnType<typeof createMediaTask>> | undefined
     try {
@@ -89,9 +92,9 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
     } catch (error) {
       if (active.aborted) return []
       if (error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown) {
-        return "视频送达未确认，请核对当前会话。"
+        return $t("services.public-share.command.text_63b89edd23")
       }
-      return `${names[source.site]}视频暂时无法发送。\n${source.url}`
+      return $t("services.public-share.command.text_de901b018d", { "value1": names[source.site], "url": source.url })
     } finally {
       if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => {})
     }
@@ -102,7 +105,7 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
     const title = source.title
     const site = names[source.site]
     const text = [`${site} · ${title}`, source.owner, source.url,
-      source.video && "发送 #播放 加原文链接可请求原站视频。"].filter(Boolean).join("\n")
+      source.video && $t("services.public-share.command.text_9edb8af60f")].filter(Boolean).join("\n")
     const card = { title, owner: source.owner, id: site, cover: source.cover, createdAt: source.createdAt,
       type: source.video ? "video" : source.images.length ? "gallery" : "article", duration: source.duration, media: source.images, showStats: false }
     let image = await render("bilibili-info", card).catch(() => undefined)
@@ -133,25 +136,25 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
     const match = identify(message, context)
     if (!match) return
     if (signal.aborted) return []
-    if (match.play && match.connection?.aborted !== false) return "请在当前绑定的群聊或好友私聊中播放。"
+    if (match.play && match.connection?.aborted !== false) return $t("services.public-share.command.text_7f47165612")
     const active = match.connection ? AbortSignal.any([signal, match.connection]) : signal
     try {
       const config = await loadConfig(match.target.site)
       if (active.aborted) return []
       const scope = `${match.target.site}.${match.play ? "play" : "preview"}`
       if (!config.enable || !new PermissionService({ permissions: config.permissions }).can(context, scope)) {
-        return match.play ? `当前会话未启用${names[match.target.site]}播放。` : undefined
+        return match.play ? $t("services.public-share.command.text_f74cfbf7d9", { "value1": names[match.target.site] }) : undefined
       }
       if (!match.play && context.message_type === "private" && !config.privatePreview) return
       const source = await readPublicShare(match.target, active, fetchPage)
       if (active.aborted) return []
-      if (!source) return `暂时无法核实${names[match.target.site]}分享。\n${match.target.url.href}`
+      if (!source) return $t("services.public-share.command.text_21774bab6d", { "value1": names[match.target.site], "href": match.target.url.href })
       if (!match.play) return await preview(source, context, active)
       const pending = sendVideo(source, context, active)
       downloads.add(pending)
       try { return await pending } finally { downloads.delete(pending) }
     } catch {
-      return active.aborted ? [] : `暂时无法读取${names[match.target.site]}分享。\n${match.target.url.href}`
+      return active.aborted ? [] : $t("services.public-share.command.text_ba8fcbeefe", { "value1": names[match.target.site], "href": match.target.url.href })
     }
   }
 
@@ -159,7 +162,7 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
     fallback,
     features(context: MessageFallbackContext) {
       const match = identify(context.normalizedMessage, context)
-      return match ? [`[media] ${names[match.target.site]}分享`] : []
+      return match ? [`[media] ${{weishi:"微视",zuiyou:"最右"}[match.target.site]}分享`] : []
     },
     async dispose() {
       stopped.abort()

@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import { loadImage, type CanvasRenderingContext2D, type Image } from "skia-canvas"
 import QRCode from "qrcode"
 import { ImageSizeLimitError, nativeImageRasterScale } from "@lotus-yunzai/skia"
@@ -45,7 +46,7 @@ function imageLink(provider: RenderProvider, value: unknown) {
 async function picture(url: string, signal?: AbortSignal): Promise<Image | undefined> {
   try {
     const timeout = AbortSignal.timeout(12000)
-    const response = await fetch(url,{redirect:"error",credentials:"omit",signal:signal?AbortSignal.any([signal,timeout]):timeout})
+    const response = await readPublicResponse(globalThis.fetch, url,{redirect:"error",credentials:"omit",signal:signal?AbortSignal.any([signal,timeout]):timeout})
     const max = 8*1024*1024
     if (!response.ok || !response.body || Number(response.headers.get("content-length")) > max) {
       await response.body?.cancel()

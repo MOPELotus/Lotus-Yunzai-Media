@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../../public-read.ts"
 // Source format: snowtafir/yuki-plugin main3, b1d8fecf41d03f92746bb2404b0b0381a24103a5 (MIT).
 import { ExpiredSubscriptionSession, readWithSubscriptionSession, type SubscriptionSession } from "../session.ts"
 import type { DynamicPost, SubscriptionProfile, SubscriptionProvider } from "../types.ts"
@@ -220,9 +221,9 @@ export async function fetchPublicWeiboPost({ id, uid }: WeiboPostIdentity, signa
   for (const [endpoint, json] of [[page, false], [api, true]] as const) {
     try {
       deadline.throwIfAborted()
-      const response = await request(endpoint, { ...options, headers: json
+      const response = await readPublicResponse((target, init) => request(new URL(target), init), endpoint, { ...options, headers: json
         ? { Accept: "application/json", Referer: page.href, "X-Requested-With": "XMLHttpRequest", "User-Agent": "Lotus-Yunzai" }
-        : { Accept: "text/html", "User-Agent": "Lotus-Yunzai" } })
+        : { Accept: "text/html", "User-Agent": "Lotus-Yunzai" } }, json ? 2 : 1)
       if (!response.ok) {
         void response.body?.cancel().catch(() => {})
         continue
@@ -268,7 +269,7 @@ export async function fetchPublicWeiboComments(mid: string, signal?: AbortSignal
   const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
   try {
     deadline.throwIfAborted()
-    const response = await request(api, { method: "GET", credentials: "omit", redirect: "manual", signal: deadline,
+    const response = await readPublicResponse((target, init) => request(new URL(target), init), api, { method: "GET", credentials: "omit", redirect: "manual", signal: deadline,
       headers: { Accept: "application/json", Referer: detailRoot + mid, "X-Requested-With": "XMLHttpRequest", "User-Agent": "Lotus-Yunzai" } })
     if (!response.ok) {
       void response.body?.cancel().catch(() => {})
@@ -345,7 +346,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
     const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
     const request = async (input: URL, options: RequestInit) => {
       try {
-        return await fetch(input, options)
+        return await readPublicResponse((target, init) => fetch(new URL(target), init), input, options)
       } catch {
         deadline.throwIfAborted()
         throw new Error("无法读取微博公开数据。")
@@ -386,7 +387,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
     const originalNeeds = detailNeeds(raw.retweeted_status, post.forwarded)
     if ((!needs && !originalNeeds) || deadline.aborted) return post
     try {
-      const response = await fetch(new URL(detailRoot + post.id), {
+      const response = await readPublicResponse((target, init) => fetch(new URL(target), init), new URL(detailRoot + post.id), {
         method: "GET", headers: { Accept: "text/html", "User-Agent": "Lotus-Yunzai" },
         credentials: "omit", redirect: "manual", signal: deadline,
       })

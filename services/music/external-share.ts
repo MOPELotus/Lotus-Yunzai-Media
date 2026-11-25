@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 export type ExternalMusicShare = {
   readonly platform: "apple" | "spotify"
   readonly kind: "external-share"
@@ -56,7 +57,7 @@ async function boundedBody(response: Response, limit: number, signal: AbortSigna
 }
 
 const request = (url: URL, signal: AbortSignal, fetch: typeof globalThis.fetch) =>
-  fetch(url, { signal, credentials: "omit", redirect: "error", headers: { "User-Agent": "Mozilla/5.0" } })
+  readPublicResponse((target, init) => fetch(new URL(target), init), url, { signal, credentials: "omit", redirect: "error", headers: { "User-Agent": "Mozilla/5.0" } })
 
 export const externalMusicLabels = { apple: "Apple Music", spotify: "Spotify" } as const
 

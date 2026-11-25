@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../../services/public-read.ts"
 import { acfunImageUrl, fetchCdn, weixinChannelsImageUrl, type MediaFetch, type MusicCoverCdn } from "../../services/media/cdn.ts"
 
 interface ImageFetchOptions {
@@ -16,7 +17,7 @@ export async function fetchImageBytes(url: string, { fetch: fetchImpl = globalTh
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     active.throwIfAborted()
-    const response = await fetchCdn(fetchImpl, url, { signal: active }, musicCover ??
+    const response = await fetchCdn((target, options) => readPublicResponse(fetchImpl, target, options), url, { signal: active }, musicCover ??
       (acfunImageUrl(url) ? "acfun-image" : weixinChannelsImageUrl(url) ? "weixin-channels-image" : "image"))
     if (!response.ok) throw new Error(`图片请求 HTTP ${response.status}`)
     if (musicCover && !/^image\/(?:jpe?g|png|webp|avif)(?:;|$)/iu.test(response.headers.get("content-type") ?? "")) {

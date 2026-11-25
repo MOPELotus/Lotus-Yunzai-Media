@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { loadPublicShareConfig } from "../../core/config/global.ts"
@@ -83,7 +84,7 @@ export function parseXiaohongshuPage(html: string, id: string) {
 async function readCover(cover: URL | undefined, fetch: MediaFetch, signal: AbortSignal) {
   if (!cover) return
   try {
-    const response = await fetch(cover.href, { credentials: "omit", redirect: "error", signal })
+    const response = await readPublicResponse(fetch, cover.href, { credentials: "omit", redirect: "error", signal })
     if (response.status !== 200 || response.redirected || !response.body ||
         Number(response.headers.get("content-length")) > maxCover ||
         !/^image\/(?:jpeg|png|webp)(?:;|$)/iu.test(response.headers.get("content-type") ?? "")) {

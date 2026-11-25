@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import type { MediaFetch } from "../media/cdn.ts"
 
 const redirectStatuses = new Set([301, 302, 303, 307, 308])
@@ -9,7 +10,7 @@ export async function readPublicSharePage(start: URL, accept: (url: URL) => bool
   const maxBytes = 2_000_000
   let url = start
   for (let hop = 0; hop <= 5 && accept(url); hop++) {
-    const response = await fetch(url.href, { credentials: "omit", redirect: "manual", signal, headers })
+    const response = await readPublicResponse(fetch, url.href, { credentials: "omit", redirect: "manual", signal, headers })
     if (redirectStatuses.has(response.status)) {
       await response.body?.cancel()
       const location = response.headers.get("location")

@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import { publicShareVideoUrl, type MediaFetch } from "../media/cdn.ts"
 
@@ -139,7 +140,7 @@ export async function readPublicShare(target: Target, signal: AbortSignal, fetch
   const active = AbortSignal.any([signal, AbortSignal.timeout(8_000)])
   let current = target
   for (let hop = 0; hop <= 3; hop++) {
-    const response = await fetch(current.url.href, { signal: active, credentials: "omit", redirect: "manual" })
+    const response = await readPublicResponse(fetch, current.url.href, { signal: active, credentials: "omit", redirect: "manual" })
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel()
       const location = response.headers.get("Location")

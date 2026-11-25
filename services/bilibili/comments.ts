@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import type { BilibiliService } from "./service.ts"
 
 export interface BiliCommentTarget { readonly oid: string; readonly type: number }
@@ -57,7 +58,7 @@ export function createBiliComments(fetch: BilibiliService["fetch"] = globalThis.
     url.search = input.toString()
     const timeout = AbortSignal.timeout(5_000)
     const active = signal ? AbortSignal.any([signal, timeout]) : timeout
-    const response = await fetch(url.href, { credentials: "omit", redirect: "error", signal: active,
+    const response = await readPublicResponse(fetch, url.href, { credentials: "omit", redirect: "error", signal: active,
       headers: { Referer: "https://www.bilibili.com/", "User-Agent": "Mozilla/5.0", Accept: "application/json" } })
     if (!response.ok || response.redirected || !response.body || Number(response.headers.get("content-length")) > limit) {
       await response.body?.cancel()

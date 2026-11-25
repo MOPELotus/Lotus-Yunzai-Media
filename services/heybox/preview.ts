@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { loadPublicShareConfig } from "../../core/config/global.ts"
 import { PermissionService } from "../../core/permissions/service.ts"
@@ -36,7 +37,7 @@ function identify(message: string, context: MessageFallbackContext) {
 }
 
 async function readGameTitle(id: string, fetch: MediaFetch, signal: AbortSignal) {
-  const response = await fetch(`${endpoint}?appid=${id}&game_type=pc`, { credentials: "omit", redirect: "manual", signal })
+  const response = await readPublicResponse(fetch, `${endpoint}?appid=${id}&game_type=pc`, { credentials: "omit", redirect: "manual", signal })
   await response.body?.cancel().catch(() => undefined)
   if (response.status !== 302 || response.redirected) return
   const location = response.headers.get("location")

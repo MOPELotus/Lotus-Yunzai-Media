@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import { acfunImageUrl, acfunVideoUrl, fetchCdn, type MediaFetch } from "../media/cdn.ts"
 
 const canonical = "https://www.acfun.cn"
@@ -109,7 +110,7 @@ export async function acfunInfo(target: AcfunTarget, fetch: MediaFetch, signal: 
   const { id, part } = target
   const active = AbortSignal.any([signal, AbortSignal.timeout(12_000)])
   const url = acfunPage(target)
-  const response = await fetch(url, { credentials: "omit", redirect: "error", signal: active,
+  const response = await readPublicResponse(fetch, url, { credentials: "omit", redirect: "error", signal: active,
     headers: { Accept: "text/html,application/xhtml+xml" } })
   const html = await readText(response, 2 * 1024 ** 2, active)
   const start = /(?:^|[>;\s])window\.pageInfo\s*=\s*window\.videoInfo\s*=\s*(?=\{)/u.exec(html)

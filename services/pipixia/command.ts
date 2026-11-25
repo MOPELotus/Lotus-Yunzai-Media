@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import { join } from "node:path"
 import type { MessageFallback, MessageFallbackContext } from "../../../../lib/commands.ts"
@@ -59,7 +60,7 @@ async function fetchPost(start: URL, fetch: MediaFetch, signal: AbortSignal) {
   const expectedId = itemPath.exec(start.pathname)?.[1]
   let url = shareTarget(start)
   for (let hop = 0; url && hop <= 5; hop++) {
-    const response = await fetch(url.href, { credentials: "omit", redirect: "manual", signal,
+    const response = await readPublicResponse(fetch, url.href, { credentials: "omit", redirect: "manual", signal,
       headers: { "User-Agent": agent, Accept: "text/html,application/xhtml+xml" } })
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel()

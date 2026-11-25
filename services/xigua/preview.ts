@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import { load } from "cheerio"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { loadGlobalConfig } from "../../core/config/global.ts"
@@ -98,7 +99,7 @@ export function parseXiguaPage(html: string, id: string) {
 
 async function resolveShare(target: Share, fetch: MediaFetch, signal: AbortSignal) {
   for (let hop = 0; hop < 3 && !target.id; hop++) {
-    const response = await fetch(target.link, { redirect: "manual", credentials: "omit", signal })
+    const response = await readPublicResponse(fetch, target.link, { redirect: "manual", credentials: "omit", signal })
     await response.body?.cancel().catch(() => undefined)
     if (!redirect.has(response.status) || response.redirected) return
     const location = response.headers.get("location")

@@ -1,3 +1,4 @@
+import { readPublicResponse } from "../public-read.ts"
 import type { MessageFallbackContext } from "../../../../lib/commands.ts"
 import { buildMediaMessageText } from "../media/message.ts"
 import { neteaseEpisodePage } from "./episode.ts"
@@ -112,7 +113,7 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
   const timeout = AbortSignal.timeout(8000)
   const active = signal ? AbortSignal.any([signal, timeout]) : timeout
   if (target.kind === "share-page") {
-    const response = await fetch(new URL(target.url), { credentials: "omit", redirect: "error", signal: active })
+    const response = await readPublicResponse((target, init) => fetch(new URL(target), init), new URL(target.url), { credentials: "omit", redirect: "error", signal: active })
     const limit = 512 * 1024
     if (!response.ok || !response.body || Number(response.headers.get("content-length")) > limit) {
       await response.body?.cancel().catch(() => {})
@@ -149,7 +150,7 @@ export async function resolveMusicShare(target: StandardMusicShare, signal?: Abo
   let url = new URL(target.url)
   for (let hop = 0; hop < 3; hop++) {
     const request = target.platform === "soda" ? { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 13)" } } : { method: "HEAD" }
-    const response = await fetch(url, { ...request, credentials: "omit", redirect: "manual", signal: active })
+    const response = await readPublicResponse((target, init) => fetch(new URL(target), init), url, { ...request, credentials: "omit", redirect: "manual", signal: active })
     await response.body?.cancel().catch(() => {})
     const location = response.headers.get("Location")
     if (response.status < 300 || response.status >= 400 || !location) break

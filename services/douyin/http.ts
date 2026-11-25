@@ -1,4 +1,5 @@
 import { discardBody, readStream } from "../media/transfer.ts"
+import { withReadRetries } from "@lotus-yunzai/http"
 
 export type DouyinFetch = (input: string, init?: RequestInit) => Promise<Response>
 
@@ -15,12 +16,13 @@ export class DouyinError extends Error {
 }
 
 export async function requestText(fetchImpl: DouyinFetch, url: string, options: RequestInit = {}, { timeoutMs = 15000, maxBytes = 4 * 1024 * 1024, headersOnly = false } = {}) {
+  const request = withReadRetries((target, init) => fetchImpl(target.href, init))
   const controller = new AbortController()
   const active = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     active.throwIfAborted()
-    const response = await fetchImpl(url, { ...options, signal: active })
+    const response = await request(new URL(url), { ...options, signal: active })
     if (active.aborted) {
       discardBody(response)
       active.throwIfAborted()

@@ -283,3 +283,27 @@ test("同作品、同媒体编号可一次刷新过期地址，保持原图项�
     expect(await readdir(directory)).toEqual([])
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+test("抖音通用只读HTTP总三次，POST、限频和取消保持单次派发", async () => {
+  let calls = 0
+  const read = async () => {
+    calls++
+    if (calls === 1) throw Object.assign(new Error("reset"), { code: "ECONNRESET" })
+    if (calls === 2) return new Response(null, { status: 502 })
+    return new Response("fixture-success")
+  }
+  expect((await requestText(read, archive)).text).toBe("fixture-success")
+  expect(calls).toBe(3)
+  calls = 0
+  await expect(requestText(async () => { calls++; throw Object.assign(new Error("reset"), { code: "ECONNRESET" }) },
+    "https://ttwid.bytedance.com/ttwid/union/register/", { method: "POST", body: "{}" })).rejects.toMatchObject({ code: "network" })
+  expect(calls).toBe(1)
+  calls = 0
+  const limited = await requestText(async () => { calls++; return new Response("limited", { status: 429 }) }, archive)
+  expect(limited.response.status).toBe(429)
+  expect(calls).toBe(1)
+  const cancel = new AbortController(); calls = 0
+  await expect(requestText(async () => { calls++; cancel.abort(); throw Object.assign(new Error("reset"), { code: "ECONNRESET" }) },
+    archive, { signal: cancel.signal })).rejects.toThrow()
+  expect(calls).toBe(1)
+})

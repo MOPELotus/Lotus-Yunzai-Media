@@ -147,6 +147,9 @@ export class DouyinService {
         signal?.throwIfAborted()
         if ((error as { code?: string }).code === "unavailable" || Date.now() >= deadline) throw error
         primaryError = error
+        // HTTP reads already exhausted their internal network budget. Refresh
+        // visitor state only for a business/session failure, not another 3 reads.
+        if (["network", "timeout", "api_http"].includes((error as { code?: string }).code ?? "")) break
       }
     }
     try {

@@ -13,6 +13,7 @@
     "qrcode": "1.5.4",
     "skia-canvas": "4.0.1",
     "sm-crypto": "0.4.0",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "@lotus-yunzai/http": "workspace:*"
   }
 }

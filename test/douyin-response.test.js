@@ -107,6 +107,6 @@ test("普通作品详情故障时保留同一公开分享页预览，双源失�
   hasPublicPage = false
   await expect(check()).rejects.toMatchObject({ code: "parse_failed" })
   expect(attempted).toEqual(Array.from({ length: 2 }, () => [
-    "/aweme/v1/web/aweme/detail/", "/aweme/v1/web/aweme/detail/", "/share/video/" + id + "/",
+    ...Array(3).fill("/aweme/v1/web/aweme/detail/"), "/share/video/" + id + "/",
   ]).flat())
 })

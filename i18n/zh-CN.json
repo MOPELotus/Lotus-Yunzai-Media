@@ -5,411 +5,411 @@
   "description": "媒体解析、音乐与合伙人",
   "sections": {
     "core.config.global": {
-      "description": "媒体解析、音乐与合伙人：配置",
+      "description": "全局配置加载与公共分享站点名称映射",
       "source": "plugins/media/core/config/global.ts"
     },
     "core.render.image": {
-      "description": "媒体解析、音乐与合伙人：图片渲染",
+      "description": "图片下载与大小、格式校验",
       "source": "plugins/media/core/render/image.ts"
     },
     "core.render.plain-text": {
-      "description": "媒体解析、音乐与合伙人：图片渲染",
+      "description": "纯文本与技能数值表达式解析",
       "source": "plugins/media/core/render/plain-text.ts"
     },
     "core.render.service": {
-      "description": "媒体解析、音乐与合伙人：图片渲染",
+      "description": "渲染模板调度与二维码登录卡片生成",
       "source": "plugins/media/core/render/service.ts"
     },
     "core.render.source-cards": {
-      "description": "媒体解析、音乐与合伙人：图片渲染",
+      "description": "媒体作品信息卡片与统计数据渲染",
       "source": "plugins/media/core/render/source-cards.ts"
     },
     "guoba-settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "媒体插件的锅巴面板配置表单定义与保存校验，涵盖各平台动态推送、B 站番剧、公开分享解析、米游社官号视频、官方链接预览及网页总结过滤设置。",
       "source": "plugins/media/guoba-settings.ts"
     },
     "services.acfun.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "AcFun 链接预览与视频播放命令处理",
       "source": "plugins/media/services/acfun/command.ts"
     },
     "services.acfun.source": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "AcFun 公开作品信息抓取与点播清单解析",
       "source": "plugins/media/services/acfun/source.ts"
     },
     "services.bilibili.comment-write": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "哔哩哔哩视频与动态评论发布及登录态校验",
       "source": "plugins/media/services/bilibili/comment-write.ts"
     },
     "services.bilibili.comments": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "B 站公开评论及楼中楼回复数据的请求与解析",
       "source": "plugins/media/services/bilibili/comments.ts"
     },
     "services.bilibili.login-command": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩 · 登录 · 命令",
+      "description": "B 站私聊扫码登录命令处理、权限检查、二维码投递与状态卡片渲染",
       "source": "plugins/media/services/bilibili/login-command.ts"
     },
     "services.bilibili.pgc": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "B 站番剧公开信息解析与展示卡片生成",
       "source": "plugins/media/services/bilibili/pgc.ts"
     },
     "services.bilibili.pgc-playback": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "B 站番剧分集画质配置、公开音视频流下载校验、合并及媒体发送",
       "source": "plugins/media/services/bilibili/pgc-playback.ts"
     },
     "services.bilibili.service": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "B站视频、直播解析与下载服务（含 TuneWeave 账号会话与媒体处理）",
       "source": "plugins/media/services/bilibili/service.ts"
     },
     "services.bilibili.video-command": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩 · 命令",
+      "description": "哔哩哔哩视频搜索、解析、下载及评论交互命令处理",
       "source": "plugins/media/services/bilibili/video-command.ts"
     },
     "services.douyin.api": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音作品详情接口请求、风控校验与响应解析",
       "source": "plugins/media/services/douyin/api.ts"
     },
     "services.douyin.command": {
-      "description": "媒体解析、音乐与合伙人：抖音 · 命令",
+      "description": "抖音链接解析、直播卡片渲染与下载指令处理模块",
       "source": "plugins/media/services/douyin/command.ts"
     },
     "services.douyin.guest-signature": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音游客页面挑战与访问签名生成模块",
       "source": "plugins/media/services/douyin/guest-signature.ts"
     },
     "services.douyin.http": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音请求底层 HTTP 文本抓取与大小超时控制模块",
       "source": "plugins/media/services/douyin/http.ts"
     },
     "services.douyin.links": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音分享链接提取、校验与短链跳转解析模块",
       "source": "plugins/media/services/douyin/links.ts"
     },
     "services.douyin.live": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音直播间页面解析与状态核实模块",
       "source": "plugins/media/services/douyin/live.ts"
     },
     "services.douyin.model": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音作品与图文数据规范化模型模块",
       "source": "plugins/media/services/douyin/model.ts"
     },
     "services.douyin.service": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音作品信息获取与媒体下载服务模块",
       "source": "plugins/media/services/douyin/service.ts"
     },
     "services.douyin.signature": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音接口请求 a_bogus 签名计算模块",
       "source": "plugins/media/services/douyin/signature.ts"
     },
     "services.douyin.ssr": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音分享页面 SSR 数据解析与重定向校验",
       "source": "plugins/media/services/douyin/ssr.ts"
     },
     "services.douyin.visitor": {
-      "description": "媒体解析、音乐与合伙人：抖音",
+      "description": "抖音游客身份（ttwid 与 UIFID）获取与会话校验",
       "source": "plugins/media/services/douyin/visitor.ts"
     },
     "services.heybox.preview": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "小黑盒游戏链接预览卡片生成与失败回退提示",
       "source": "plugins/media/services/heybox/preview.ts"
     },
     "services.jike.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "即刻公开动态链接解析与消息回复构建",
       "source": "plugins/media/services/jike/command.ts"
     },
     "services.jike.settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "即刻链接解析开关与私聊自动解析设置",
       "source": "plugins/media/services/jike/settings.ts"
     },
     "services.kuaishou.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "快手公开短视频解析、视频下载投递与任务管理",
       "source": "plugins/media/services/kuaishou/command.ts"
     },
     "services.kuaishou.settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "快手链接解析开关与私聊自动解析设置",
       "source": "plugins/media/services/kuaishou/settings.ts"
     },
     "services.mcwiki.article": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "中文 Minecraft Wiki 条目接口请求与响应校验解析",
       "source": "plugins/media/services/mcwiki/article.ts"
     },
     "services.mcwiki.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "#mcwiki 条目查询命令处理与合并转发预览构建",
       "source": "plugins/media/services/mcwiki/command.ts"
     },
     "services.mcwiki.render": {
-      "description": "媒体解析、音乐与合伙人：图片渲染",
+      "description": "中文 Minecraft Wiki 条目预览图片排版渲染",
       "source": "plugins/media/services/mcwiki/render.ts"
     },
     "services.media.cdn": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "媒体 CDN 地址校验与重定向解析",
       "source": "plugins/media/services/media/cdn.ts"
     },
     "services.media.download": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "媒体文件流式下载与格式嗅探",
       "source": "plugins/media/services/media/download.ts"
     },
     "services.media.files": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "媒体文件会话发送、外部处理进程执行与失败提示",
       "source": "plugins/media/services/media/files.ts"
     },
     "services.media.range-download": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "媒体分片并发下载与资源完整性校验",
       "source": "plugins/media/services/media/range-download.ts"
     },
     "services.media.stream-retry": {
-      "description": "媒体解析、音乐与合伙人：媒体 · 流式下载",
+      "description": "媒体流式读取瞬态错误重试",
       "source": "plugins/media/services/media/stream-retry.ts"
     },
     "services.media.tasks": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "媒体任务目录校验与进程归属管理",
       "source": "plugins/media/services/media/tasks.ts"
     },
     "services.media.transfer": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "媒体文件分段写入与传输",
       "source": "plugins/media/services/media/transfer.ts"
     },
     "services.media.video": {
-      "description": "媒体解析、音乐与合伙人：媒体",
+      "description": "视频流探测与 FFmpeg 兼容性转码",
       "source": "plugins/media/services/media/video.ts"
     },
     "services.music.bilibili": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 哔哩哔哩",
+      "description": "哔哩哔哩音频搜索与播放地址解析",
       "source": "plugins/media/services/music/bilibili.ts"
     },
     "services.music.cloud-command": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 命令",
+      "description": "网易云音乐云盘私聊命令解析与交互处理",
       "source": "plugins/media/services/music/cloud-command.ts"
     },
     "services.music.cloud-service": {
-      "description": "媒体解析、音乐与合伙人：音乐",
+      "description": "网易云音乐云盘账号校验与曲库接口服务",
       "source": "plugins/media/services/music/cloud-service.ts"
     },
     "services.music.command": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 命令",
+      "description": "音乐点歌、播放、歌词语音重发、账号登录、个人收藏与合伙人命令交互模块",
       "source": "plugins/media/services/music/command.ts"
     },
     "services.music.episode": {
-      "description": "媒体解析、音乐与合伙人：音乐",
+      "description": "网易云播客节目音频流解析与字幕内容一致性校验模块",
       "source": "plugins/media/services/music/episode.ts"
     },
     "services.music.external-share": {
-      "description": "媒体解析、音乐与合伙人：音乐",
+      "description": "外部音乐平台分享页读取与单曲标识核验模块",
       "source": "plugins/media/services/music/external-share.ts"
     },
     "services.music.netease-account": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 账号",
+      "description": "网易云音乐账号绑定校验与登录状态刷新",
       "source": "plugins/media/services/music/netease-account.ts"
     },
     "services.music.partner-account": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 网易云合伙人 · 账号",
+      "description": "网易云音乐合伙人账号绑定校验与配置持久化",
       "source": "plugins/media/services/music/partner-account.ts"
     },
     "services.music.partner-log": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 网易云合伙人",
+      "description": "网易云音乐合伙人执行日志读取与结果格式化输出",
       "source": "plugins/media/services/music/partner-log.ts"
     },
     "services.music.partner-review": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 网易云合伙人",
+      "description": "网易云音乐合伙人 AI 乐评生成、提示词构建与来源校验",
       "source": "plugins/media/services/music/partner-review.ts"
     },
     "services.music.partner-schedule": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 网易云合伙人 · 排期",
+      "description": "管理网易云音乐合伙人定时任务排期、启动补跑及执行报告通知。",
       "source": "plugins/media/services/music/partner-schedule.ts"
     },
     "services.music.partner-task": {
-      "description": "媒体解析、音乐与合伙人：音乐 · 网易云合伙人",
+      "description": "执行网易云音乐合伙人每日评定任务，完成账号核验、待评作品拉取、乐评生成与结果提交。",
       "source": "plugins/media/services/music/partner-task.ts"
     },
     "services.music.personal": {
-      "description": "媒体解析、音乐与合伙人：音乐",
+      "description": "处理个人及公共音乐账号绑定核验、登录态续期以及 QQ 音乐曲目与音源校验。",
       "source": "plugins/media/services/music/personal.ts"
     },
     "services.music.service": {
-      "description": "媒体解析、音乐与合伙人：音乐",
+      "description": "提供跨平台音乐服务的基础常量定义（平台名称、扫码登录类型）与通用账号能力。",
       "source": "plugins/media/services/music/service.ts"
     },
     "services.music.share-link": {
-      "description": "媒体解析、音乐与合伙人：音乐",
+      "description": "音乐分享链接解析：负责解析与核实酷狗、网易云、汽水等平台的公开分享页及短链接。",
       "source": "plugins/media/services/music/share-link.ts"
     },
     "services.official-links.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "公开链接预览命令处理与卡片/文本回复",
       "source": "plugins/media/services/official-links/command.ts"
     },
     "services.official-links.settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "公开链接预览开关项与 YAML 配置读写",
       "source": "plugins/media/services/official-links/settings.ts"
     },
     "services.official-links.source": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "公开链接数据源抓取与内容解析",
       "source": "plugins/media/services/official-links/source.ts"
     },
     "services.official-links.summary-model": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "网页正文摘要模型配置读取与接口调用",
       "source": "plugins/media/services/official-links/summary-model.ts"
     },
     "services.official-links.x": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "X 公开帖正文解析与预览内容提取",
       "source": "plugins/media/services/official-links/x.ts"
     },
     "services.official-video.feed": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "米游社官号视频抓取与推送消息格式化",
       "source": "plugins/media/services/official-video/feed.ts"
     },
     "services.official-video.index": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "米游社官号视频轮询调度与消息发送",
       "source": "plugins/media/services/official-video/index.ts"
     },
     "services.official-video.post-command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "米游社公开帖子与视频解析发送",
       "source": "plugins/media/services/official-video/post-command.ts"
     },
     "services.official-video.settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "米游社官号视频游戏列表与配置存储",
       "source": "plugins/media/services/official-video/settings.ts"
     },
     "services.pipixia.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "皮皮虾公开作品解析、评论转发与视频发送",
       "source": "plugins/media/services/pipixia/command.ts"
     },
     "services.pipixia.settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "皮皮虾链接解析配置项定义",
       "source": "plugins/media/services/pipixia/settings.ts"
     },
     "services.public-share.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "微视与最右公开分享解析及视频播放",
       "source": "plugins/media/services/public-share/command.ts"
     },
     "services.public-share.qq-world": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "QQ 小世界分享链接识别与停用提示",
       "source": "plugins/media/services/public-share/qq-world.ts"
     },
     "services.public-share.settings": {
-      "description": "媒体解析、音乐与合伙人：设置",
+      "description": "公开分享平台通用配置存储",
       "source": "plugins/media/services/public-share/settings.ts"
     },
     "services.public-share.source": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "读取并解析第三方公开分享页面（如微视、最右等）的元数据与媒体内容。",
       "source": "plugins/media/services/public-share/source.ts"
     },
     "services.release-network": {
-      "description": "媒体解析、音乐与合伙人：网络",
+      "description": "网络请求重试与任务进度提示工具，负责向外部主机发起请求并报告尝试及失败状态。",
       "source": "plugins/media/services/release-network.ts"
     },
     "services.subscriptions.bilibili.index": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "B 站动态与直播订阅的数据抓取、内容类型映射、状态解析及公开接口错误处理。",
       "source": "plugins/media/services/subscriptions/bilibili/index.ts"
     },
     "services.subscriptions.bilibili.login": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩 · 登录",
+      "description": "B 站动态订阅的扫码登录、会话状态查询、退出及本地 Cookie 与共享登录管理",
       "source": "plugins/media/services/subscriptions/bilibili/login.ts"
     },
     "services.subscriptions.bilibili.login-card": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩 · 登录 · 图片卡片",
+      "description": "渲染并生成 B 站动态订阅扫码登录的二维码图片卡片。",
       "source": "plugins/media/services/subscriptions/bilibili/login-card.ts"
     },
     "services.subscriptions.bilibili.shared": {
-      "description": "媒体解析、音乐与合伙人：哔哩哔哩",
+      "description": "与 TuneWeave 共享的 B 站登录会话一致性校验与刷新管理",
       "source": "plugins/media/services/subscriptions/bilibili/shared.ts"
     },
     "services.subscriptions.config": {
-      "description": "媒体解析、音乐与合伙人：配置",
+      "description": "订阅推送路由与动态推送设置的 YAML 配置文件读写、加锁及校验",
       "source": "plugins/media/services/subscriptions/config.ts"
     },
     "services.subscriptions.delivery": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "订阅动态的定时调度、去重占位、消息投递与直播全体提醒发送",
       "source": "plugins/media/services/subscriptions/delivery.ts"
     },
     "services.subscriptions.help": {
-      "description": "媒体解析、音乐与合伙人：帮助",
+      "description": "订阅服务帮助卡片的平台指令、账号字段与功能说明定义",
       "source": "plugins/media/services/subscriptions/help.ts"
     },
     "services.subscriptions.module": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "订阅服务命令处理模块，负责触发同步与按 UID/昵称查询账号资料",
       "source": "plugins/media/services/subscriptions/module.ts"
     },
     "services.subscriptions.panel": {
-      "description": "媒体解析、音乐与合伙人：面板",
+      "description": "订阅配置 Web 面板接口，校验权限与目标群/好友并保存订阅路由",
       "source": "plugins/media/services/subscriptions/panel.ts"
     },
     "services.subscriptions.profile": {
-      "description": "媒体解析、音乐与合伙人：档案",
+      "description": "订阅账号资料格式化模块，生成账号信息与直播状态文本",
       "source": "plugins/media/services/subscriptions/profile.ts"
     },
     "services.subscriptions.render": {
-      "description": "媒体解析、音乐与合伙人：图片渲染",
+      "description": "订阅动态渲染模块，生成动态文本消息与长图卡片",
       "source": "plugins/media/services/subscriptions/render.ts"
     },
     "services.subscriptions.weibo.index": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "微博订阅数据源模块，负责微博接口请求、登录态校验及搜索/动态解析",
       "source": "plugins/media/services/subscriptions/weibo/index.ts"
     },
     "services.subscriptions.weibo.login": {
-      "description": "媒体解析、音乐与合伙人：登录",
+      "description": "微博动态订阅登录状态查询与会话清除",
       "source": "plugins/media/services/subscriptions/weibo/login.ts"
     },
     "services.subscriptions.weibo.preview": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "微博动态链接解析与热评预览生成",
       "source": "plugins/media/services/subscriptions/weibo/preview.ts"
     },
     "services.subscriptions.xhh-author-command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "B 站作者投稿订阅群指令管理与迁移",
       "source": "plugins/media/services/subscriptions/xhh-author-command.ts"
     },
     "services.subscriptions.xhh-author-source": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "B 站作者投稿订阅数据源，负责获取 WBI 公开签名字段并检索作者投稿",
       "source": "plugins/media/services/subscriptions/xhh-author-source.ts"
     },
     "services.subscriptions.xhh-author-store": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "B 站作者投稿订阅存储模块，负责带锁读写、去重与校验群组投稿订阅记录",
       "source": "plugins/media/services/subscriptions/xhh-author-store.ts"
     },
     "services.tools.command": {
-      "description": "媒体解析、音乐与合伙人：工具 · 命令",
+      "description": "媒体环境初始化指令处理，负责检查并准备 FFmpeg、TuneWeave 及验证码模型并汇报状态",
       "source": "plugins/media/services/tools/command.ts"
     },
     "services.tools.initialize": {
-      "description": "媒体解析、音乐与合伙人：工具",
+      "description": "媒体初始化协调模块，负责检查工具链可用性并初始化 TuneWeave 服务",
       "source": "plugins/media/services/tools/initialize.ts"
     },
     "services.tools.installer": {
-      "description": "媒体解析、音乐与合伙人：工具",
+      "description": "媒体处理所需外部工具（如 FFmpeg、ffprobe）的下载校验、压缩包解包及可执行状态检查。",
       "source": "plugins/media/services/tools/installer.ts"
     },
     "services.tuneweave.auth": {
-      "description": "媒体解析、音乐与合伙人：媒体服务",
+      "description": "TuneWeave 平台扫码登录后的账号身份验证与平台绑定关系核验。",
       "source": "plugins/media/services/tuneweave/auth.ts"
     },
     "services.tuneweave.service": {
-      "description": "媒体解析、音乐与合伙人：媒体服务",
+      "description": "TuneWeave HTTP 接口调用、发行版下载校验及本地托管进程生命周期管理",
       "source": "plugins/media/services/tuneweave/service.ts"
     },
     "services.tuneweave.startup": {
-      "description": "媒体解析、音乐与合伙人：媒体服务",
+      "description": "媒体工具与本机 TuneWeave 服务的启动初始化及后台维护检查",
       "source": "plugins/media/services/tuneweave/startup.ts"
     },
     "services.tuneweave.version": {
-      "description": "媒体解析、音乐与合伙人：媒体服务",
+      "description": "TuneWeave 语义化版本号解析与比较",
       "source": "plugins/media/services/tuneweave/version.ts"
     },
     "services.web-summary.command": {
-      "description": "媒体解析、音乐与合伙人：命令",
+      "description": "网页摘要命令结果格式化与转发消息构造",
       "source": "plugins/media/services/web-summary/command.ts"
     },
     "services.web-summary.public-page-network": {
-      "description": "媒体解析、音乐与合伙人：网络",
+      "description": "网页摘要公开页面抓取的出站网络排除、DNS 解析校验与 TLS 证书域名验证",
       "source": "plugins/media/services/web-summary/public-page-network.ts"
     },
     "services.weixin-channels.preview": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "微信视频号分享链接解析与公开预览卡片生成",
       "source": "plugins/media/services/weixin-channels/preview.ts"
     },
     "services.xiaohongshu.preview": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "小红书公开笔记链接解析与预览读取",
       "source": "plugins/media/services/xiaohongshu/preview.ts"
     },
     "services.xigua.preview": {
-      "description": "媒体解析、音乐与合伙人",
+      "description": "西瓜视频分享链接解析、封面校验抓取与公开预览卡片生成",
       "source": "plugins/media/services/xigua/preview.ts"
     }
   },
@@ -473,7 +473,7 @@
     "guoba-settings.text_2812dae477": "仅在文字模式下生效。",
     "guoba-settings.text_2a265869e0": "仅在下方指定的群生效，机器人需有全员提醒权限。",
     "guoba-settings.text_2c80b0fd14": "请填写有效的公开链接预览设置。",
-    "guoba-settings.text_2d38e23178": "旧元宝模式使用已启用的通用兼容接口回退。未配置通用模型时显示原文预览。",
+    "guoba-settings.text_2d38e23178": "旧元宝模式回退至已启用的通用兼容接口。未配置通用模型时显示原文预览。",
     "guoba-settings.text_2d92fff83b": "同一轮获取多个账号的动态时随机等待。微博分条发送也会留出间隔。设为 0 可关闭等待。",
     "guoba-settings.text_2e0ab455aa": "记录推送结果汇总",
     "guoba-settings.text_2e42c1f303": "视频与动态共用 B 站登录",
@@ -494,7 +494,7 @@
     "guoba-settings.text_455094f7cb": "仅在分片截图模式下生效。",
     "guoba-settings.text_45a8421b35": "分开发送",
     "guoba-settings.text_45ca7bb666": "记录已确认、未确认和异常的发送数量。",
-    "guoba-settings.text_4d869b88ca": "允许从群聊中的公开分享显示作品信息，并响应显式播放指令。",
+    "guoba-settings.text_4d869b88ca": "允许显示群聊中公开分享的作品信息，并响应显式播放指令。",
     "guoba-settings.text_4e486cabbb": "关闭时仍可显式播放。平台下载授权和 B 站下载权限同时生效。",
     "guoba-settings.text_5199b61553": "小红书私聊自动预览",
     "guoba-settings.text_52d4a75489": "开启后也可在好友私聊预览。",
@@ -622,21 +622,21 @@
     "services.bilibili.login-command.text_178a17312a": "二维码图片暂不可用。请在 3 分钟内打开 B 站登录链接。\n",
     "services.bilibili.login-command.text_22a38f0a99": "B 站登录二维码送达未确认，请重试。",
     "services.bilibili.login-command.text_28384d7afd": "失败",
-    "services.bilibili.login-command.text_4e2593785b": "B站账号已保存，可用于视频及没有可用独立会话的动态订阅。",
+    "services.bilibili.login-command.text_4e2593785b": "B 站账号已保存，可用于视频及没有可用独立会话的动态订阅。",
     "services.bilibili.login-command.text_4f1c3406e6": "请由机器人主人在已连接的好友私聊登录 B 站账号。",
     "services.bilibili.login-command.text_559a364c22": "已有 B 站登录正在进行，请稍后重试。",
     "services.bilibili.login-command.text_6a4abb3e70": "没有 B 站登录权限。",
     "services.bilibili.login-command.text_6d827611e7": "使用 Bilibili App 扫码确认。登录可同时用于视频和未单独登录的动态订阅。",
-    "services.bilibili.login-command.text_7e1611ac7a": "B站账号引用已保存，后续搜索和解析会自动使用。",
+    "services.bilibili.login-command.text_7e1611ac7a": "B 站账号引用已保存，后续搜索和解析会自动使用。",
     "services.bilibili.login-command.text_7f5440b5cf": "Lotus-Yunzai · B 站",
     "services.bilibili.login-command.text_8fd3c7b241": "使用 Bilibili App 扫码确认。登录由 TuneWeave 保存，Lotus-Yunzai 仅保存账号引用。",
-    "services.bilibili.login-command.text_9158dcf753": "B站登录",
+    "services.bilibili.login-command.text_9158dcf753": "B 站登录",
     "services.bilibili.login-command.text_97b575de6d": "检查链接是否有效，或稍后重试。",
     "services.bilibili.login-command.text_a488e93d69": "来源",
     "services.bilibili.login-command.text_abee497473": "建议",
     "services.bilibili.login-command.text_c0b3fbff51": "完成",
     "services.bilibili.login-command.text_c8674a0f5b": "二维码图片暂不可用，请稍后重试。",
-    "services.bilibili.login-command.text_e294f47a39": "B站登录完成。",
+    "services.bilibili.login-command.text_e294f47a39": "B 站登录完成。",
     "services.bilibili.login-command.text_f0f609f1e2": "保存时间",
     "services.bilibili.pgc-playback.text_017262f30c": "最高可用 AVC 画质",
     "services.bilibili.pgc-playback.text_03e12362ce": "当前会话已有同一分集的播放任务。",
@@ -679,40 +679,40 @@
     "services.bilibili.service.text_3de263cd42": "直播间 {roomId}",
     "services.bilibili.service.text_4224be5c04": "B 站原账号已失效，请重新扫码登录。",
     "services.bilibili.service.text_4422cb288c": "视频简介",
-    "services.bilibili.service.text_49e80aa4f4": "B站登录身份未核实",
+    "services.bilibili.service.text_49e80aa4f4": "B 站登录身份未核实",
     "services.bilibili.service.text_4cceb5bed8": "TuneWeave 未返回指定分 P",
     "services.bilibili.service.text_4d8c1c5b42": "未知",
-    "services.bilibili.service.text_5316da6dc1": "B站二维码已过期或需要附加验证，请重新登录",
+    "services.bilibili.service.text_5316da6dc1": "B 站二维码已过期或需要附加验证，请重新登录",
     "services.bilibili.service.text_554197ad15": "不支持的 B 站链接",
     "services.bilibili.service.text_56210666b5": "未开播",
     "services.bilibili.service.text_567244b07c": "TuneWeave 视频详情不完整",
-    "services.bilibili.service.text_57adba479b": "开始下载 {bvid}，分P策略：{policy}。",
-    "services.bilibili.service.text_5b89a115b8": "B站直播接口错误 {code}",
+    "services.bilibili.service.text_57adba479b": "开始下载 {bvid}，分 P 策略：{policy}。",
+    "services.bilibili.service.text_5b89a115b8": "B 站直播接口错误 {code}",
     "services.bilibili.service.text_5d6f637daa": "分区",
-    "services.bilibili.service.text_5fd2d95181": "B站账号登录信息为空",
+    "services.bilibili.service.text_5fd2d95181": "B 站账号登录信息为空",
     "services.bilibili.service.text_60a53514eb": "收藏",
     "services.bilibili.service.text_6320b4a872": "状态",
     "services.bilibili.service.text_6563bbb6ae": "TuneWeave 未返回可下载视频流",
     "services.bilibili.service.text_6594d38005": "TuneWeave 未确认原 B 站账号续期。",
     "services.bilibili.service.text_6849b8254d": "评论",
     "services.bilibili.service.text_685ad54102": "创作",
-    "services.bilibili.service.text_695877517c": "B站直播接口返回无效响应",
+    "services.bilibili.service.text_695877517c": "B 站直播接口返回无效响应",
     "services.bilibili.service.text_6b072def69": "UP主",
     "services.bilibili.service.text_6c50a8522a": "直播中",
-    "services.bilibili.service.text_7d78573a3e": "B站二维码登录超时",
+    "services.bilibili.service.text_7d78573a3e": "B 站二维码登录超时",
     "services.bilibili.service.text_7e564575eb": "分享",
     "services.bilibili.service.text_7fe21c9c29": "B 站短链接未跳转至可识别的地址",
     "services.bilibili.service.text_88231a541e": "无法读取旧 B 站账号记录，请从当前部署重新登录。",
     "services.bilibili.service.text_894274d346": "B 站原账号已变更，请重试。",
     "services.bilibili.service.text_8d6a3396fb": "TuneWeave 播放来源与所选分 P 不匹配",
-    "services.bilibili.service.text_8e6ddbb1ff": "B站请求失败 HTTP {status}",
+    "services.bilibili.service.text_8e6ddbb1ff": "B 站请求失败 HTTP {status}",
     "services.bilibili.service.text_91ba3a619f": "原创",
     "services.bilibili.service.text_973851f86c": "[media] B 站任务清理失败： {message}",
     "services.bilibili.service.text_9e7e005e15": "投币",
     "services.bilibili.service.text_a2f120acdc": "TuneWeave 视频分 P 编号无效",
     "services.bilibili.service.text_a41fab00b5": "主播",
-    "services.bilibili.service.text_a9c87a52f8": "B站账号记录格式无效",
-    "services.bilibili.service.text_acb2586067": "B站二维码事务缺失",
+    "services.bilibili.service.text_a9c87a52f8": "B 站账号记录格式无效",
+    "services.bilibili.service.text_acb2586067": "B 站二维码事务缺失",
     "services.bilibili.service.text_aced5d7f9f": "点赞",
     "services.bilibili.service.text_af966e8c11": "TuneWeave 未确认原 B 站账号。",
     "services.bilibili.service.text_b073431962": "分P",
@@ -844,7 +844,7 @@
     "services.douyin.service.text_4ad3bb58d0": "开始下载抖音作品 {id}",
     "services.douyin.service.text_4c59ffb174": "作者：{owner}",
     "services.douyin.service.text_52f9cd574b": "[图片] {value1}",
-    "services.douyin.service.text_6e14b8ac5a": "[media] 抖音任务清理失败： {message}",
+    "services.douyin.service.text_6e14b8ac5a": "[media] 抖音任务清理失败：{message}",
     "services.douyin.service.text_71e60c9d14": "未取得可用媒体",
     "services.douyin.service.text_76765483e7": "第{index}项{value2}",
     "services.douyin.service.text_9e37cd0ab1": "第{index}项 {kind}：{message}",
@@ -1550,7 +1550,7 @@
     "services.subscriptions.module.text_5fb6df0f47": " 条，异常 ",
     "services.subscriptions.module.text_5fe9480d59": "订阅任务正在执行或已停止。",
     "services.subscriptions.module.text_7a3b06c300": " · 机器人 ",
-    "services.subscriptions.module.text_7df1e748c3": "请在订阅要发送的群聊或私聊中设置。",
+    "services.subscriptions.module.text_7df1e748c3": "请在接收订阅的群聊或私聊中设置。",
     "services.subscriptions.module.text_817b3d2c71": "未找到 UID ",
     "services.subscriptions.module.text_87043e5254": "任务。",
     "services.subscriptions.module.text_9eb20ff6ff": "群 ",
@@ -1778,14 +1778,14 @@
     "services.tuneweave.service.text_b87521b340": "此 TuneWeave 发行版未声明客户端兼容性",
     "services.tuneweave.service.text_b9f136d4ae": "TuneWeave 发布清单的客户端兼容性声明无效",
     "services.tuneweave.service.text_bb2281f199": "TuneWeave 返回了无效的能力清单。",
-    "services.tuneweave.service.text_bcd4997eed": "TuneWeave 进程记录须为本机文件。",
+    "services.tuneweave.service.text_bcd4997eed": "TuneWeave 进程记录须为常规文件。",
     "services.tuneweave.service.text_be3b951a49": "网易云今日没有更多可评定歌曲（405）",
     "services.tuneweave.service.text_c220d531d2": "已完成下载校验，正在替换并重启 TuneWeave",
     "services.tuneweave.service.text_c510c7432e": "TuneWeave 旧进程未停止，取消替换程序",
     "services.tuneweave.service.text_c8a6e55f90": "TuneWeave 启动未通过健康检查，请查看 data/tuneweave/server.log。",
     "services.tuneweave.service.text_cd6609c0f6": "{label}失败（{host}）：{value3}；curl 备用下载也未成功，请检查网络/代理。",
     "services.tuneweave.service.text_ceaaa87695": "下载期间 TuneWeave 进程已变化，取消更新",
-    "services.tuneweave.service.text_d64bfbfc55": "TuneWeave 启动后的版本与校验发布包不符",
+    "services.tuneweave.service.text_d64bfbfc55": "TuneWeave 启动后的版本与已校验发布包不符",
     "services.tuneweave.service.text_d878ea1ff0": "下载并校验 TuneWeave 发布文件",
     "services.tuneweave.service.text_d9be8b0d22": "TuneWeave 校验文件无效",
     "services.tuneweave.service.text_d9f89ed513": "更新至",
@@ -1838,655 +1838,655 @@
   },
   "parameters": {
     "core.render.image.text_e929e6d826": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "core.render.source-cards.text_bee11b0726": {
-      "value1": "data.page||1"
+      "value1": "当前页码"
     },
     "core.render.source-cards.text_b330f86837": {
-      "value1": "Math.floor(data.duration/60)",
-      "value2": "Math.floor(data.duration%60)"
+      "value1": "时长分钟数",
+      "value2": "时长秒数"
     },
     "core.render.source-cards.text_a1b3c9418d": {
-      "length": "data.media.length"
+      "length": "媒体项数量"
     },
     "core.render.source-cards.text_36dfb48472": {
-      "title": "data.music.title",
-      "value2": "data.music.author||''"
+      "title": "音乐标题",
+      "value2": "音乐作者"
     },
     "core.render.source-cards.text_7744c5636a": {
-      "title": "data.collection.title"
+      "title": "合集标题"
     },
     "core.render.source-cards.text_ddf0310f12": {
-      "value1": "data.sources.map(source=>[source.quality||'清晰度未记录',source.width&&source.height?`${source.width}×${source.height}`:'',source.codec||''].filter(Boolean).join(' ')).join(' / ')"
+      "value1": "视频源清晰度、分辨率与编码信息列表"
     },
     "guoba-settings.text_14970058c7": {
-      "platform": "platform"
+      "platform": "订阅平台显示名称"
     },
     "guoba-settings.text_5363847c40": {
-      "label": "label"
+      "label": "外部链接来源平台名称"
     },
     "guoba-settings.text_6949b04c81": {
-      "value1": "publicShareSiteNames[site]"
+      "value1": "公开分享站点显示名称"
     },
     "guoba-settings.text_e11f1b2549": {
-      "name": "share.name"
+      "name": "公开分享平台显示名称"
     },
     "guoba-settings.text_3d26426d12": {
-      "label": "label"
+      "label": "排除规则字段显示名称"
     },
     "guoba-settings.text_cd7091728d": {
-      "label": "label"
+      "label": "订阅平台显示名称（如 B站、微博）"
     },
     "services.bilibili.comment-write.text_3b75199d3c": {
-      "rpid": "rpid"
+      "rpid": "已发送评论的编号"
     },
     "services.bilibili.pgc.text_c6ec302104": {
-      "label": "label"
+      "label": "集数编号"
     },
     "services.bilibili.pgc.text_d1616ff0c9": {
-      "voters": "voters"
+      "voters": "评分人数"
     },
     "services.bilibili.pgc.text_e702680871": {
-      "score": "score",
-      "value2": "voters ? ` · ${voters} 人评分` : \"\""
+      "score": "评分分数",
+      "value2": "可选的评分人数文本"
     },
     "services.bilibili.pgc.text_96000506d3": {
-      "url": "input.url"
+      "url": "番剧页面链接"
     },
     "services.bilibili.pgc.text_21708e0fc7": {
-      "value1": "Math.floor(selected.duration / 60)",
-      "value2": "Math.floor(selected.duration % 60)"
+      "value1": "分集时长的分钟数",
+      "value2": "分集时长不足一分钟的剩余秒数"
     },
     "services.bilibili.pgc.text_7061c760fc": {
-      "follows": "follows"
+      "follows": "番剧追番人数"
     },
     "services.bilibili.pgc.text_f7322d6842": {
-      "badge": "selected.badge"
+      "badge": "番剧角标文本"
     },
     "services.bilibili.service.text_5b89a115b8": {
-      "code": "json.code"
+      "code": "接口返回的错误码"
     },
     "services.bilibili.service.text_3de263cd42": {
-      "roomId": "roomId"
+      "roomId": "直播间编号"
     },
     "services.bilibili.service.text_57adba479b": {
-      "bvid": "plan.info.bvid",
-      "policy": "plan.policy"
+      "bvid": "视频 BV 号",
+      "policy": "分 P 下载策略"
     },
     "services.bilibili.service.text_973851f86c": {
-      "message": "cleanupError.message"
+      "message": "清理异常信息"
     },
     "services.bilibili.service.text_10ef03b59a": {
-      "page": "page.page",
-      "concurrency": "download.concurrency"
+      "page": "分 P 编号",
+      "concurrency": "下载并发数"
     },
     "services.bilibili.service.text_8e6ddbb1ff": {
-      "status": "response.status"
+      "status": "HTTP 状态码"
     },
     "services.bilibili.service.text_331104e391": {
-      "url": "info.url"
+      "url": "视频页面链接"
     },
     "services.bilibili.service.text_b2e8dfa288": {
-      "value1": "(number / 10000).toFixed(1)"
+      "value1": "以万为单位格式化后的数值"
     },
     "services.bilibili.video-command.text_787dd2c120": {
-      "length": "discussion.rows.length"
+      "length": "当前评论列表总数"
     },
     "services.bilibili.video-command.text_491921973e": {
-      "title": "title"
+      "title": "操作名称"
     },
     "services.bilibili.video-command.text_a58246ae84": {
-      "page": "page"
+      "page": "当前页码"
     },
     "services.bilibili.video-command.text_0675556447": {
-      "value1": "index + 1"
+      "value1": "搜索结果序号"
     },
     "services.bilibili.video-command.text_7d392b71c1": {
-      "page": "page",
-      "length": "results.length"
+      "page": "当前页码",
+      "length": "当前页结果数"
     },
     "services.bilibili.video-command.text_18f43e7832": {
-      "length": "session!.results.length"
+      "length": "搜索结果总数"
     },
     "services.douyin.api.text_2555b3220b": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.douyin.command.text_d80b74a045": {
-      "url": "share.url"
+      "url": "直播间链接"
     },
     "services.douyin.command.text_327f939d86": {
-      "status": "room.status"
+      "status": "直播间状态"
     },
     "services.douyin.command.text_c3f5a70e2f": {
-      "url": "share.url"
+      "url": "直播间链接"
     },
     "services.douyin.command.text_c96c42d43f": {
-      "title": "info.title",
-      "value2": "info.owner || \"未知\"",
-      "url": "info.url"
+      "title": "作品标题",
+      "value2": "作者名称",
+      "url": "作品链接"
     },
     "services.douyin.command.text_06f9a0caf1": {
-      "value1": "code || \"error\"",
-      "message": "message"
+      "value1": "错误码或错误标识",
+      "message": "错误详情"
     },
     "services.douyin.live.text_792d1cf43b": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.douyin.model.text_a8a80c974c": {
-      "value1": "index + 1"
+      "value1": "媒体分项序号（从 1 开始）"
     },
     "services.douyin.model.text_8118ce59de": {
-      "value1": "index + 1"
+      "value1": "媒体分项序号（从 1 开始）"
     },
     "services.douyin.model.text_d3da49380e": {
-      "id": "id"
+      "id": "抖音作品 ID"
     },
     "services.douyin.service.text_4ad3bb58d0": {
-      "id": "info.id"
+      "id": "抖音作品 ID"
     },
     "services.douyin.service.text_4c59ffb174": {
-      "owner": "info.owner"
+      "owner": "作品作者名称"
     },
     "services.douyin.service.text_52f9cd574b": {
-      "value1": "block.urls[0]"
+      "value1": "图片资源链接"
     },
     "services.douyin.service.text_aca979d378": {
-      "index": "item.index"
+      "index": "媒体分项序号"
     },
     "services.douyin.service.text_76765483e7": {
-      "index": "item.index",
-      "value2": "item.kind === \"video\" ? \"视频\" : \"图片\""
+      "index": "媒体分项序号",
+      "value2": "媒体类型名称（视频或图片）"
     },
     "services.douyin.service.text_c5f7b5c95f": {
-      "value1": "failedItems.map(item => `第${item.index}项${item.kind === \"video\" ? \"视频\" : \"图片\"}`).join(\"、\")"
+      "value1": "未取得媒体的分项汇总文本"
     },
     "services.douyin.service.text_9e37cd0ab1": {
-      "index": "item.index",
-      "kind": "item.kind",
-      "message": "item.message"
+      "index": "媒体分项序号",
+      "kind": "媒体类型标识",
+      "message": "该分项失败原因"
     },
     "services.douyin.service.text_6e14b8ac5a": {
-      "message": "cleanupError.message"
+      "message": "任务目录清理异常信息"
     },
     "services.douyin.ssr.text_ee91544679": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.douyin.visitor.text_63bebb4a59": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.douyin.visitor.text_254a09fad3": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.jike.command.text_51d720b11c": {
-      "duration": "post.duration"
+      "duration": "视频时长（秒）"
     },
     "services.jike.command.text_81491de6b7": {
-      "value1": "post.duration ? ` · ${post.duration} 秒` : \"\""
+      "value1": "可选的视频时长文本片段（带分隔符）"
     },
     "services.jike.command.text_4c59ffb174": {
-      "owner": "post.owner"
+      "owner": "动态作者昵称"
     },
     "services.kuaishou.command.text_3c4aa1e0e2": {
-      "title": "post.title"
+      "title": "快手作品标题"
     },
     "services.kuaishou.command.text_4c59ffb174": {
-      "owner": "post.owner"
+      "owner": "快手作品作者昵称"
     },
     "services.mcwiki.command.text_77d2715f65": {
-      "renderer": "engine.renderer",
-      "value2": "engine.api ?? \"未知后端\"",
-      "value3": "engine.device ?? \"未知设备\""
+      "renderer": "图片渲染引擎名称",
+      "value2": "渲染图形后端名称或未知兜底文本",
+      "value3": "渲染设备名称或未知兜底文本"
     },
     "services.mcwiki.command.text_ff8fa218d9": {
-      "revisionId": "article.revisionId",
-      "revisionUrl": "article.revisionUrl",
-      "license": "article.license"
+      "revisionId": "条目修订版本号",
+      "revisionUrl": "条目修订版本页面链接",
+      "license": "附加版权许可说明"
     },
     "services.mcwiki.render.text_357bacecf6": {
-      "revisionId": "article.revisionId"
+      "revisionId": "条目修订版本号"
     },
     "services.media.cdn.text_7e10a3fa50": {
-      "platform": "platform"
+      "platform": "音乐平台名称"
     },
     "services.media.download.text_30727abc24": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.media.files.text_45addd3e5a": {
-      "command": "command"
+      "command": "执行的外部命令名称"
     },
     "services.media.files.text_72af269aa1": {
-      "command": "command",
-      "output": "output"
+      "command": "执行的外部命令名称",
+      "output": "命令输出日志"
     },
     "services.media.files.text_d28542b54a": {
-      "value1": "seconds / 60"
+      "value1": "时长上限分钟数"
     },
     "services.media.files.text_622b117f29": {
-      "seconds": "seconds"
+      "seconds": "时长上限秒数"
     },
     "services.media.files.text_39812731a0": {
-      "limit": "limit"
+      "limit": "带单位的时长上限文本"
     },
     "services.media.files.text_4c24420f1c": {
-      "estimatedSizeMb": "result.estimatedSizeMb",
-      "limitMb": "result.limitMb"
+      "estimatedSizeMb": "预估视频文件大小（MB）",
+      "limitMb": "允许的最大文件大小（MB）"
     },
     "services.media.range-download.text_268c53c7dc": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.media.range-download.text_f31707a8ce": {
-      "status": "probe.status"
+      "status": "探测请求的 HTTP 状态码"
     },
     "services.media.stream-retry.text_30727abc24": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.music.cloud-command.text_79a09edff6": {
-      "length": "tracks.length",
-      "usage": "usage"
+      "length": "云盘曲目总数量",
+      "usage": "可选的云盘已用空间与总容量字符串"
     },
     "services.music.cloud-command.text_2635a486db": {
-      "maxPage": "maxPage"
+      "maxPage": "云盘曲目列表的总页数"
     },
     "services.music.cloud-command.text_493cf69b78": {
-      "length": "browse.tracks.length"
+      "length": "关键词筛选后匹配的曲目数量"
     },
     "services.music.cloud-command.text_4949e16c4f": {
-      "page": "browse.page",
-      "maxPage": "maxPage"
+      "page": "当前浏览的页码",
+      "maxPage": "云盘曲目列表的总页数"
     },
     "services.music.cloud-command.text_0170e4feac": {
-      "value1": "inventory(snapshot)"
+      "value1": "云盘曲目总数及已用容量摘要"
     },
     "services.music.cloud-command.text_9865b6a45f": {
-      "name": "result.name"
+      "name": "成功匹配的官方曲目名称"
     },
     "services.music.cloud-command.text_02648951c1": {
-      "name": "result.name"
+      "name": "目标官方曲目的歌曲名称"
     },
     "services.music.command.text_3a3c664232": {
-      "success": "account.success",
-      "fail": "account.fail"
+      "success": "成功次数",
+      "fail": "失败次数"
     },
     "services.music.command.text_b417f4d805": {
-      "time": "report.time"
+      "time": "报告生成时间"
     },
     "services.music.command.text_cb843c7432": {
-      "value1": "Math.round(media.duration)"
+      "value1": "四舍五入后的完整音频时长（秒）"
     },
     "services.music.command.text_7f0fc7fa5b": {
-      "name": "track.name"
+      "name": "曲目名称"
     },
     "services.music.command.text_19c21cb395": {
-      "name": "source.episode.name"
+      "name": "节目名称"
     },
     "services.music.command.text_b58589b85f": {
-      "name": "source.track.name"
+      "name": "曲目名称"
     },
     "services.music.command.text_512d2b9f5d": {
-      "value1": "musicNames[session.platform]",
-      "page": "session.page"
+      "value1": "音乐平台名称",
+      "page": "当前页码"
     },
     "services.music.command.text_acac3da6c6": {
-      "page": "session.page"
+      "page": "当前页码"
     },
     "services.music.command.text_bcdc62151a": {
-      "name": "track.name",
-      "value2": "encodeURIComponent(track.id)"
+      "name": "曲目名称",
+      "value2": "经 URL 编码的歌曲 ID"
     },
     "services.music.command.text_21251de44c": {
-      "value1": "musicNames[platform]"
+      "value1": "音乐平台名称"
     },
     "services.music.command.text_50e029ca4e": {
-      "value1": "trackCount + (session.episodes?.length ?? 0)"
+      "value1": "可选条目总数"
     },
     "services.music.command.text_218220de0b": {
-      "value1": "formatLocalDateTime()"
+      "value1": "本地日期时间"
     },
     "services.music.partner-log.text_72d300d588": {
-      "reason": "reason"
+      "reason": "乐评未发布的原因说明"
     },
     "services.music.partner-log.text_8c26608108": {
-      "value1": "safeText(entry.name,160) || \"曲目\""
+      "value1": "歌曲名称（缺省为“曲目”）"
     },
     "services.music.partner-log.text_4d37999770": {
-      "score": "score"
+      "score": "歌曲主评分或“未返回”提示"
     },
     "services.music.partner-log.text_edc9fad143": {
-      "value1": "scores(entry.extraScore) || \"该作品未提供子项\""
+      "value1": "子项评分明细或“未提供子项”提示"
     },
     "services.music.partner-log.text_d00ddb619a": {
-      "review": "review"
+      "review": "乐评正文或未发布状态说明"
     },
     "services.music.partner-log.text_437880cbec": {
-      "value1": "count(entry.attempt)",
-      "state": "state"
+      "value1": "评测尝试轮次",
+      "state": "当前条目执行状态"
     },
     "services.music.partner-log.text_2132ae5adf": {
-      "value1": "safeText(account.nickname,100) || \"账号\"",
-      "value2": "count(account.success)",
-      "value3": "count(account.fail)",
-      "value4": "account.attempts == null ? 1 : count(account.attempts)"
+      "value1": "账号昵称（缺省为“账号”）",
+      "value2": "成功评测数量",
+      "value3": "失败评测数量",
+      "value4": "执行总轮数"
     },
     "services.music.partner-review.text_3757168e9f": {
-      "targetMin": "targetMin",
-      "targetMax": "targetMax",
-      "maxChars": "maxChars"
+      "targetMin": "乐评目标最小字符数",
+      "targetMax": "乐评目标最大字符数",
+      "maxChars": "乐评允许的最大字符数上限"
     },
     "services.music.partner-review.text_0dcfbf68d6": {
-      "value1": "JSON.stringify(context)"
+      "value1": "JSON 格式的歌曲详情、歌词与作者简介上下文"
     },
     "services.music.partner-review.text_ae5df5d861": {
-      "status": "response.status"
+      "status": "HTTP 响应状态码"
     },
     "services.official-links.command.text_db4d59eabd": {
-      "platform": "platform",
-      "link": "input.link"
+      "platform": "来源平台名称",
+      "link": "原始公开链接"
     },
     "services.official-video.feed.text_ef849705c2": {
-      "game": "game"
+      "game": "游戏名称"
     },
     "services.official-video.feed.text_d3c3936c57": {
-      "title": "video.title"
+      "title": "视频标题"
     },
     "services.official-video.feed.text_141525e614": {
-      "value1": "date.format(new Date(video.published * 1000))"
+      "value1": "格式化后的视频发布时间"
     },
     "services.official-video.feed.text_4746d8976a": {
-      "value1": "Math.ceil(video.size / 1024 / 1024)"
+      "value1": "向上取整后的视频大小（单位：MB）"
     },
     "services.official-video.feed.text_f42c5ec3c0": {
-      "value1": "[video.quality, video.size && `约 ${Math.ceil(video.size / 1024 / 1024)} MB`].filter(Boolean).join(\" · \") || \"未提供\""
+      "value1": "拼接后的画质与体积信息，无数据时为“未提供”"
     },
     "services.official-video.feed.text_3f70220ab2": {
-      "url": "video.url"
+      "url": "官方视频播放或下载链接"
     },
     "services.official-video.feed.text_43ae1edc0e": {
-      "text": "video.text"
+      "text": "视频附带的动态正文文本"
     },
     "services.official-video.feed.text_7d69228331": {
-      "game": "game",
-      "text": "video.text"
+      "game": "游戏名称",
+      "text": "视频附带的动态正文文本"
     },
     "services.official-video.post-command.text_fd04ac0732": {
-      "original": "original"
+      "original": "原图链接地址"
     },
     "services.official-video.post-command.text_22f5fe65cc": {
-      "href": "video.href"
+      "href": "视频链接地址"
     },
     "services.pipixia.command.text_6e5d8d52af": {
-      "author": "author",
-      "text": "text",
-      "value3": "time ? time + \" · \" : \"\"",
-      "value4": "httpNumber(comment.like_count) ?? 0",
-      "value5": "httpNumber(comment.reply_count) ?? 0"
+      "author": "评论作者名称",
+      "text": "评论正文内容",
+      "value3": "评论时间及分隔符",
+      "value4": "评论点赞数",
+      "value5": "评论回复数"
     },
     "services.pipixia.command.text_2dc8280c99": {
-      "value1": "like ?? \"未记录\""
+      "value1": "点赞数或未记录"
     },
     "services.pipixia.command.text_6a11edf008": {
-      "value1": "reply ?? \"未记录\""
+      "value1": "评论数或未记录"
     },
     "services.pipixia.command.text_f1e29490a6": {
-      "value1": "share ?? \"未记录\""
+      "value1": "分享数或未记录"
     },
     "services.pipixia.command.text_a0c6561200": {
-      "value1": "view ?? \"未记录\""
+      "value1": "播放量或未记录"
     },
     "services.pipixia.command.text_c91e9942fb": {
-      "title": "post.title"
+      "title": "作品标题"
     },
     "services.pipixia.command.text_4c59ffb174": {
-      "owner": "post.owner"
+      "owner": "作品作者名称"
     },
     "services.public-share.command.text_1191a17492": {
-      "value1": "names[source.site]",
-      "url": "source.url"
+      "value1": "平台名称",
+      "url": "分享链接地址"
     },
     "services.public-share.command.text_de901b018d": {
-      "value1": "names[source.site]",
-      "url": "source.url"
+      "value1": "平台名称",
+      "url": "分享链接地址"
     },
     "services.public-share.command.text_f74cfbf7d9": {
-      "value1": "names[match.target.site]"
+      "value1": "平台名称"
     },
     "services.public-share.command.text_21774bab6d": {
-      "value1": "names[match.target.site]",
-      "href": "match.target.url.href"
+      "value1": "平台名称",
+      "href": "分享链接地址"
     },
     "services.public-share.command.text_ba8fcbeefe": {
-      "value1": "names[match.target.site]",
-      "href": "match.target.url.href"
+      "value1": "平台名称",
+      "href": "分享链接地址"
     },
     "services.release-network.text_7768ab0027": {
-      "label": "label",
-      "host": "host",
-      "attempt": "attempt",
-      "attempts": "attempts"
+      "label": "请求操作名称",
+      "host": "目标主机名",
+      "attempt": "当前尝试次数",
+      "attempts": "最大尝试次数"
     },
     "services.release-network.text_a03f618232": {
-      "label": "label",
-      "host": "host",
-      "attempt": "attempt",
-      "reason": "reason"
+      "label": "请求操作名称",
+      "host": "目标主机名",
+      "attempt": "已尝试次数",
+      "reason": "失败原因说明"
     },
     "services.release-network.text_bb41250fd0": {
-      "label": "label",
-      "host": "host",
-      "reason": "reason",
-      "value4": "attempt + 1",
-      "attempts": "attempts"
+      "label": "请求操作名称",
+      "host": "目标主机名",
+      "reason": "失败原因说明",
+      "value4": "下一次重试序号",
+      "attempts": "最大尝试次数"
     },
     "services.subscriptions.help.text_cf520db5d6": {
-      "platform": "platform"
+      "platform": "平台名称"
     },
     "services.subscriptions.help.text_6925f0523e": {
-      "platform": "platform"
+      "platform": "平台名称"
     },
     "services.subscriptions.help.text_a99c06d554": {
-      "platform": "platform"
+      "platform": "平台名称"
     },
     "services.subscriptions.panel.text_b8189cf5dd": {
-      "uid": "uid"
+      "uid": "目标账号 UID"
     },
     "services.subscriptions.panel.text_6a99163572": {
-      "uid": "uid"
+      "uid": "目标账号 UID"
     },
     "services.subscriptions.profile.text_60b8cc21f8": {
-      "title": "live.title"
+      "title": "直播间标题"
     },
     "services.subscriptions.profile.text_84298e8420": {
-      "status": "live.status"
+      "status": "直播状态文本"
     },
     "services.subscriptions.profile.text_e1e2165408": {
-      "viewers": "live.viewers"
+      "viewers": "观看人数"
     },
     "services.subscriptions.profile.text_329159b152": {
-      "roomId": "live.roomId"
+      "roomId": "直播间号"
     },
     "services.subscriptions.render.text_b2e8dfa288": {
-      "value1": "(count/10_000).toFixed(1)"
+      "value1": "以万为单位的数值（保留一位小数）"
     },
     "services.subscriptions.render.text_b2aa4face3": {
-      "area": "details.area"
+      "area": "直播分区名称"
     },
     "services.subscriptions.render.text_1a0f079828": {
-      "value1": "compactCount(details.viewers)"
+      "value1": "格式化后的观看人数"
     },
     "services.subscriptions.render.text_760f22f2c1": {
-      "year": "year",
-      "month": "month",
-      "day": "day",
-      "hour": "hour",
-      "minute": "minute",
-      "second": "second"
+      "year": "年",
+      "month": "月",
+      "day": "日",
+      "hour": "时",
+      "minute": "分",
+      "second": "秒"
     },
     "services.subscriptions.render.text_268ed3a935": {
-      "value1": "category(provider, original)",
-      "author": "original.author"
+      "value1": "原帖动态类型名称",
+      "author": "原作者名称"
     },
     "services.subscriptions.render.text_a0512814b8": {
-      "label": "provider.label",
-      "value2": "preview ? \"\" : \"订阅\""
+      "label": "平台名称",
+      "value2": "非预览模式时为“订阅”字样"
     },
     "services.subscriptions.weibo.preview.text_8a5362b07e": {
-      "likes": "likes"
+      "likes": "评论点赞数"
     },
     "services.subscriptions.weibo.preview.text_539a8267ee": {
-      "value1": "index + 1",
-      "value2": "index + items.length",
-      "length": "rows.length"
+      "value1": "当前页起始评论序号",
+      "value2": "当前页结束评论序号",
+      "length": "评论总条数"
     },
     "services.subscriptions.weibo.preview.text_adc2d2cc57": {
-      "link": "input.link"
+      "link": "微博动态原文链接"
     },
     "services.subscriptions.weibo.preview.text_c62eceb6ab": {
-      "link": "input.link"
+      "link": "微博动态原文链接"
     },
     "services.subscriptions.xhh-author-command.text_21accfecd3": {
-      "count": "count"
+      "count": "成功迁移的订阅数量"
     },
     "services.subscriptions.xhh-author-command.text_fbc4a4e39b": {
-      "uid": "uid"
+      "uid": "B 站作者 UID"
     },
     "services.subscriptions.xhh-author-command.text_a9b832edb7": {
-      "name": "name",
-      "uid": "uid"
+      "name": "B 站作者名称",
+      "uid": "B 站作者 UID"
     },
     "services.subscriptions.xhh-author-command.text_82d785f89f": {
-      "name": "name"
+      "name": "B 站作者名称"
     },
     "services.tools.command.text_766394516d": {
-      "reason": "item.reason"
+      "reason": "工具检查或安装失败的具体原因"
     },
     "services.tools.command.text_854c7b55b8": {
-      "value1": "failureMessage(error)"
+      "value1": "具体失败原因或错误信息"
     },
     "services.tools.installer.text_8679f4a9af": {
-      "name": "name"
+      "name": "工具名称"
     },
     "services.tools.installer.text_9631d3e088": {
-      "name": "name",
-      "reason": "reason"
+      "name": "工具名称",
+      "reason": "失败原因"
     },
     "services.tools.installer.text_04a28b892f": {
-      "name": "name",
-      "reason": "health.reason"
+      "name": "工具名称",
+      "reason": "需要修复的原因说明"
     },
     "services.tools.installer.text_1534e5daa0": {
-      "repo": "tool.repo"
+      "repo": "GitHub 发布仓库名称"
     },
     "services.tools.installer.text_dccc06ce08": {
-      "attempt": "attempt",
-      "attempts": "attempts"
+      "attempt": "当前重试次数",
+      "attempts": "最大重试总次数"
     },
     "services.tools.installer.text_3e1e5fab97": {
-      "name": "asset.name",
-      "value2": "attempt > 1 ? `（重试 ${attempt}/${attempts}）` : \"\""
+      "name": "发布包文件名",
+      "value2": "重试次数说明后缀或空字符串"
     },
     "services.tools.installer.text_ad1bb5837a": {
-      "name": "asset.name"
+      "name": "发布包文件名"
     },
     "services.tools.installer.text_09ee0a42f4": {
-      "name": "name"
+      "name": "工具名称"
     },
     "services.tools.installer.text_b0a886bf89": {
-      "host": "new URL(asset.browser_download_url).host",
-      "message": "error.message"
+      "host": "下载来源主机名",
+      "message": "HTTP 错误信息"
     },
     "services.tools.installer.text_4cc82931d2": {
-      "name": "name",
-      "host": "new URL(asset.browser_download_url).host",
-      "value3": "attempt + 1",
-      "attempts": "attempts",
-      "value5": "releaseFailure(error)"
+      "name": "工具名称",
+      "host": "下载来源主机名",
+      "value3": "即将进行的重试次数序号",
+      "attempts": "最大尝试总次数",
+      "value5": "本次失败原因摘要"
     },
     "services.tools.installer.text_4e55e6c97e": {
-      "host": "new URL(asset.browser_download_url).host",
-      "attempts": "attempts",
-      "value3": "releaseFailure(lastError)"
+      "host": "下载来源主机名",
+      "attempts": "已尝试总次数",
+      "value3": "最终失败原因摘要"
     },
     "services.tools.installer.text_8726d6b949": {
-      "repo": "repo"
+      "repo": "GitHub 发布仓库名称"
     },
     "services.tools.installer.text_b119b79bda": {
-      "host": "new URL(url).host"
+      "host": "下载来源主机名"
     },
     "services.tools.installer.text_bfba8a1ad5": {
-      "command": "command"
+      "command": "解压压缩包所需的系统命令行工具名称"
     },
     "services.tools.installer.text_93728e9863": {
-      "value1": "path.basename(file)"
+      "value1": "待校验的文件名"
     },
     "services.tuneweave.service.text_7be467bfba": {
-      "reason": "reason"
+      "reason": "接口请求失败的具体原因或错误码"
     },
     "services.tuneweave.service.text_7606f0e332": {
-      "TUNEWEAVE_REQUIRED_VERSION": "TUNEWEAVE_REQUIRED_VERSION"
+      "TUNEWEAVE_REQUIRED_VERSION": "插件要求运行的最低 TuneWeave 版本号"
     },
     "services.tuneweave.service.text_de7d486d3c": {
-      "version": "status.version",
-      "TUNEWEAVE_REQUIRED_VERSION": "TUNEWEAVE_REQUIRED_VERSION"
+      "version": "当前运行的版本号",
+      "TUNEWEAVE_REQUIRED_VERSION": "所需的最低版本号"
     },
     "services.tuneweave.service.text_2576b4a0ad": {
-      "label": "label",
-      "host": "host"
+      "label": "当前下载项的描述名称",
+      "host": "下载目标 URL 的主机名"
     },
     "services.tuneweave.service.text_cd6609c0f6": {
-      "label": "label",
-      "host": "host",
-      "value3": "releaseFailure(error)"
+      "label": "当前下载任务名称",
+      "host": "目标主机名",
+      "value3": "主下载请求失败原因"
     },
     "services.tuneweave.service.text_4ec2c41bda": {
-      "status": "response.status"
+      "status": "清单请求返回的 HTTP 状态码"
     },
     "services.tuneweave.service.text_73861eabc7": {
-      "version": "manifest.version",
-      "TUNEWEAVE_REQUIRED_VERSION": "TUNEWEAVE_REQUIRED_VERSION"
+      "version": "清单中的发布包版本号",
+      "TUNEWEAVE_REQUIRED_VERSION": "插件要求运行的最低 TuneWeave 版本号"
     },
     "services.tuneweave.service.text_571488b1d8": {
-      "value1": "errorMessage(error)"
+      "value1": "发送更新通知时产生的错误信息"
     },
     "services.tuneweave.service.text_a4d7e55d1a": {
-      "version": "status.version",
-      "value2": "repair ? \"修复\" : \"更新至\"",
-      "targetVersion": "targetVersion"
+      "version": "当前运行的版本号",
+      "value2": "操作动词（修复或更新至）",
+      "targetVersion": "目标版本号"
     },
     "services.tuneweave.service.text_7355b5715c": {
-      "version": "status.version",
-      "value2": "ready.version"
+      "version": "更新前的旧版本号",
+      "value2": "更新并启动成功后的新版本号"
     },
     "services.tuneweave.service.text_858315528a": {
-      "version": "status.version"
+      "version": "回滚恢复的原版本号"
     },
     "services.tuneweave.service.text_dae9264b88": {
-      "value1": "errorMessage(rollbackError)"
+      "value1": "回滚恢复失败的错误详情"
     },
     "services.tuneweave.service.text_fbcb87f76c": {
-      "value1": "errorMessage(error)",
-      "recovery": "recovery"
+      "value1": "更新失败的错误详情",
+      "recovery": "回滚恢复结果说明"
     },
     "services.tuneweave.service.text_114fdb3a7e": {
-      "value1": "errorMessage(error)",
-      "recovery": "recovery"
+      "value1": "更新失败的错误信息",
+      "recovery": "更新失败后的服务恢复状态描述"
     },
     "services.tuneweave.service.text_e2d06c47ab": {
-      "platform": "platform",
-      "arch": "arch"
+      "platform": "操作系统平台标识",
+      "arch": "CPU 架构标识"
     },
     "services.web-summary.command.text_109081da5d": {
-      "title": "title",
-      "units": "units",
-      "minutes": "minutes"
+      "title": "网页标题",
+      "units": "原文总字数",
+      "minutes": "预计阅读所需分钟数"
     },
     "services.web-summary.command.text_7ee539ea25": {
-      "length": "Array.from(excerpt).length"
+      "length": "截取用于生成摘要的原文字符数"
     },
     "services.web-summary.command.text_e09f78b1ec": {
-      "link": "target.link"
+      "link": "目标网页或文章的原始链接"
     },
     "services.xigua.preview.text_a0c6561200": {
-      "value1": "post.view.toLocaleString(\"zh-CN\")"
+      "value1": "格式化后的视频播放量数值"
     }
   }
 }

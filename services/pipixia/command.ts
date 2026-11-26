@@ -185,7 +185,7 @@ export function createPipixiaCommands({ signal: lifecycle, mediaRuntime, fetch =
               } catch (error) {
                 if (!active.aborted) {
                   const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
-                  await context.reply(unknown ? $t("services.pipixia.command.text_63b89edd23") : $t("services.pipixia.command.text_8679d28932"))
+                  if (!unknown) await context.reply($t("services.pipixia.command.text_8679d28932"))
                 }
               } finally {
                 if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn($t("services.pipixia.command.text_de8df796ea")))

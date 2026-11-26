@@ -103,7 +103,7 @@ export function createKuaishouCommands({ signal: lifecycle, mediaRuntime, fetch 
     } catch (error) {
       if (!active.aborted) {
         const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
-        await context.reply(unknown ? $t("services.kuaishou.command.text_63b89edd23") : $t("services.kuaishou.command.text_ed74eb8a23"))
+        if (!unknown) await context.reply($t("services.kuaishou.command.text_ed74eb8a23"))
       }
     } finally {
       if (task) await releaseMediaTask(tasksDir, task.dir).catch(() => console.warn($t("services.kuaishou.command.text_80d115ce60")))

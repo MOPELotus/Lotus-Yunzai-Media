@@ -92,7 +92,7 @@ export function createPublicShareCommands({ signal: lifecycle, mediaRuntime, fet
     } catch (error) {
       if (active.aborted) return []
       if (error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown) {
-        return $t("services.public-share.command.text_63b89edd23")
+        return []
       }
       return $t("services.public-share.command.text_de901b018d", { "value1": names[source.site], "url": source.url })
     } finally {

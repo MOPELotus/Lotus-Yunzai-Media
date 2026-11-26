@@ -149,7 +149,7 @@ export function createMiyoushePostCommands({ signal: lifecycle, mediaRuntime, re
     } catch (error) {
       if (!active.aborted) {
         const unknown = error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown
-        try { await context.reply(unknown ? $t("services.official-video.post-command.text_a70a783e34") : $t("services.official-video.post-command.text_419dfd1d18")) }
+        try { if (!unknown) await context.reply($t("services.official-video.post-command.text_419dfd1d18")) }
         catch { /* The original connection may have closed after delivery. */ }
       }
     } finally {

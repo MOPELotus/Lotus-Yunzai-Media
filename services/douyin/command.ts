@@ -135,8 +135,9 @@ export function createDouyinCommands({ signal: lifecycle, mediaRuntime }: Servic
       const code = error instanceof Error && "code" in error ? error.code : undefined
       const message = error instanceof Error ? error.message : $t("services.douyin.command.text_373ee33f74")
       console.warn($t("services.douyin.command.text_06f9a0caf1", { "value1": code || "error", "message": message }))
+      if (code === mediaDeliveryUnknown) return
       await replyImage(reply, active, maxBytes, renderScale => renderStatusCard({
-        title: $t("services.douyin.command.text_885c06c21b"), subtitle: $t("services.douyin.command.text_863ef55e48"), badge: code === mediaDeliveryUnknown ? $t("services.douyin.command.text_c098e854e6") : $t("services.douyin.command.text_28384d7afd"),
+        title: $t("services.douyin.command.text_885c06c21b"), subtitle: $t("services.douyin.command.text_863ef55e48"), badge: $t("services.douyin.command.text_28384d7afd"),
         message, userId: context.user_id,
       }, { saveId: saveId + "-error", renderScale }), message)
     } finally {

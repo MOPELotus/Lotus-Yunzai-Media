@@ -61,7 +61,7 @@ test("快手精确比对官方 H5 公开号码，下载与未知送达只尝试�
     await result.onDelivered(2)
     expect(seen).toEqual([source, video])
     expect(deliveries).toBe(1)
-    expect(messages).toEqual(["视频送达未确认，请核对当前会话。"])
+    expect(messages).toEqual([])
     expect(await readdir(tasksDir)).toEqual([])
   } finally {
     await command.dispose()

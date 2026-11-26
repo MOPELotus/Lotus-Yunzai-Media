@@ -127,7 +127,7 @@ export function createAcfunCommands({ signal: lifecycle, mediaRuntime }: Service
     } catch (error) {
       if (connection.aborted) return []
       if (error instanceof Error && "code" in error && error.code === mediaDeliveryUnknown) {
-        return $t("services.acfun.command.text_d067c369b9")
+        return []
       }
       return $t("services.acfun.command.text_e0c288703a") + acfunPage(target)
     } finally {

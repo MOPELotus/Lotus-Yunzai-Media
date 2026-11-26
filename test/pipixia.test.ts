@@ -160,7 +160,7 @@ test.each([200, 206])("皮皮虾只上传完整响应，未知回执不重发（
     await result.onDelivered(12)
     expect(downloads).toBe(1)
     expect(uploads).toBe(status === 200 ? 1 : 0)
-    expect(messages).toEqual([status === 200 ? "视频送达未确认，请核对当前会话。" : "皮皮虾视频暂未送达，可打开上面的原帖。"])
+    expect(messages).toEqual(status === 200 ? [] : ["皮皮虾视频暂未送达，可打开上面的原帖。"])
     expect(await readdir(dir)).toEqual([])
   } finally {
     await commands.dispose()

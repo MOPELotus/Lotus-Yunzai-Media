@@ -129,10 +129,10 @@ test("引用 B 站视频的预览用 AV 号和评论类型 1；上游串楼禁�
   }
   try {
     expect(await api.fallback("解析", context)).toEqual([])
-    expect(cards[0].items[0].value).toBe("测试视频评论")
+    expect(cards).toHaveLength(0)
     expect(await api.fallback("#展开 1", { ...context, reply_id: id,
       lookupReply: async () => ({ user_id: 99, message: [{ type: "image" }] }) })).toContain("子评论暂不可用")
-    expect(cards).toHaveLength(1)
+    expect(cards).toHaveLength(0)
     expect(paths.slice(-2)).toEqual(["/x/v2/reply", "/x/v2/reply/reply"])
   } finally { await api.dispose() }
 })

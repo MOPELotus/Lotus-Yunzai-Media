@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test, spyOn } from "bun:test"
 import { spawn } from "node:child_process"
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -304,4 +304,45 @@ test("B 站视频认证失效后只续原账号一次，确认原别名与 UID �
     await expect(service().getInfo(link)).rejects.toThrow("未确认原 B 站账号")
     expect(requests).toEqual([["read", alias]])
   } finally { await rm(workDir, { recursive: true, force: true }) }
+})
+
+test("B站视频发送结果未知时保持静默且不重发，明确失败时仍返回回执", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lotus-bili-delivery-"))
+  const file = join(directory, "fixture.mp4")
+  await writeFile(file, "fixture")
+  let deliveries = 0, downloads = 0, releases = 0
+  let outcome = "unknown"
+  const messages = []
+  const download = spyOn(BilibiliService.prototype, "download").mockImplementation(async () => {
+    downloads++
+    return { ok: true, files: [file], fileNames: { [file]: "fixture.mp4" } }
+  })
+  const release = spyOn(BilibiliService.prototype, "releaseTask").mockImplementation(async () => { releases++ })
+  const api = createBilibiliVideoCommands({})
+  const context = { message_type: "private", self_id: 99, user_id: 42, isMaster: true,
+    deliverMedia: async () => { deliveries++; return outcome },
+    reply: async message => { messages.push(message); return message?.type !== "video" },
+  }
+  try {
+    for (const state of ["unknown", "confirmed"]) {
+      outcome = state
+      expect(await api.fallback("#B站下载 " + link, context)).toEqual([])
+      expect(messages).toEqual([])
+    }
+    expect(downloads).toBe(2)
+    expect(deliveries).toBe(2)
+    expect(releases).toBe(2)
+    outcome = "rejected"
+    expect(await api.fallback("#B站下载 " + link, context)).toEqual([])
+    expect(messages.some(message => message?.type === "video")).toBe(true)
+    expect(messages.some(message => message?.type === "image")).toBe(true)
+    expect(downloads).toBe(3)
+    expect(deliveries).toBe(3)
+    expect(releases).toBe(3)
+  } finally {
+    await api.dispose()
+    download.mockRestore()
+    release.mockRestore()
+    await rm(directory, { recursive: true, force: true })
+  }
 })

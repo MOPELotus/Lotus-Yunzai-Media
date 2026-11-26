@@ -141,3 +141,5 @@ B 站和微博的文字转发推送先给转发帖链接，再显示原帖类别
 合伙人评分、乐评和逐首回执参考 Lotus-ReFactor 的 [e28c6df](https://github.com/MOPELotus/Lotus-ReFactor/tree/e28c6df5fd6212ce5943b4a9f7fba6e2bca32653)，沿用同一许可。
 
 动态订阅和图卡结构来源于 [snowtafir/yuki-plugin main3](https://github.com/snowtafir/yuki-plugin/tree/b1d8fecf41d03f92746bb2404b0b0381a24103a5)，保留 [MIT 许可](LICENSES/yuki-plugin.txt)。
+
+视频解析默认不附带评论卡；媒体发送回执未知时不额外提示也不自动重发，仅在明确失败时进行提示。

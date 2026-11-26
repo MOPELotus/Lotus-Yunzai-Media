@@ -309,16 +309,16 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
   async function reportError(context: MessageFallbackContext, title: string, cause: unknown) {
     if (signal?.aborted) return
     const error = cause as Error & { code?: string }
+    if (error?.code === mediaDeliveryUnknown) return
     const message = error instanceof Error ? error.message : $t("services.bilibili.video-command.text_8977b79aa8")
     const diskFull = error?.code === "ENOSPC" || error?.code === "EDQUOT" || /No space left on device|Disk quota exceeded/iu.test(message)
     const detail = diskFull ? $t("services.bilibili.video-command.text_1aa1d82019") : message
-    const unconfirmed = error?.code === mediaDeliveryUnknown
-    const fallback = unconfirmed || diskFull || error?.code === mediaDeliveryTooLarge ? detail : $t("services.bilibili.video-command.text_491921973e", { "title": title })
+    const fallback = diskFull || error?.code === mediaDeliveryTooLarge ? detail : $t("services.bilibili.video-command.text_491921973e", { "title": title })
     const image = await renderStatusCard({
-      title, subtitle: $t("services.bilibili.video-command.text_7f5440b5cf"), badge: unconfirmed ? $t("services.bilibili.video-command.text_c098e854e6") : $t("services.bilibili.video-command.text_28384d7afd"),
+      title, subtitle: $t("services.bilibili.video-command.text_7f5440b5cf"), badge: $t("services.bilibili.video-command.text_28384d7afd"),
       message: detail,
       userId: context.user_id,
-      items: unconfirmed ? [] : [
+      items: [
         { label: $t("services.bilibili.video-command.text_abee497473"), value: diskFull ? $t("services.bilibili.video-command.text_68ebf9d47c") : $t("services.bilibili.video-command.text_97b575de6d") },
       ],
     }, { saveId: `media-bilibili-error-${context.user_id || "user"}` }).catch(() => undefined)
@@ -383,7 +383,6 @@ export function createBilibiliVideoCommands({ signal, mediaRuntime, fetch, setti
     if (!image && info.type === "video") await reply(context, formatBilibiliPreviewText(info), undefined, receipt)
     else await imageReply(context, image || undefined, $t("services.bilibili.video-command.text_3218cf73b0"), receipt)
     if (signal?.aborted) return
-    if (discussion && preview) await showDiscussion(context, preview, $t("services.bilibili.video-command.text_39028a915f"))
     if (info.type === "live" && info.playerUrl) {
       await reply(context, $t("services.bilibili.video-command.text_bad0d56016") + info.playerUrl)
     } else if (info.type === "video" && info.url && download) {

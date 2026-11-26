@@ -157,7 +157,8 @@ export function createBiliPgcPlayback({
       return []
     } catch (error) {
       if (signal.aborted) return
-      return fail(fields(error).code === mediaDeliveryUnknown ? $t("services.bilibili.pgc-playback.text_cc7be90b66") : $t("services.bilibili.pgc-playback.text_d828fa3e95"))
+      if (fields(error).code === mediaDeliveryUnknown) return []
+      return fail($t("services.bilibili.pgc-playback.text_d828fa3e95"))
     } finally {
       running.delete(key)
       if (task) await releaseMediaTask(task.root, task.dir).catch(() => undefined)

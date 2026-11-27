@@ -222,11 +222,27 @@ export function selectVideoSources(sources: MediaSource[], config: { quality?: s
   return [...known, ...ordered.filter(source => !source.sizeBytes)]
 }
 
+export function staticImageUrls(...candidates: unknown[]): string[] {
+  return [...new Set(candidates.flatMap(mediaUrls))].filter(value => {
+    let normalized = value;
+    try { normalized = decodeURIComponent(value); } catch {}
+    try {
+      const url = new URL(normalized);
+      if (/\.(?:heic|heif)$/iu.test(url.pathname)) return false;
+      for (const [key, value] of url.searchParams) {
+        if (!/^(?:fmt|format|image[_-]?format|file[_-]?format|type|image[_-]?type|mime(?:[_-]?type)?|content[_-]?type)$/iu.test(key)) continue;
+        if (/^(?:heic|heif)$/iu.test(value.trim()) || /^image\/(?:x-)?(?:heic|heif)(?:\s*;|$)/iu.test(value.trim()) || /\.(?:heic|heif)$/iu.test(value.trim())) return false;
+      }
+      return true;
+    } catch { return false; }
+  });
+}
+
 function articleBlocks(info: WireArticle, warnings: string[]) {
   const content = jsonObject<ArticleContent>(info.article_content)
   const fe = jsonObject<ArticleImages>(info.fe_data)
   const images = Array.isArray(fe.image_list) ? fe.image_list.filter(isObject) : []
-  const replacements = new Map(images.map(image => [image.markdown_url, image.ai_high_image_url || image.high_image_url || image.origin_image_url || image.markdown_url]))
+  const replacements = new Map(images.map(image => [image.markdown_url, staticImageUrls(image.ai_high_image_url, image.high_image_url, image.origin_image_url, image.markdown_url)]))
   const blocks: ArticleBlock[] = []
   const markdown = typeof content.markdown === "string" ? content.markdown : ""
   if (markdown) {
@@ -235,7 +251,7 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
     for (const match of markdown.matchAll(expression)) {
       const text = plainText(markdown.slice(offset, match.index))
       if (text) blocks.push({ type: "text", text })
-      const urls = [...new Set([...mediaUrls(replacements.get(match[2])), ...mediaUrls(match[2])])]
+      const urls = staticImageUrls(replacements.get(match[2]), match[2])
       if (urls.length) blocks.push({ type: "image", urls, caption: match[1] })
       offset = match.index + match[0].length
     }
@@ -249,7 +265,7 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
       if (typeof node === "string") { const text = plainText(node); if (text) blocks.push({ type: "text", text }); return }
       if (typeof node !== "object") return
       const { url_list, image, url, src, type, tag, text, children, content, body } = node as ArticleNode
-      const urls = mediaUrls(url_list || image?.url_list || url || src)
+      const urls = staticImageUrls(url_list, image?.url_list, url, src)
       if (urls.length && /image|img|picture/.test(String(type || tag || ""))) blocks.push({ type: "image", urls })
       else if (typeof text === "string") visit(text, depth + 1)
       else visit(children || content || body, depth + 1)
@@ -259,12 +275,12 @@ function articleBlocks(info: WireArticle, warnings: string[]) {
       warnings.push($t("services.douyin.model.text_627d2c0d56"))
       if (typeof info.article_content === "string" && !Object.keys(content).length) visit(info.article_content)
       for (const image of images) {
-        const urls = mediaUrls(image.high_image_url || image.origin_image_url || image.markdown_url)
+        const urls = staticImageUrls(image.ai_high_image_url, image.high_image_url, image.origin_image_url, image.markdown_url)
         if (urls.length) blocks.push({ type: "image", urls })
       }
     }
   }
-  return { blocks, cover: mediaUrls(content.head_poster_list)[0], markdown }
+  return { blocks, cover: staticImageUrls(content.head_poster_list)[0], markdown }
 }
 
 export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expectedId }: NormalizeOptions = {}) {
@@ -305,12 +321,12 @@ export function normalizeDouyinWork(detail: AwemeDetail, { source = "web", expec
   const owner = plainText(author.nickname)
   return {
     platform: "douyin" as const, id, type, title, desc: plainText(detail.desc), owner,
-    author: { id: String(author.uid || ""), secUid: author.sec_uid || "", name: owner, avatar: mediaUrls(author.avatar_thumb)[0] },
-    cover: article?.cover || mediaUrls(detail.video?.origin_cover)[0] || mediaUrls(detail.video?.cover)[0] || media.find(item => item.urls.length)?.urls[0] || "",
+    author: { id: String(author.uid || ""), secUid: author.sec_uid || "", name: owner, avatar: staticImageUrls(author.avatar_thumb)[0] },
+    cover: article?.cover || staticImageUrls(detail.video?.origin_cover, detail.video?.cover, ...media.map(item => item.urls))[0] || "",
     url: `https://www.douyin.com/${isArticle ? "article" : images.length ? "note" : "video"}/${id}`,
     createdAt, duration: (positive(detail.video?.duration || detail.duration) || 0) / 1000,
     stat: { like: count(statistics.digg_count), reply: count(statistics.comment_count), favorite: count(statistics.collect_count), share: count(statistics.share_count), view: count(statistics.play_count) },
-    music: detail.music ? { id: String(detail.music.id || ""), title: detail.music.title || "", author: detail.music.author || "", urls: mediaUrls(detail.music.play_url), cover: mediaUrls(detail.music.cover_large)[0] } : undefined,
+    music: detail.music ? { id: String(detail.music.id || ""), title: detail.music.title || "", author: detail.music.author || "", urls: mediaUrls(detail.music.play_url), cover: staticImageUrls(detail.music.cover_large)[0] } : undefined,
     collection: detail.mix_info ? { id: String(detail.mix_info.mix_id || ""), title: detail.mix_info.mix_name || "" } : undefined,
     isCollection: detail.is_slides === true, media, sources, article, source, warnings,
   }

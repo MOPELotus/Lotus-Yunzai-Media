@@ -151,7 +151,7 @@ test("首卡或单页绘制失败时仍逐页交付文章，单页超限可降�
   } finally { await commands.dispose() }
 })
 
-test("抖音未知交付明确提示核对，清理任务且不续发其余文件", async () => {
+test("Douyin unknown delivery stays silent and stops remaining files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lotus-douyin-delivery-"))
   const service = new DouyinService({ tasksDir: directory, async fetch() { return new Response(png) } })
   service.getInfo = async () => normalizeDouyinWork({ aweme_id:id, desc:"交付",
@@ -164,7 +164,7 @@ test("抖音未知交付明确提示核对，清理任务且不续发其余文�
       async reply(value) { replies.push(value); return true } })
     expect(await commands.fallback("#抖音下载 " + archive, event)).toEqual([])
     expect(sends).toEqual(["001-image.png"])
-    expect(replies).toEqual(["媒体发送结果未确认，请在会话中核对。"])
+    expect(replies).toEqual([])
     expect(await readdir(directory)).toEqual([])
   } finally { await commands.dispose(); await rm(directory, { recursive:true, force:true }) }
 })

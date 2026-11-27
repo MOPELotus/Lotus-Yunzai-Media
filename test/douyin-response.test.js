@@ -110,3 +110,22 @@ test("普通作品详情故障时保留同一公开分享页预览，双源失�
     ...Array(3).fill("/aweme/v1/web/aweme/detail/"), "/share/video/" + id + "/",
   ]).flat())
 })
+
+test('HEIC cover candidates preserve later compatible URLs without rewriting downloads', async () => {
+  const {staticImageUrls}=await import('../services/douyin/model.ts');
+  const heic='https://fixture.douyinpic.com/cover.heic';
+  const jpeg='https://fixture.douyinpic.com/cover.jpg';
+  expect(staticImageUrls([heic,'https://fixture.douyinpic.com/image?format=heif',jpeg])).toEqual([jpeg]);
+  expect(staticImageUrls('https://fixture.douyinpic.com/image?mime=image%2Fheic')).toEqual([]);
+  expect(staticImageUrls('https://fixture.douyinpic.com/heic-word.jpg')).toEqual(['https://fixture.douyinpic.com/heic-word.jpg']);
+  const work=normalizeDouyinWork({aweme_id:id,images:[{url_list:[heic,jpeg]}],video:{origin_cover:{url_list:[heic]},cover:{url_list:[jpeg]}},author:{avatar_thumb:{url_list:[heic,jpeg]}}});
+  expect(work.cover).toBe(jpeg);expect(work.author.avatar).toBe(jpeg);
+  expect(work.media[0].urls).toEqual([heic,jpeg]);
+  expect(normalizeDouyinWork({aweme_id:id,images:[{url_list:[heic]}]}).cover).toBe('');
+});
+
+test('article image URL lists keep compatible fallbacks after HEIC high-resolution candidates', () => {
+  const heic='https://fixture.douyinpic.com/high.heic',jpeg='https://fixture.douyinpic.com/original.jpg',markdown='https://fixture.douyinpic.com/markdown.jpg';
+  const work=normalizeDouyinWork({aweme_id:id,article_info:{article_content:{markdown:`![photo](${markdown})`},fe_data:{image_list:[{markdown_url:markdown,ai_high_image_url:heic,high_image_url:heic,origin_image_url:jpeg}]}}});
+  expect(work.article.blocks.find(block=>block.type==='image').urls).toEqual([jpeg,markdown]);
+});

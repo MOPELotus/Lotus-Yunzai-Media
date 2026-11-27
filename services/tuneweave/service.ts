@@ -1,6 +1,9 @@
 import { createTranslator as createTextTranslator } from "../../../../packages/i18n/index.ts";
 import messageCatalog from "../../i18n/zh-CN.json";
 const $t = createTextTranslator("media", messageCatalog.messages);
+import { detectNativeCpu, nativeCpuFingerprint, type NativeCpu } from "../../../../lib/native-cpu.ts"
+import { nativeRoute } from "../../../../lib/native-policy.ts"
+import { buildNativeArtifact, nativeBuildCacheRoot, nativeSourceMode, rememberNativeSourceMode, unsupportedNativeSource } from "../../../../lib/native-build.ts"
 import { withoutReadRetries, withReadRetries } from "@lotus-yunzai/http"
 import { ReleaseHttpError, retryReleaseRequest, temporaryReleaseFailure, releaseFailure } from "../release-network.ts"
 import { emitTaskProgress, responseBytes, type TaskProgressHandler } from "../progress.ts"
@@ -46,6 +49,9 @@ interface TuneWeaveOptions {
   config?: Partial<TuneWeaveConfig>
   platform?: string
   arch?: string
+  cpu?: () => Promise<NativeCpu>
+  buildNative?: typeof buildNativeArtifact
+  nativeCacheRoot?: string
 }
 
 export interface CredentialUpdate {
@@ -196,6 +202,9 @@ export class TuneWeaveService {
   readonly config: TuneWeaveConfig
   readonly platform: string
   readonly arch: string
+  readonly nativeCpu: () => Promise<NativeCpu>
+  readonly buildNative: typeof buildNativeArtifact
+  readonly nativeCacheRoot: string
 
   constructor(options: TuneWeaveOptions = {}) {
     this.fetch = options.fetch || globalThis.fetch
@@ -204,6 +213,9 @@ export class TuneWeaveService {
     this.config = { api_url: "http://127.0.0.1:7832", request_timeout_ms: 30000, ...options.config }
     this.platform = options.platform || process.platform
     this.arch = options.arch || process.arch
+    this.nativeCpu = options.cpu ?? (() => detectNativeCpu({ platform: this.platform as NodeJS.Platform, arch: this.arch }))
+    this.buildNative = options.buildNative ?? buildNativeArtifact
+    this.nativeCacheRoot = options.nativeCacheRoot ?? nativeBuildCacheRoot()
   }
 
   request<T = unknown>(route: string, options: TuneWeaveRequestOptions & { accountSelection: TuneWeaveAccountSelection }): Promise<SelectedResponse<T>>
@@ -426,7 +438,15 @@ export class TuneWeaveService {
 
   async verifyInstalled(manifest: TuneWeaveManifest, signal?: AbortSignal, onTaskProgress?: TaskProgressHandler) {
     try { await fs.access(this.executable) } catch (error) { if (errorCode(error) === "ENOENT") return false; throw error }
-    const expected = await this.releaseChecksum(manifest, signal, onTaskProgress), hash = crypto.createHash("sha256")
+    const cpu = await this.nativeCpu()
+    const sourceMode = await nativeSourceMode(this.nativeCacheRoot, "tuneweave", cpu)
+    const route = nativeRoute("tuneweave", cpu, { sourceMode, version: manifest.version })
+    if (route === "blocked") throw unsupportedNativeSource("tuneweave", cpu)
+    if (!sourceMode && route === "source") return false
+    const source = sourceMode ? await fs.readFile(path.join(this.nativeCacheRoot, "modes", `tuneweave-${nativeCpuFingerprint(cpu)}-installed.json`), "utf8")
+      .then(text => JSON.parse(text)).catch(() => undefined) : undefined
+    if (sourceMode && (source?.version !== manifest.version || !/^[a-f0-9]{64}$/u.test(source?.sha256 ?? ""))) return false
+    const expected = sourceMode ? source.sha256 : await this.releaseChecksum(manifest, signal, onTaskProgress), hash = crypto.createHash("sha256")
     const total = (await fs.stat(this.executable)).size
     let completed = 0
     const report = () => emitTaskProgress(onTaskProgress, { stage: "tuneweave-verify", message: $t("services.tuneweave.service.text_38ba82b6d0"), completed, total, unit: "bytes" })
@@ -439,6 +459,31 @@ export class TuneWeaveService {
     signal?.throwIfAborted()
     manifest ||= await this.releaseManifest(signal, onTaskProgress)
     requireCompatibleManifest(manifest)
+    const cpu = await this.nativeCpu()
+    const route = nativeRoute("tuneweave", cpu, { sourceMode: await nativeSourceMode(this.nativeCacheRoot, "tuneweave", cpu), version: manifest.version })
+    if (route === "blocked") throw unsupportedNativeSource("tuneweave", cpu)
+    if (route === "source") {
+      await rememberNativeSourceMode(this.nativeCacheRoot, "tuneweave", cpu)
+      const built = await this.buildNative({ component: "tuneweave", version: manifest.version, cpu,
+        cacheRoot: this.nativeCacheRoot, signal, progress: message => emitTaskProgress(onTaskProgress, { stage: "tuneweave-native-build", message }) })
+      signal?.throwIfAborted()
+      await fs.mkdir(path.dirname(this.executable), { recursive: true })
+      const file = `${this.executable}.download-${crypto.randomUUID()}`
+      let complete = false
+      try {
+        await fs.copyFile(built, file)
+        await fs.chmod(file, 0o700)
+        signal?.throwIfAborted()
+        const receipt = path.join(this.nativeCacheRoot, "modes", `tuneweave-${nativeCpuFingerprint(cpu)}-installed.json`)
+        const temporary = receipt + ".part-" + crypto.randomUUID()
+        try {
+          await fs.writeFile(temporary, JSON.stringify({ version: manifest.version, sha256: crypto.createHash("sha256").update(await fs.readFile(file)).digest("hex") }), { mode: 0o600 })
+          await fs.rename(temporary, receipt)
+        } finally { await fs.rm(temporary, { force: true }) }
+        complete = true
+        return { file, version: manifest.version }
+      } finally { if (!complete) await fs.rm(file, { force: true }) }
+    }
     const artifact = selectTuneWeaveArtifact(manifest, this.platform, this.arch)
     const selected = manifest
     return retryReleaseRequest(() => this.downloadReleaseOnce(selected, signal, onTaskProgress), {

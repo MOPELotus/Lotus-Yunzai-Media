@@ -4,6 +4,7 @@ const $t = createTextTranslator("media", messageCatalog.messages);
 import { readPublicResponse } from "../../public-read.ts"
 // Source format: snowtafir/yuki-plugin main3, b1d8fecf41d03f92746bb2404b0b0381a24103a5 (MIT).
 import { ExpiredSubscriptionSession, readWithSubscriptionSession, type SubscriptionSession } from "../session.ts"
+import { withWeiboVisitorRecovery } from "./visitor.ts"
 import type { DynamicPost, SubscriptionProfile, SubscriptionProvider } from "../types.ts"
 
 interface WeiboUser {
@@ -345,6 +346,7 @@ async function readText(response: Response, maxBytes = 4 * 1024 * 1024) {
 }
 
 export function createWeiboProvider({ fetch = globalThis.fetch, session }: WeiboProviderOptions = {}): SubscriptionProvider {
+  const visitorRequest = withWeiboVisitorRecovery(fetch)
   async function get(params: Record<string, string>, signal?: AbortSignal) {
     signal?.throwIfAborted()
     const url = new URL(entrypoint)
@@ -353,7 +355,7 @@ export function createWeiboProvider({ fetch = globalThis.fetch, session }: Weibo
     const deadline = signal ? AbortSignal.any([signal, timeout]) : timeout
     const request = async (input: URL, options: RequestInit) => {
       try {
-        return await readPublicResponse((target, init) => fetch(new URL(target), init), input, options)
+        return await readPublicResponse((target, init) => visitorRequest(new URL(target), init), input, options)
       } catch {
         deadline.throwIfAborted()
         throw new Error($t("services.subscriptions.weibo.index.text_d7afa223fb"))

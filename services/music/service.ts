@@ -18,7 +18,7 @@ import { readMusicAccounts, saveMusicAccount, type MusicAccounts } from "./accou
 import { neteaseEpisodePage, verifiedEpisodePlayback, verifiedEpisodeTranscript, voiceSearchSelection, type EpisodeData,
   type EpisodeResult, type EpisodeTranscript, type VoiceSearchItem, type VoiceSearchSelection } from "./episode.ts"
 import type { PublicMusicTarget } from "./share-link.ts"
-import { musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
+import { musicCoverSource, musicVideoCdnUrl, type MusicVideoCdn } from "../media/cdn.ts"
 import { isBilibiliAudioCdn, resolveBilibiliAudio, searchBilibiliAudio } from "./bilibili.ts"
 import { findOwnedNeteaseAccount, musicAccountAlias, neteaseAccountId, neteaseOwnerAlias, recordedNeteaseOwner,
   verifyNeteaseAccount, verifyOrRenewNeteaseAccount } from "./netease-account.ts"
@@ -33,7 +33,7 @@ export type MusicTrack = {
   readonly name: string
   readonly artists?: readonly { readonly name: string; readonly avatar_url?: string }[]
   readonly album?: { readonly cover_url?: string }
-  readonly extensions?: { readonly url?: string; readonly album_audio_id?: string | number; readonly hash?: string; readonly numeric_id?: string;
+  readonly extensions?: { readonly url?: string; readonly album_audio_id?: string | number; readonly hash?: string; readonly numeric_id?: string; readonly copyright_id?: string;
     readonly video_cover_url?: string; readonly video_duration_ms?: number }
   readonly duration_ms?: number
   readonly episode_id?: string
@@ -516,15 +516,28 @@ export function musicShare(track: MusicTrack, stream: Pick<MusicStream, "url" | 
   if (!type) return null
   const artists = track.artists?.map(a => a.name).join(" / ") || $t("services.music.service.text_f374d78a34"), id = encodeURIComponent(track.id)
   const netease = track.episode_id ? neteaseEpisodePage(track.episode_id) : `https://music.163.com/#/song?id=${id}`
-  const links: Partial<Record<string, string>> = { netease, qq: `https://y.qq.com/n/ryqq/songDetail/${id}` }
+  const hash = track.extensions?.hash
+  const copyright = track.extensions?.copyright_id
+  const links: Partial<Record<string, string>> = {
+    netease, qq: `https://y.qq.com/n/ryqq/songDetail/${id}`,
+    ...(/^\d+$/u.test(String(track.id)) && { kuwo: `https://www.kuwo.cn/play_detail/${id}` }),
+    ...(typeof hash === "string" && /^[a-f\d]{32}$/iu.test(hash) && {
+      kugou: `https://www.kugou.com/song/#hash=${hash}&album_audio_id=${id}`,
+    }),
+    ...(typeof copyright === "string" && /^[a-z\d]+$/iu.test(copyright) && {
+      migu: `https://music.migu.cn/v3/music/song/${copyright}`,
+    }),
+  }
   const url = links[track.platform] || track.extensions?.url
   if (!url) return null
   const cover = track.album?.cover_url || track.artists?.[0]?.avatar_url || ""
   if (!cover) return null
   const headerKeys = Object.keys(stream.headers || {})
   const audio = URL.parse(stream.url)
+  if (audio?.protocol === "http:" && /\.(?:music\.126\.net|qq\.com|kugou\.com|kuwo\.cn|migu\.cn)$/u.test(audio.hostname)) audio.protocol = "https:"
   if (headerKeys.some(k => /credential|authorization|cookie/i.test(k)) || !audio ||
       audio.protocol !== "https:" || audio.username || audio.password || audio.port ||
       !audio.hostname.includes(".") || isIP(audio.hostname) || audio.pathname.startsWith("/v1/")) return null
-  return { type: "music" as const, data: { type, url, audio: audio.href, title: track.name, content: artists, singer: artists, image: cover } }
+  const image = musicCoverSource(cover, track.platform)?.url.href || cover
+  return { type: "music" as const, data: { type, url, audio: audio.href, title: track.name, content: artists, singer: artists, image } }
 }

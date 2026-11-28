@@ -119,6 +119,26 @@ test("playback isolates platform credentials even with cross-platform fallback",
   }
 })
 
+test("music cards normalize official HTTP assets and supply platform song links", () => {
+  const fixtures = [
+    { platform: "netease", id: "42", type: "163", audio: "http://m801.music.126.net/full.mp3", cover: "http://p3.music.126.net/fixture/42.jpg", page: "https://music.163.com/#/song?id=42" },
+    { platform: "qq", id: "0042MID", type: "qq", audio: "http://ws.stream.qqmusic.qq.com/full.mp3", cover: "https://y.gtimg.cn/music/photo_new/fixture.jpg", page: "https://y.qq.com/n/ryqq/songDetail/0042MID" },
+    { platform: "kuwo", id: "42", type: "kuwo", audio: "http://rc.sycdn.kuwo.cn/full.mp3", cover: "http://img1.kuwo.cn/star/albumcover/fixture.jpg", page: "https://www.kuwo.cn/play_detail/42" },
+    { platform: "kugou", id: "42", type: "kugou", audio: "http://fs.kugou.com/full.mp3", cover: "http://imgessl.kugou.com/stdmusic/fixture.jpg", extensions: { hash: "a".repeat(32) }, page: `https://www.kugou.com/song/#hash=${"a".repeat(32)}&album_audio_id=42` },
+    { platform: "migu", id: "42", type: "migu", audio: "http://freetyst.nf.migu.cn/full.mp3", cover: "https://d.musicapp.migu.cn/data/oss/resource/fixture.webp", extensions: { copyright_id: "60054704101" }, page: "https://music.migu.cn/v3/music/song/60054704101" },
+  ]
+  for (const row of fixtures) {
+    const track = { platform: row.platform, id: row.id, name: "fixture", artists: [{ name: "artist" }], album: { cover_url: row.cover }, extensions: row.extensions }
+    const card = musicShare(track, { url: row.audio })
+    expect(card?.data.type).toBe(row.type)
+    expect(card?.data.url).toBe(row.page)
+    expect(card?.data.audio).toBe(row.audio.replace("http:", "https:"))
+    expect(card?.data.image.startsWith("https:")).toBe(true)
+    expect(musicShare(track, { url: row.audio, headers: { Authorization: "private-fixture" } })).toBeNull()
+    expect(musicShare(track, { url: "http://music.126.net.attacker.invalid/full.mp3" })).toBeNull()
+  }
+})
+
 test("搜歌只取所选平台的曲目，播放回退保留卡片的原平台", async () => {
   const file = join(await directory(), "music.yaml")
   await saveMusicAccount("netease", {alias:"lotus-nep-fixture",uid:"1042",credential:""}, {file})

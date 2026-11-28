@@ -401,7 +401,9 @@ export class MusicService {
     const params = new URLSearchParams({ quality: this.config.quality, fallback: String(!exact), unblock: "false",
       ...(!exact && { fallback_platforms: Object.keys(MUSIC_PLATFORMS).filter(p => p !== track.platform).join(",") }),
       ...(account?.alias && !account.credential ? { account: account.alias } : {}) })
-    const stream = await this.usePublicAccount(track.platform, exact ? { [track.platform]: account } : accounts, signal, current =>
+    // An expired credential from an unrelated provider rejects the entire request,
+    // even when the requested platform already has a playable full stream.
+    const stream = await this.usePublicAccount(track.platform, { [track.platform]: account }, signal, current =>
       this.request<MusicStream>(`/v1/tracks/${encodeURIComponent(track.ref)}/stream?${params}`, current, undefined, signal))
     if (!stream?.url || stream.trial) throw new Error($t("services.music.service.text_98c685a3d9"))
     if (stream.origin_track != null && stream.origin_track !== track.ref) throw new Error($t("services.music.service.text_60b540d826"))

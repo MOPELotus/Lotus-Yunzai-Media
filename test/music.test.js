@@ -93,6 +93,32 @@ test("同号 Milky 私聊不能取消 OneBot 的音乐扫码菜单", async () =>
   }
 })
 
+test("playback isolates platform credentials even with cross-platform fallback", async () => {
+  const file = join(await directory(), "accounts.yaml")
+  for (const platform of ["netease", "qq", "kugou"]) {
+    await saveMusicAccount(platform, { alias: `fixture-${platform}`, uid: "1042", credential: `twc1_${platform}` }, { file })
+  }
+  for (const platform of ["netease", "qq", "kugou"]) for (const exact of [false, true]) {
+    const song = { platform, id: "1042", ref: `${platform}:1042`, name: "fixture" }
+    let calls = 0
+    const service = new MusicService({ accountsFile: file, tuneweave: { async request(route, options) {
+      calls++
+      // The server validates every submitted credential before resolving audio.
+      if (options.credentials.some(value => value !== `twc1_${platform}`)) {
+        throw Object.assign(new Error("unrelated expired credential"), { code: "authentication_required", platform: "other" })
+      }
+      expect(options.credentials).toEqual([`twc1_${platform}`])
+      const query = new URL(route, "http://fixture.invalid").searchParams
+      expect(query.get("fallback")).toBe(String(!exact))
+      if (!exact) expect(query.get("fallback_platforms").split(",")).not.toContain(platform)
+      return { url: "https://audio.example.test/full.wav", trial: false,
+        origin_track: song.ref, resolved_track: song.ref, resolved_platform: platform }
+    } } })
+    expect((await service.resolve(song, { exact })).resolved_track).toBe(song.ref)
+    expect(calls).toBe(1)
+  }
+})
+
 test("搜歌只取所选平台的曲目，播放回退保留卡片的原平台", async () => {
   const file = join(await directory(), "music.yaml")
   await saveMusicAccount("netease", {alias:"lotus-nep-fixture",uid:"1042",credential:""}, {file})
